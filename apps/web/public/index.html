@@ -49,10 +49,16 @@
     <header class="topbar">
       <button class="icon-btn menu-btn" id="menuBtn">Menü</button>
       <div class="spacer"></div>
-      <a href="#/settings" class="icon-btn notification-btn" id="bell" aria-label="Benachrichtigungen">
-        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>
-        <span class="notification-count" id="bell-n" aria-hidden="true" hidden></span>
-      </a>
+      <div class="notification-wrap">
+        <button type="button" class="icon-btn notification-btn" id="bell" aria-label="Benachrichtigungen" aria-expanded="false" aria-controls="notification-popover">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>
+          <span class="notification-count" id="bell-n" aria-hidden="true" hidden></span>
+        </button>
+        <section id="notification-popover" class="notification-popover" aria-label="Benachrichtigungen" hidden>
+          <div class="notification-head"><b>Benachrichtigungen</b><button type="button" class="link" id="notification-read" hidden>Alle gelesen</button></div>
+          <div id="notification-items"></div>
+        </section>
+      </div>
       <a href="#/settings" style="text-decoration:none"><span class="avatar" data-me></span></a>
       <button class="icon-btn" type="button" data-action="logout">Abmelden</button>
     </header>

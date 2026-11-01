@@ -198,7 +198,15 @@ async function loadBell() {
     count.textContent = n.unread || '';
     count.hidden = !n.unread;
     $('#bell').setAttribute('aria-label', n.unread ? `Benachrichtigungen, ${n.unread} ungelesen` : 'Benachrichtigungen');
-  } catch { /* ignorieren */ }
+    $('#notification-read').hidden = !n.unread;
+    $('#notification-items').innerHTML = n.items.length ? n.items.map((item) => `<div class="notification-item ${item.read_at ? '' : 'unread'}">
+      <b>${esc(item.title)}</b><small>${esc(item.body || '')}</small><small>${new Date(item.created_at).toLocaleString('de-DE')}</small>
+    </div>`).join('') : '<p class="muted">Keine Benachrichtigungen.</p>';
+    return true;
+  } catch {
+    $('#notification-items').innerHTML = '<p class="auth-error">Benachrichtigungen konnten nicht geladen werden.</p>';
+    return false;
+  }
 }
 
 export async function reloadMe() {
@@ -239,7 +247,28 @@ async function logout() {
 }
 
 onLogout(() => { state.me = null; route(); });
-document.addEventListener('click', (e) => {
+document.addEventListener('click', async (e) => {
+  const popup = $('#notification-popover');
+  if (e.target.closest('#bell')) {
+    e.preventDefault();
+    popup.hidden = !popup.hidden;
+    $('#bell').setAttribute('aria-expanded', String(!popup.hidden));
+    if (!popup.hidden) await loadBell();
+    return;
+  }
+  if (!e.target.closest('.notification-wrap')) {
+    popup.hidden = true;
+    $('#bell').setAttribute('aria-expanded', 'false');
+  }
+  if (e.target.closest('#notification-read')) {
+    try {
+      await api.post('/notifications/read');
+      await loadBell();
+    } catch (error) {
+      toast(error.message, true);
+    }
+    return;
+  }
   if (e.target.closest('[data-action=logout]')) logout();
   if (e.target.closest('#menuBtn')) $('.sidebar').classList.toggle('open');
   const m = e.target.closest('.modal [data-close]');
@@ -250,6 +279,12 @@ document.addEventListener('click', (e) => {
     $$('.tabs [data-tab]', root).forEach((t) => t.classList.toggle('on', t === tab));
     $$('.tab-panel', root).forEach((p) => p.classList.toggle('on', p.dataset.panel === tab.dataset.tab));
     tab.dispatchEvent(new CustomEvent('tabchange', { bubbles: true }));
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('#notification-popover').hidden) {
+    $('#notification-popover').hidden = true;
+    $('#bell').setAttribute('aria-expanded', 'false');
   }
 });
 window.addEventListener('hashchange', route);

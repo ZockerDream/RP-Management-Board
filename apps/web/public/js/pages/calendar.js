@@ -12,7 +12,8 @@ const MODAL = `<div class="modal" id="m-event"><div class="card"><div class="car
     <label class="field full row start"><input type="checkbox" id="ev-allday"> Ganztägig</label>
     <label class="field" id="ev-times-a">Beginn<input type="time" id="ev-start" value="09:00"></label>
     <label class="field" id="ev-times-b">Ende<input type="time" id="ev-end" value="10:00"></label>
-    <label class="field">Wiederholung<select id="ev-repeat"><option value="none">Keine</option><option value="weekly">Wöchentlich</option><option value="monthly">Monatlich</option><option value="yearly">Jährlich</option></select></label>
+    <label class="field">Wiederholung<select id="ev-repeat"><option value="none">Keine</option><option value="daily">Täglich</option><option value="weekly">Wöchentlich</option><option value="monthly">Monatlich</option><option value="yearly">Jährlich</option><option value="custom">Benutzerdefiniert (Tage)</option></select></label>
+    <label class="field" id="ev-repeat-interval-wrap" hidden>Abstand in Tagen<input id="ev-repeat-interval" type="number" min="1" max="3650" value="1"></label>
     <label class="field">Erinnerung<select id="ev-remind"><option value="none">Keine</option><option value="1d">1 Tag vorher</option><option value="3d">3 Tage vorher</option><option value="7d">7 Tage vorher</option><option value="14d">14 Tage vorher</option></select></label>
     <label class="field full">Betrag (optional, negativ = Ausgabe)<input id="ev-amount" placeholder="-450"></label>
     <label class="field full">Notiz<input id="ev-note"></label>

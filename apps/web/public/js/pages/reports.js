@@ -4,7 +4,7 @@ import { areaChart, donut } from '../charts.js';
 import { can } from '../app.js';
 
 const KINDS = { monthly: 'Monatsbericht', categories: 'Kategorien-Bericht', costs: 'Objektkosten-Bericht' };
-const RHYTHM = { weekly: 'Wöchentlich', monthly: 'Monatlich', quarterly: 'Vierteljährlich' };
+const RHYTHM = { daily: 'Täglich', weekly: 'Wöchentlich', monthly: 'Monatlich', yearly: 'Jährlich', custom: 'Benutzerdefiniert (Tage)' };
 const ASSET = { house: 'Häuser', vehicle: 'Fahrzeuge', key: 'Schlüssel', sonstige: 'Sonstige' };
 
 export async function render(view) {
@@ -33,7 +33,7 @@ export async function render(view) {
   }
   async function loadSaved() {
     const s = await api.get('/reports/saved');
-    $('#s-body').innerHTML = s.length ? s.map((r) => `<div class="list-item"><div class="grow"><b>${KINDS[r.kind]}</b><small>${RHYTHM[r.rhythm]} · ${esc((r.recipients || []).join(', ') || 'an dich')}</small></div>${can('report:create') ? `<button class="btn ghost sm" data-del="${r.id}">Löschen</button>` : ''}</div>`).join('') : empty('Keine geplanten Berichte.');
+    $('#s-body').innerHTML = s.length ? s.map((r) => `<div class="list-item"><div class="grow"><b>${KINDS[r.kind]}</b><small>${r.rhythm === 'custom' ? `alle ${r.rhythm_interval} Tage` : `${r.rhythm_interval > 1 ? `alle ${r.rhythm_interval} · ` : ''}${RHYTHM[r.rhythm]}`} · ${esc((r.recipients || []).join(', ') || 'an dich')}</small></div>${can('report:create') ? `<button class="btn ghost sm" data-del="${r.id}">Löschen</button>` : ''}</div>`).join('') : empty('Keine geplanten Berichte.');
   }
   view.addEventListener('click', async (e) => {
     const g = (s) => e.target.closest(s);
@@ -43,8 +43,9 @@ export async function render(view) {
         if (await openForm({ title: 'Bericht planen', fields: [
           { name: 'kind', label: 'Bericht', type: 'select', options: Object.entries(KINDS).map(([v, l]) => ({ v, l })) },
           { name: 'rhythm', label: 'Rhythmus', type: 'select', options: Object.entries(RHYTHM).map(([v, l]) => ({ v, l })), value: 'monthly' },
+          { name: 'rhythm_interval', label: 'Alle … Einheiten', type: 'number', min: 1, max: 3650, value: 1, help: 'Bei benutzerdefiniertem Rhythmus ist der Abstand in Tagen.' },
           { name: 'recipients', label: 'Zusätzliche Empfänger (Komma-getrennt)', full: true },
-        ], onSubmit: (v) => api.post('/reports/saved', { kind: v.kind, rhythm: v.rhythm, recipients: v.recipients.split(',').map((x) => x.trim()).filter(Boolean) }) })) loadSaved();
+        ], onSubmit: (v) => api.post('/reports/saved', { kind: v.kind, rhythm: v.rhythm, rhythm_interval: Number(v.rhythm_interval) || 1, recipients: v.recipients.split(',').map((x) => x.trim()).filter(Boolean) }) })) loadSaved();
       } else if (g('[data-del]') && (await confirmBox('Bericht löschen', 'Geplanten Bericht entfernen?'))) { await api.del(`/reports/saved/${g('[data-del]').dataset.del}`); loadSaved(); }
     } catch (x) { toast(x.message, true); }
   });

@@ -10,7 +10,8 @@ const time = z.string().regex(/^\d{2}:\d{2}$/);
 const body = z.object({
   title: z.string().min(1).max(150), type: z.enum(['team', 'personal']), team_id: z.string().uuid().nullish(), date,
   start: time.nullish(), end: time.nullish(), allDay: z.boolean().default(false),
-  repeat: z.enum(['none', 'weekly', 'monthly', 'yearly']).default('none'), remind: z.enum(['none', '1d', '3d', '7d', '14d']).default('none'),
+  repeat: z.enum(['none', 'daily', 'weekly', 'monthly', 'yearly', 'custom']).default('none'),
+  repeat_interval: z.number().int().min(1).max(3650).default(1), remind: z.enum(['none', '1d', '3d', '7d', '14d']).default('none'),
   amount: z.union([z.string(), z.number()]).nullish().transform((v) => (v === null || v === undefined || v === '' ? null : String(v).replace(',', '.'))),
   note: z.string().max(2000).default(''),
 });
@@ -19,9 +20,9 @@ const hd = new Holidays(process.env.HOLIDAY_COUNTRY || 'DE', process.env.HOLIDAY
 
 const shape = (e) => ({
   id: `own:${e.id}`, source: 'own', type: e.type, title: e.title, date: e.date, start: e.start_time, end: e.end_time, allDay: e.all_day,
-  repeat: e.repeat, amount: e.amount, note: e.note, remind: e.remind, team_id: e.team_id, locked: false,
+  repeat: e.repeat, repeat_interval: e.repeat_interval, amount: e.amount, note: e.note, remind: e.remind, team_id: e.team_id, locked: false,
 });
-const ro = (id, type, title, d, extra = {}) => ({ id, source: type, type, title, date: d, start: null, end: null, allDay: true, repeat: 'none', amount: null, note: '', remind: 'none', locked: true, ...extra });
+const ro = (id, type, title, d, extra = {}) => ({ id, source: type, type, title, date: d, start: null, end: null, allDay: true, repeat: 'none', repeat_interval: 1, amount: null, note: '', remind: 'none', locked: true, ...extra });
 
 export async function buildFeed(userId, from, to) {
   const out = [];
@@ -53,10 +54,10 @@ export async function buildFeed(userId, from, to) {
   const ids = await accessibleBudgetIds(userId);
   const rules = await many('SELECT * FROM recurring_rules WHERE active AND budget_id = ANY($1)', [ids]);
   for (const r of rules) {
-    const simple = r.interval === 1 && ['weekly', 'monthly', 'yearly'].includes(r.frequency);
+    const simple = r.interval === 1 && ['daily', 'weekly', 'monthly', 'yearly'].includes(r.frequency);
     const common = { amount: r.type === 'income' ? r.amount : `-${r.amount}`, note: '', locked: true, source: 'finance' };
     if (simple && !r.end_date) {
-      out.push(ro(`rec:${r.id}`, 'finance', r.name, r.start_date, { ...common, repeat: r.frequency }));
+      out.push(ro(`rec:${r.id}`, 'finance', r.name, r.start_date, { ...common, repeat: r.frequency, repeat_interval: r.interval }));
     } else {
       for (let n = 0, d = r.start_date; d <= to && n < 800; n++, d = nthOccurrence(r.start_date, r.frequency, r.interval, n)) {
         if (r.end_date && d > r.end_date) break;
@@ -113,8 +114,8 @@ export default async function routes(app) {
     const b = body.parse(req.body);
     const teamId = await resolveTeam(req, b);
     const r = await one(
-      `INSERT INTO calendar_events(owner_id,team_id,type,title,date,start_time,end_time,all_day,repeat,remind,amount,note) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
-      [req.user.id, teamId, b.type, b.title, b.date, b.allDay ? null : b.start || null, b.allDay ? null : b.end || null, b.allDay, b.repeat, b.remind, b.amount, b.note],
+      `INSERT INTO calendar_events(owner_id,team_id,type,title,date,start_time,end_time,all_day,repeat,repeat_interval,remind,amount,note) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+      [req.user.id, teamId, b.type, b.title, b.date, b.allDay ? null : b.start || null, b.allDay ? null : b.end || null, b.allDay, b.repeat, b.repeat_interval, b.remind, b.amount, b.note],
     );
     return { id: `own:${r.id}` };
   });
@@ -138,8 +139,8 @@ export default async function routes(app) {
     const b = body.parse(req.body);
     const teamId = b.type === 'team' ? (e.team_id ?? (await resolveTeam(req, b))) : null;
     await q(
-      `UPDATE calendar_events SET type=$2,team_id=$3,title=$4,date=$5,start_time=$6,end_time=$7,all_day=$8,repeat=$9,remind=$10,amount=$11,note=$12,last_reminded=NULL WHERE id=$1`,
-      [e.id, b.type, teamId, b.title, b.date, b.allDay ? null : b.start || null, b.allDay ? null : b.end || null, b.allDay, b.repeat, b.remind, b.amount, b.note],
+      `UPDATE calendar_events SET type=$2,team_id=$3,title=$4,date=$5,start_time=$6,end_time=$7,all_day=$8,repeat=$9,repeat_interval=$10,remind=$11,amount=$12,note=$13,last_reminded=NULL WHERE id=$1`,
+      [e.id, b.type, teamId, b.title, b.date, b.allDay ? null : b.start || null, b.allDay ? null : b.end || null, b.allDay, b.repeat, b.repeat_interval, b.remind, b.amount, b.note],
     );
     return { ok: true };
   });
@@ -166,7 +167,7 @@ export default async function routes(app) {
         lines.push(`DTSTART:${d}T${e.start.replace(':', '')}00`);
         if (e.end) lines.push(`DTEND:${d}T${e.end.replace(':', '')}00`);
       }
-      if (e.repeat !== 'none') lines.push(`RRULE:FREQ=${e.repeat.toUpperCase()}`);
+      if (e.repeat !== 'none') lines.push(`RRULE:FREQ=${(e.repeat === 'custom' ? 'daily' : e.repeat).toUpperCase()}${e.repeat_interval > 1 ? `;INTERVAL=${e.repeat_interval}` : ''}`);
       lines.push(`SUMMARY:${icsEsc(e.title)}`);
       if (e.note) lines.push(`DESCRIPTION:${icsEsc(e.note)}`);
       lines.push('END:VEVENT');

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { many, one, q, tx } from '../db.js';
-import { requireAuth, bad, notFound } from '../authz.js';
+import { requireAuth, adminOnly, bad, notFound } from '../authz.js';
 import { config } from '../config.js';
 import { encrypt, decrypt, randomToken, sha256 } from '../security.js';
 
@@ -188,6 +188,15 @@ export default async function routes(app) {
       `SELECT id, title, description, steps, github_issue_number, github_url, github_sync_error, created_at
        FROM bug_reports WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50`,
       [req.user.id],
+    ),
+  }));
+
+  app.get('/admin/bug-reports', adminOnly(), async () => ({
+    items: await many(
+      `SELECT br.id, br.title, br.description, br.steps, br.github_issue_number, br.github_url,
+         br.github_sync_error, br.created_at, u.name user_name, u.email user_email
+       FROM bug_reports br JOIN users u ON u.id=br.user_id
+       ORDER BY br.created_at DESC LIMIT 200`,
     ),
   }));
 

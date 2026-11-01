@@ -48,8 +48,7 @@ function nextOccurrence(e, from) {
   if (e.repeat === 'none') return e.date >= from ? e.date : null;
   let n = 0;
   let d = e.date;
-  const freq = { weekly: 'weekly', monthly: 'monthly', yearly: 'yearly' }[e.repeat];
-  while (d < from && n < 5000) d = nthOccurrence(e.date, freq, 1, ++n);
+  while (d < from && n < 5000) d = nthOccurrence(e.date, e.repeat, e.repeat_interval || 1, ++n);
   return d;
 }
 
@@ -113,11 +112,11 @@ export async function reminders(log) {
 
 export async function reportsRun(log) {
   const t = today();
-  const step = { weekly: 7, monthly: 28, quarterly: 85 };
   let n = 0;
   for (const r of await many('SELECT r.*, u.email, u.name FROM saved_reports r JOIN users u ON u.id=r.owner_id WHERE r.active')) {
-    if (r.last_run && (new Date(t) - new Date(r.last_run)) / 86400000 < step[r.rhythm]) continue;
-    const from = addInterval(t, r.rhythm === 'weekly' ? 'weekly' : 'monthly', r.rhythm === 'quarterly' ? -3 : -1);
+    const interval = r.rhythm_interval || 1;
+    if (r.last_run && addInterval(String(r.last_run).slice(0, 10), r.rhythm, interval) > t) continue;
+    const from = addInterval(t, r.rhythm, -interval);
     const rows = await many(
       `SELECT COALESCE(c.name,'Ohne Kategorie') name, sum(t.amount) total FROM transactions t JOIN budgets b ON b.id=t.budget_id LEFT JOIN categories c ON c.id=t.category_id
        WHERE t.type='expense' AND t.booked_at BETWEEN $2 AND $3 AND ((b.type='solo' AND b.owner_user_id=$1) OR b.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1))

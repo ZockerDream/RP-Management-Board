@@ -35,7 +35,8 @@ async function assertVisible(req, table, recordId) {
 
 const costFields = {
   cost_amount: money.nullish(),
-  cost_interval: z.enum(['once', 'daily', 'weekly', 'monthly', 'quarterly', 'yearly']).nullish(),
+  cost_interval: z.enum(['once', 'daily', 'weekly', 'monthly', 'yearly', 'custom']).nullish(),
+  cost_interval_count: z.number().int().min(1).max(3650).nullish(),
   cost_budget_id: id.nullish(),
   cost_category_id: id.nullish(),
   cost_tracking: z.boolean().optional(),
@@ -47,7 +48,7 @@ const KINDS = {
     schema: z.object({
       name: z.string().min(1).max(100), type: z.enum(['home', 'office', 'storage', 'holiday']).default('home'), address: str(300).default(''), ...ownerFields,
       responsible_person_id: id.nullish(), maintenance_due: date.nullish(), maintenance_note: str(500).default(''), note: str(2000).default(''), ...costFields,
-    }).refine((v) => v.cost_interval !== 'daily', 'Tägliche Kosten sind nur für Fahrzeuge verfügbar'),
+    }),
     cols: ['name', 'type', 'address', 'responsible_person_id', 'maintenance_due', 'maintenance_note', 'note'],
   },
   vehicles: {
@@ -63,13 +64,12 @@ const KINDS = {
     schema: z.object({
       code: z.string().min(1).max(30), label: z.string().min(1).max(100), kind: str(40).default('Haustür'), property_id: id.nullish(), vehicle_id: id.nullish(), ...ownerFields,
       copies: z.number().int().min(1).max(99).default(1), note: str(2000).default(''), ...costFields,
-    }).refine((v) => v.property_id || v.vehicle_id, 'Haus oder Fahrzeug erforderlich')
-      .refine((v) => v.cost_interval !== 'daily', 'Tägliche Kosten sind nur für Fahrzeuge verfügbar'),
+    }).refine((v) => v.property_id || v.vehicle_id, 'Haus oder Fahrzeug erforderlich'),
     cols: ['code', 'label', 'kind', 'property_id', 'vehicle_id', 'copies', 'note'],
   },
 };
-const COST_COLS = ['cost_amount', 'cost_interval', 'cost_budget_id', 'cost_category_id', 'cost_tracking'];
-const PER = { daily: ['daily', 1], weekly: ['weekly', 1], monthly: ['monthly', 1], quarterly: ['monthly', 3], yearly: ['yearly', 1] };
+const COST_COLS = ['cost_amount', 'cost_interval', 'cost_interval_count', 'cost_budget_id', 'cost_category_id', 'cost_tracking'];
+const PER = { daily: ['daily', 1], weekly: ['weekly', 1], monthly: ['monthly', 1], yearly: ['yearly', 1], custom: ['custom', null] };
 
 // Kosten eines Objekts mit Budget synchronisieren (§7.1): einmalig = Buchung, sonst Dauerauftrag
 async function syncCost(c, table, kind, before, after, userId) {
@@ -90,7 +90,8 @@ async function syncCost(c, table, kind, before, after, userId) {
     );
     return;
   }
-  const [freq, interval] = PER[after.cost_interval];
+  const [freq, standardInterval] = PER[after.cost_interval];
+  const interval = standardInterval ?? after.cost_interval_count ?? 1;
   const r = (
     await c.query(
       `INSERT INTO recurring_rules(name,budget_id,category_id,created_by,type,amount,frequency,interval,start_date,next_run,source,asset_type,asset_id)
@@ -177,7 +178,7 @@ export default async function routes(app) {
       try {
         const row = await tx(async (c) => {
           const r = (
-            await c.query(`INSERT INTO ${table}(${cols.join(',')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(',')}) RETURNING *`, cols.map((k) => k === 'owner_user_id' ? owner.owner_user_id : k === 'team_id' ? owner.team_id : b[k] ?? (k === 'cost_tracking' ? true : null))
+            await c.query(`INSERT INTO ${table}(${cols.join(',')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(',')}) RETURNING *`, cols.map((k) => k === 'owner_user_id' ? owner.owner_user_id : k === 'team_id' ? owner.team_id : b[k] ?? (k === 'cost_tracking' ? true : k === 'cost_interval_count' ? 1 : null))
           )).rows[0];
           await syncCost(c, table, kind, null, r, req.user.id);
           return r;
@@ -207,7 +208,7 @@ export default async function routes(app) {
       const keys = Object.keys(patch).filter((k) => [...K.cols, ...COST_COLS, 'owner_user_id', 'team_id'].includes(k));
       await tx(async (c) => {
         let after = before;
-        if (keys.length) after = (await c.query(`UPDATE ${table} SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1 RETURNING *`, [before.id, ...keys.map((k) => patch[k] ?? null)])).rows[0];
+        if (keys.length) after = (await c.query(`UPDATE ${table} SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1 RETURNING *`, [before.id, ...keys.map((k) => k === 'cost_interval_count' ? patch[k] ?? 1 : patch[k] ?? null)])).rows[0];
         await syncCost(c, table, kind, before, after, req.user.id);
       });
       await audit(req, `${path}.updated`, path, before.id);
@@ -330,10 +331,10 @@ export default async function routes(app) {
     const parts = ['properties:name:house', 'vehicles:make_model:vehicle', 'keys:label:key'].map((s) => s.split(':'));
     const items = [];
     for (const [t, col, type] of parts) {
-      items.push(...(await many(`SELECT '${type}' type, x.id, x.${col} name, x.cost_amount amount, x.cost_interval interval, x.cost_tracking tracking, b.name budget_name FROM ${t} x LEFT JOIN budgets b ON b.id=x.cost_budget_id WHERE ${ownerSql('x')} AND x.cost_amount IS NOT NULL`, [req.user.id])));
+      items.push(...(await many(`SELECT '${type}' type, x.id, x.${col} name, x.cost_amount amount, x.cost_interval interval, x.cost_interval_count interval_count, x.cost_tracking tracking, b.name budget_name FROM ${t} x LEFT JOIN budgets b ON b.id=x.cost_budget_id WHERE ${ownerSql('x')} AND x.cost_amount IS NOT NULL`, [req.user.id])));
     }
-    const factor = { once: 0, daily: 365, weekly: 52, monthly: 12, quarterly: 4, yearly: 1 };
-    for (const i of items) i.yearly = (Number(i.amount) * factor[i.interval]).toFixed(2);
+    const factor = { once: 0, daily: 365, weekly: 52, monthly: 12, yearly: 1 };
+    for (const i of items) i.yearly = (Number(i.amount) * (i.interval === 'custom' ? 365 : factor[i.interval]) / Number(i.interval_count || 1)).toFixed(2);
     return { items, yearly_total: items.reduce((s, i) => s + Number(i.yearly), 0).toFixed(2) };
   });
 
