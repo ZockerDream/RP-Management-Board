@@ -38,6 +38,12 @@ export const empty = (msg) => `<p class="muted" style="padding:12px 4px">${esc(m
 export const opts = (list, sel, valueKey = 'id', labelKey = 'name') =>
   list.map((o) => `<option value="${esc(o[valueKey])}" ${String(o[valueKey]) === String(sel) ? 'selected' : ''}>${esc(o[labelKey])}</option>`).join('');
 
+const eyeIcon = (visible) => visible
+  ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 10.6a2 2 0 002.8 2.8"/><path d="M9.9 5.2A10.8 10.8 0 0112 5c5 0 8.5 4.5 9.5 7-.4 1-1.2 2.2-2.4 3.3M6.2 6.2C3.9 7.7 2.7 9.8 2.5 12c.5 1.4 1.7 3.2 4 4.6A10.3 10.3 0 0012 19c1 0 1.9-.2 2.7-.5"/></svg>'
+  : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z"/><circle cx="12" cy="12" r="2.5"/></svg>';
+export const passwordToggleButton = (label) =>
+  `<button type="button" class="btn ghost sm password-toggle" data-password-toggle data-password-label="${esc(label)}" aria-label="${esc(label)} einblenden" title="${esc(label)} einblenden">${eyeIcon(false)}</button>`;
+
 /* ---------- Modal-Formulare ---------- */
 function fieldHtml(f) {
   const id = `f-${f.name}`;
@@ -52,7 +58,22 @@ function fieldHtml(f) {
     input = `<div class="stack" style="gap:6px;max-height:150px;overflow:auto">${(f.options || []).map((o) => `<label class="row start" style="font-weight:400;color:var(--text)"><input type="checkbox" name="${f.name}" value="${esc(o.v)}" ${(val || []).includes(o.v) ? 'checked' : ''}> ${esc(o.l)}</label>`).join('')}</div>`;
   } else if (f.type === 'textarea') input = `<textarea ${common} rows="3">${esc(val)}</textarea>`;
   else input = `<input type="${f.type || 'text'}" ${common} value="${esc(val)}" ${f.step ? `step="${f.step}"` : ''} ${f.min !== undefined ? `min="${f.min}"` : ''} ${f.autocomplete ? `autocomplete="${f.autocomplete}"` : ''}>`;
+  if (f.type === 'password') input = `<span class="password-control">${input}${passwordToggleButton(f.label)}</span>`;
   return `<label class="${cls}">${esc(f.label)}${input}${f.help ? `<small class="muted">${esc(f.help)}</small>` : ''}</label>`;
+}
+
+export function bindPasswordToggles(root) {
+  $$('[data-password-toggle]', root).forEach((button) => {
+    button.addEventListener('click', () => {
+      const input = $('input', button.parentElement);
+      const visible = input.type === 'password';
+      const label = button.dataset.passwordLabel || 'Wert';
+      input.type = visible ? 'text' : 'password';
+      button.innerHTML = eyeIcon(visible);
+      button.setAttribute('aria-label', `${label} ${visible ? 'ausblenden' : 'einblenden'}`);
+      button.title = `${label} ${visible ? 'ausblenden' : 'einblenden'}`;
+    });
+  });
 }
 
 export function readForm(form, fields) {
@@ -76,6 +97,7 @@ export function openForm({ title, fields, submit = 'Speichern', onSubmit, danger
       <div class="modal-foot"><button type="button" class="btn ghost" data-x>Abbrechen</button>${extraButtons}<button type="submit" class="btn ${danger ? 'danger' : ''}">${esc(submit)}</button></div></form></div>`;
     $('#modals').append(m);
     const form = $('form', m);
+    bindPasswordToggles(m);
     const err = $('.auth-error', m);
     const close = (v) => { m.remove(); resolve(v); };
     m.addEventListener('click', (e) => { if (e.target === m) close(null); });

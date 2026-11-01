@@ -3,7 +3,7 @@ import { $, esc, fdatetime, empty, openForm, confirmBox, toast, showSecret, down
 import { state, can, reloadMe, applyTheme, renderAvatars } from '../app.js';
 
 const ACCENTS = [['indigo', 'Indigo'], ['emerald', 'Smaragd'], ['ocean', 'Ozean'], ['rose', 'Rose'], ['amber', 'Bernstein'], ['mono', 'Mono']];
-const KINDS = [['budget_80', 'Budget zu 80 % erreicht'], ['budget_exceeded', 'Budget überschritten'], ['calendar', 'Termin-Erinnerungen'], ['vehicle_service', 'Fahrzeug-Service fällig'], ['key_overdue', 'Schlüssel überfällig'], ['team_added', 'Team-Einladungen']];
+const KINDS = [['budget_80', 'Budget zu 80 % erreicht'], ['budget_exceeded', 'Budget überschritten'], ['calendar', 'Termin-Erinnerungen'], ['vehicle_service', 'Fahrzeug-Service fällig'], ['first_aid_kit', 'Verbandskasten läuft ab'], ['key_overdue', 'Schlüssel-Rückgabe fällig'], ['team_added', 'Team-Einladungen'], ['recurring_share', 'Geteilte Daueraufträge']];
 
 export async function render(view) {
   const TABS = [['profile', 'Profil'], ['security', 'Sicherheit'], ['appearance', 'Darstellung'], ['notif', 'Benachrichtigungen'], ['sessions', 'Sitzungen'], ['keys', can('apikey:read') ? 'API & Kalender' : 'Kalender'], ['data', 'Daten']];
@@ -18,13 +18,14 @@ export async function render(view) {
       el.innerHTML = `<form class="card" id="p-form"><div class="card-head"><h2>Profil</h2></div><div class="row start" style="gap:16px;margin-bottom:16px"><span class="avatar xl" data-me></span><small class="muted">Avatar wird über Gravatar anhand deiner E-Mail geladen (abschaltbar unter Darstellung).</small></div>
         <div class="form"><label class="field">Name<input name="name" value="${esc(u().name)}" required></label><label class="field">E-Mail<input value="${esc(u().email)}" disabled></label>
         <label class="field">Währung<select name="currency">${['EUR', 'USD', 'CHF', 'GBP'].map((c) => `<option ${c === u().currency ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
-        <label class="field">Wochenstart<select name="week_start"><option value="1" ${u().week_start === 1 ? 'selected' : ''}>Montag</option><option value="0" ${u().week_start === 0 ? 'selected' : ''}>Sonntag</option></select></label></div>
+        <label class="field">Wochenstart<select name="week_start"><option value="1" ${u().week_start === 1 ? 'selected' : ''}>Montag</option><option value="0" ${u().week_start === 0 ? 'selected' : ''}>Sonntag</option></select></label>
+        <label class="field">Wochen-Sollzeit (Std.)<input name="weekly_work_hours" type="number" min="1" max="168" step="0.25" value="${esc(u().weekly_work_hours ?? 40)}" required><small class="muted">Für den Monats-Saldo auf fünf Arbeitstage verteilt.</small></label></div>
         <div class="modal-foot"><button class="btn">Speichern</button></div></form>`;
       renderAvatars();
       $('#p-form', el).addEventListener('submit', async (e) => {
         e.preventDefault();
         const f = new FormData(e.target);
-        try { await patchMe({ name: f.get('name').trim(), currency: f.get('currency'), week_start: Number(f.get('week_start')) }); toast('Profil gespeichert'); } catch (x) { toast(x.message, true); }
+        try { await patchMe({ name: f.get('name').trim(), currency: f.get('currency'), week_start: Number(f.get('week_start')), weekly_work_hours: Number(f.get('weekly_work_hours')) }); toast('Profil gespeichert'); } catch (x) { toast(x.message, true); }
       });
     },
     security(el) {

@@ -11,6 +11,7 @@ Webanwendung zur Verwaltung persönlicher und geteilter Budgets, kombiniert mit 
 |---|---|---|
 | Finanzen | Dashboard | KPIs, Cashflow, Kategorien, Auslastung, Saldo-Verlauf, letzte Buchungen |
 | | Transaktionen | Alle Buchungen über Budgets hinweg |
+| | Stundenzettel | Einstempeln, Pausieren, Ausstempeln, Monatsübersicht, Überstundensaldo und PDF-Export |
 | | Budgets | Solo- und Team-Budgets, Kategorien mit Limits |
 | | Daueraufträge | Wiederkehrende Ein- und Ausgaben |
 | | Sparziele | Ziele mit Fortschritt, solo oder im Team |
@@ -18,6 +19,7 @@ Webanwendung zur Verwaltung persönlicher und geteilter Budgets, kombiniert mit 
 | Zusammenarbeit | Teams | Mitglieder, Teamrollen, geteilte Budgets |
 | | Kalender | Monat, Woche, Tag, Agenda |
 | Objekte | Schlüssel & Objekte | Häuser, Fahrzeuge, Schlüssel, Personen, Kosten, Protokoll |
+| | Hilfe | Dokumentation der wichtigsten Funktionen |
 | Administration | Verwaltung | 10 Bereiche (siehe 3) |
 | Konto | Einstellungen | Profil, Sicherheit, Darstellung, Benachrichtigungen |
 
@@ -55,7 +57,7 @@ Zwei strikt getrennte Arten: `solo` (gehört einem User) und `shared` (gehört e
 Gesamtliste mit Suche und Filtern (Budget, Kategorie, Zeitraum). Spalten: Datum, Beschreibung, Budget, Kategorie, Quelle (manuell, Dauerauftrag, Objekt), Beleg, Betrag. Neue Buchung: Typ (Ausgabe, Einnahme, Einzahlung in ein Sparziel), Betrag, Budget, Kategorie, Datum, Tags, Notiz, Beleg, optional als Dauerauftrag wiederholen. Export als CSV.
 
 ### 4.4 Daueraufträge
-Wiederkehrende Buchungen mit Intervall, Start/Ende, nächster Ausführung, pausierbar. Ein Scheduler erzeugt die Buchungen automatisch.
+Wiederkehrende Buchungen mit täglichem, wöchentlichem, monatlichem, jährlichem oder benutzerdefiniertem Tagesintervall, Start/Ende und nächster Ausführung; pausierbar. Ein Scheduler erzeugt die Buchungen automatisch. Ein persönlicher Dauerauftrag kann nach Annahme durch einen Team-Nutzer mit dem vollen Betrag auch in dessen persönlichem Budget verbucht werden; beide Konten müssen dieselbe Währung verwenden.
 
 ### 4.5 Sparziele
 Zielbetrag, Zieldatum, Fortschrittsanzeige, monatlicher Beitrag; solo oder für ein Team. Einzahlungen sind Buchungen vom Typ `deposit`.
@@ -71,9 +73,9 @@ Teams mit Mitgliedern und Teamrollen (Owner, Editor, Viewer), Einladung per E-Ma
 Eine Seite mit den Tabs Übersicht, Schlüssel, Häuser, Fahrzeuge, Personen, Kosten, Protokoll.
 
 1. **Personen (Tracking)** – Mitarbeitende, Externe und Familie, auch ohne Panel-Zugang (`user_id` optional, später verknüpfbar). Dient dem Nachverfolgen, wer was hat.
-2. **Häuser** – Name, Typ (Wohnhaus, Büro, Lager, Ferienobjekt), Adresse, Verantwortliche Person, Notizen, Schlüssel.
-3. **Fahrzeuge** – Marke/Modell, Kennzeichen, Service-fällig (Monat), Versicherung ab, Status (verfügbar, im Einsatz, Werkstatt, außer Betrieb), Schlüssel. Es gibt bewusst weder Standort noch aktuelle Fahrer*in.
-4. **Schlüssel** – gehört zu einem Haus oder Fahrzeug, hat Exemplare. Ausgabe und Rückgabe mit Datum, Person, Quittierung und optionaler Rückgabefrist. Status: ausgegeben, im Safe, überfällig, verloren, gesperrt.
+2. **Häuser** – Name, Typ (Wohnhaus, Büro, Lager, Ferienobjekt), Adresse, Verantwortliche Person, verschlüsselter Tür-PIN (Anzeige nach Passwort-/2FA-Bestätigung und protokolliert), Notizen und zugeordnete Schlüssel.
+3. **Fahrzeuge** – Marke/Modell, Kennzeichen, Besitzer, Service-fällig (Monat), Verbandskasten-Ablaufdatum, Status (verfügbar, im Einsatz, Werkstatt, außer Betrieb) und zugeordnete Schlüssel. Eine Versicherungsangabe gibt es nicht.
+4. **Schlüssel** – gehört zu einem Haus oder Fahrzeug, hat eine frei eingebbare Art und eine verwaltbare Anzahl Exemplare. Inventur zeigt Gesamtbestand, Ausgaben und Verluste; QR-Codes öffnen den Schlüssel in der Verwaltung. Ausgabe und Rückgabe mit Datum, Person, Quittierung und optionaler Rückgabefrist. Status: ausgegeben, im Safe, überfällig, verloren, gesperrt.
 5. **Übersicht** – KPIs, „Wer hat welche Schlüssel?“, Diagramm Schlüssel nach Status, Handlungsbedarf (fälliger Service, überfällige oder verlorene Schlüssel), letzte Vorgänge.
 6. **Protokoll** – lückenlose Historie je Schlüssel.
 7. **Optionaler Preis & Budget-Tracking** – Haus, Fahrzeug und Schlüssel haben ein optionales Preisfeld: Betrag, Intervall (einmalig, monatlich, vierteljährlich, jährlich), Budget, Kategorie, Schalter „im Tracking“. Ohne Preis wird der Posten nur verwaltet. Mit Preis erzeugt das System bei „einmalig“ genau eine Buchung, sonst einen Dauerauftrag im gewählten Budget; Preisänderungen aktualisieren den Dauerauftrag. Der Tab „Kosten“ zeigt alle Posten mit Preis, Intervall, Budget, Kategorie, Tracking-Schalter, die laufenden Monatskosten, einmalige Kosten und die Anzahl Posten ohne Preis.
@@ -82,7 +84,8 @@ Eine Seite mit den Tabs Übersicht, Schlüssel, Häuser, Fahrzeuge, Personen, Ko
 
 Ansichten Monat, Woche, Tag und Agenda (30 Tage), Navigation vor/zurück/heute, Klick auf Tag öffnet die Tagesansicht oder legt einen Termin an.
 
-- **Automatische Termine** (aus anderen Modulen abgeleitet, nur lesbar): Daueraufträge und Zahlungen, Service und Versicherung der Fahrzeuge, Rückgabefristen von Schlüsseln, Wartungen von Häusern, Feiertage.
+- **Automatische Termine** (aus anderen Modulen abgeleitet, nur lesbar): Daueraufträge und Zahlungen, Service der Fahrzeuge, Rückgabefristen von Schlüsseln, Wartungen von Häusern, Feiertage.
+- Ablauf-Erinnerungen weisen rechtzeitig auf Fahrzeug-Service, Verbandskasten und Schlüsselrückgaben hin; sie erscheinen im Kalender und als Benachrichtigung.
 - **Eigene Termine**: Kalender-Typ Team oder Privat, ganztägig oder mit Beginn/Ende, Wiederholung (wöchentlich, monatlich, jährlich), Erinnerung (1/3/7/14 Tage vorher), optionaler Betrag, Notiz; Bearbeiten und Löschen.
 - **Seitenleiste**: Filter je Kalender-Typ (Zahlungen, Fahrzeuge, Schlüssel, Häuser, Team, Privat, Feiertage), „Als Nächstes“, Zahlungssaldo des Monats (Einnahmen, Ausgaben, Saldo).
 - **iCal-Abo** zum Einbinden in externe Kalender.
@@ -91,10 +94,12 @@ Ansichten Monat, Woche, Tag und Agenda (30 Tage), Navigation vor/zurück/heute, 
 
 | Tab | Inhalt |
 |---|---|
-| Profil | Gravatar (ein/aus, es wird nur der MD5-Hash der E-Mail übertragen; ohne Gravatar bleiben Initialen, mit Bild kein Text darunter), Name, E-Mail, Sprache, Währung, Zeitzone, erster Wochentag, DSGVO-Export, Konto löschen |
+| Profil | Gravatar (ein/aus, es wird nur der MD5-Hash der E-Mail übertragen; ohne Gravatar bleiben Initialen, mit Bild kein Text darunter), Name, E-Mail, Sprache, Währung, Zeitzone, erster Wochentag, konfigurierbare Wochen-Sollzeit, DSGVO-Export, Konto löschen |
 | Sicherheit | 2FA per Authenticator-App (QR-Code, Bestätigungscode, Wiederherstellungscodes), Passwort ändern, aktive Sitzungen beenden |
 | Darstellung | Theme-Auswahl, „Automatisch wechseln“ (folgt Hell/Dunkel des Geräts), kompakte Tabellen, Beträge ausblenden |
-| Benachrichtigungen | Budget-Warnung bei 80 %, Budget überschritten, Dauerauftrag gebucht, Team-Einladungen |
+| Benachrichtigungen | Budget-Warnung bei 80 %, Budget überschritten, Ablauf-Erinnerungen für Fahrzeuge und Schlüssel, Team-Einladungen |
+
+Die Hilfe-Seite bietet durchsuchbare Schritt-für-Schritt-Erklärungen und Antworten auf häufige Fragen.
 
 ## 8. Design
 

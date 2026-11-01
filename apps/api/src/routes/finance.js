@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { one, many, q, tx } from '../db.js';
 import { authz, bad, notFound, forbidden, budgetAccess, accessibleBudgetIds } from '../authz.js';
 import { addDefaultCategories } from '../seed.js';
-import { periodRange, budgetUsed, budgetWatch, toCsv, today } from '../lib.js';
+import { periodRange, budgetUsed, budgetWatch, toCsv, today, notify } from '../lib.js';
 import { audit } from '../audit.js';
 
 const money = z.union([z.string(), z.number()]).transform((v) => String(v).replace(',', '.')).refine((v) => /^\d{1,12}(\.\d{1,2})?$/.test(v), 'Ungültiger Betrag');
@@ -232,34 +232,123 @@ export default async function routes(app) {
   // ---- Daueraufträge
   const recBody = z.object({
     name: z.string().min(1).max(100), budget_id: id, category_id: id.nullish(), type: z.enum(['income', 'expense']), amount: money.refine((v) => Number(v) > 0),
-    frequency: z.enum(['daily', 'weekly', 'monthly', 'yearly']), interval: z.number().int().min(1).max(60).default(1), income_kind: z.enum(['other', 'salary']).default('other'),
+    frequency: z.enum(['daily', 'weekly', 'monthly', 'yearly', 'custom']), interval: z.number().int().min(1).max(3650).default(1), income_kind: z.enum(['other', 'salary']).default('other'),
     start_date: date, end_date: date.nullish(), active: z.boolean().default(true),
   });
+  app.get('/recurring/share-candidates', authz('recurring:create'), async (req) => many(
+    `SELECT DISTINCT u.id, u.name FROM team_members mine
+     JOIN team_members peer ON peer.team_id=mine.team_id AND peer.user_id<>mine.user_id
+     JOIN users u ON u.id=peer.user_id
+     WHERE mine.user_id=$1 AND u.status='active' AND u.deleted_at IS NULL
+     ORDER BY u.name`,
+    [req.user.id],
+  ));
   app.get('/recurring', authz('recurring:read'), async (req) =>
     many(
-      `SELECT r.*, b.name budget_name, c.name category_name FROM recurring_rules r JOIN budgets b ON b.id=r.budget_id LEFT JOIN categories c ON c.id=r.category_id
-       WHERE r.budget_id = ANY($1) ORDER BY r.active DESC, r.next_run`,
-      [await accessibleBudgetIds(req.user.id)],
+      `SELECT r.*, b.name budget_name, b.currency budget_currency, c.name category_name, recipient.name recipient_name,
+         creator.name creator_name, rb.name recipient_budget_name,
+         (r.recipient_user_id=$2) is_share_recipient
+       FROM recurring_rules r JOIN budgets b ON b.id=r.budget_id LEFT JOIN categories c ON c.id=r.category_id
+       LEFT JOIN users recipient ON recipient.id=r.recipient_user_id LEFT JOIN users creator ON creator.id=r.created_by
+       LEFT JOIN budgets rb ON rb.id=r.recipient_budget_id
+       WHERE r.budget_id = ANY($1) OR r.recipient_user_id=$2 ORDER BY r.active DESC, r.next_run`,
+      [await accessibleBudgetIds(req.user.id), req.user.id],
     ));
+  app.get('/recurring/share-requests', authz('recurring:read'), async (req) => many(
+    `SELECT r.id, r.name, r.type, r.amount, r.frequency, r.interval, r.start_date, r.end_date, r.next_run,
+       b.name budget_name, b.currency, u.name sender_name
+     FROM recurring_rules r JOIN budgets b ON b.id=r.budget_id JOIN users u ON u.id=r.created_by
+     WHERE r.recipient_user_id=$1 AND r.recipient_status='pending' ORDER BY r.start_date DESC`,
+    [req.user.id],
+  ));
   app.post('/recurring', authz('recurring:create'), async (req) => {
-    const b = recBody.parse(req.body);
+    const b = recBody.extend({ recipient_user_id: id.nullish() }).parse(req.body);
     const { budget } = await budgetAccess(req.user.id, b.budget_id, true);
     await checkRefs(b, budget);
-    return one(
-      `INSERT INTO recurring_rules(name,budget_id,category_id,created_by,type,amount,frequency,interval,start_date,end_date,next_run,active,income_kind)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$9,$11,$12) RETURNING id`,
-      [b.name, b.budget_id, b.category_id || null, req.user.id, b.type, b.amount, b.frequency, b.interval, b.start_date, b.end_date || null, b.active, b.type === 'income' ? b.income_kind : 'other'],
+    if (b.recipient_user_id) {
+      if (budget.type !== 'solo' || budget.owner_user_id !== req.user.id) throw bad('Geteilte Daueraufträge benötigen dein persönliches Budget');
+      const peer = await one(
+        `SELECT u.name FROM team_members mine JOIN team_members peer ON peer.team_id=mine.team_id
+         JOIN users u ON u.id=peer.user_id
+         WHERE mine.user_id=$1 AND peer.user_id=$2 AND u.status='active' AND u.deleted_at IS NULL`,
+        [req.user.id, b.recipient_user_id],
+      );
+      if (!peer) throw bad('Der zweite Nutzer muss mit dir in einem Team sein');
+    }
+    const rule = await one(
+      `INSERT INTO recurring_rules(name,budget_id,category_id,created_by,type,amount,frequency,interval,start_date,end_date,next_run,active,income_kind,recipient_user_id,recipient_status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$9,$11,$12,$13,$14) RETURNING id`,
+      [b.name, b.budget_id, b.category_id || null, req.user.id, b.type, b.amount, b.frequency, b.interval, b.start_date, b.end_date || null, b.active, b.type === 'income' ? b.income_kind : 'other', b.recipient_user_id || null, b.recipient_user_id ? 'pending' : null],
     );
+    if (b.recipient_user_id) await notify(b.recipient_user_id, 'recurring_share', 'Dauerauftrag zur Bestätigung', `${req.user.name} möchte „${b.name}“ auch in deinem persönlichen Budget buchen.`, `recurring-share:${rule.id}`);
+    return rule;
+  });
+  app.post('/recurring/:id/accept', authz('recurring:read'), async (req) => {
+    const { budget_id } = z.object({ budget_id: id }).parse(req.body);
+    const rule = await one('SELECT * FROM recurring_rules WHERE id=$1 AND recipient_user_id=$2 AND recipient_status=\'pending\'', [req.params.id, req.user.id]);
+    if (!rule) throw notFound();
+    const { budget } = await budgetAccess(req.user.id, budget_id, true);
+    if (budget.type !== 'solo' || budget.owner_user_id !== req.user.id) throw bad('Wähle ein persönliches Budget');
+    const sourceBudget = await one('SELECT currency FROM budgets WHERE id=$1', [rule.budget_id]);
+    if (sourceBudget.currency !== budget.currency) throw bad('Beide persönlichen Budgets müssen dieselbe Währung verwenden');
+    const accepted = await tx(async (client) => {
+      const result = await client.query(
+        `UPDATE recurring_rules SET recipient_budget_id=$2, recipient_status='accepted'
+         WHERE id=$1 AND recipient_user_id=$3 AND recipient_status='pending' RETURNING id`,
+        [rule.id, budget.id, req.user.id],
+      );
+      if (!result.rowCount) throw notFound();
+      await client.query(
+        `INSERT INTO transactions(budget_id,category_id,created_by,type,amount,booked_at,title,note,tags,source,recurring_id,income_kind)
+         SELECT $2,NULL,created_by,type,amount,booked_at,$4,'','{}'::text[],'recurring',recurring_id,income_kind
+         FROM transactions WHERE recurring_id=$1 AND budget_id=$3 AND source='recurring'
+         ON CONFLICT DO NOTHING`,
+        [rule.id, budget.id, rule.budget_id, rule.name],
+      );
+      return result.rows[0];
+    });
+    await budgetWatch(budget.id, req.log);
+    await notify(rule.created_by, 'recurring_share', 'Dauerauftrag angenommen', `${req.user.name} hat „${rule.name}“ für das persönliche Budget bestätigt.`, `recurring-accepted:${rule.id}`);
+    return accepted;
+  });
+  app.post('/recurring/:id/decline', authz('recurring:read'), async (req) => {
+    const rule = await one('UPDATE recurring_rules SET recipient_status=\'declined\' WHERE id=$1 AND recipient_user_id=$2 AND recipient_status=\'pending\' RETURNING created_by,name', [req.params.id, req.user.id]);
+    if (!rule) throw notFound();
+    await notify(rule.created_by, 'recurring_share', 'Dauerauftrag abgelehnt', `${req.user.name} hat „${rule.name}“ nicht angenommen.`, `recurring-declined:${req.params.id}`);
+    return { ok: true };
+  });
+  app.post('/recurring/:id/revoke-share', authz('recurring:update'), async (req) => {
+    const rule = await one('SELECT * FROM recurring_rules WHERE id=$1', [req.params.id]);
+    if (!rule || rule.source === 'asset' || rule.created_by !== req.user.id || !rule.recipient_user_id) throw notFound();
+    await budgetAccess(req.user.id, rule.budget_id, true);
+    const revoked = await q(
+      'UPDATE recurring_rules SET recipient_status=\'revoked\', recipient_budget_id=NULL WHERE id=$1 AND recipient_user_id IS NOT NULL AND recipient_status IN (\'pending\',\'accepted\') RETURNING id',
+      [rule.id],
+    );
+    if (!revoked.rowCount) throw notFound();
+    await notify(rule.recipient_user_id, 'recurring_share', 'Dauerauftrag geteilt', `Die gemeinsame Buchung von „${rule.name}“ wurde beendet.`, `recurring-revoked:${rule.id}`);
+    return { ok: true };
   });
   app.patch('/recurring/:id', authz('recurring:update'), async (req) => {
     const r = await one('SELECT * FROM recurring_rules WHERE id=$1', [req.params.id]);
     if (!r || r.source === 'asset') throw notFound();
     await budgetAccess(req.user.id, r.budget_id, true);
     const b = recBody.omit({ budget_id: true }).partial().parse(req.body);
+    const sharedTermsChanged = r.recipient_user_id && ['pending', 'accepted'].includes(r.recipient_status)
+      && ['type', 'amount', 'frequency', 'interval', 'start_date', 'end_date'].some((key) => {
+        if (!(key in b)) return false;
+        return key === 'amount'
+          ? Number(b[key]) !== Number(r[key])
+          : String(b[key] ?? '') !== String(r[key] ?? '');
+      });
     const patch = { ...b };
     if (patch.type && patch.type !== 'income') patch.income_kind = 'other';
     const keys = Object.keys(patch);
     if (keys.length) await q(`UPDATE recurring_rules SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1`, [r.id, ...keys.map((k) => patch[k] ?? null)]);
+    if (sharedTermsChanged) {
+      await q('UPDATE recurring_rules SET recipient_status=\'pending\', recipient_budget_id=NULL WHERE id=$1', [r.id]);
+      await notify(r.recipient_user_id, 'recurring_share', 'Dauerauftrag erneut bestätigen', `Die Bedingungen von „${r.name}“ wurden geändert. Bitte bestätige den Auftrag erneut.`, `recurring-share-update:${r.id}:${Date.now()}`);
+    }
     return { ok: true };
   });
   app.delete('/recurring/:id', authz('recurring:delete'), async (req) => {

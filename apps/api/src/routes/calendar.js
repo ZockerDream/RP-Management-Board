@@ -64,10 +64,10 @@ export async function buildFeed(userId, from, to) {
       }
     }
   }
-  for (const v of await many(`SELECT id, plate, make_model, service_due, insurance_from FROM vehicles
+  for (const v of await many(`SELECT id, plate, make_model, service_due, first_aid_kit_expires_on FROM vehicles
     WHERE owner_user_id=$1 OR team_id IN (SELECT team_id FROM team_members WHERE user_id=$1)`, [userId])) {
     if (v.service_due) out.push(ro(`veh:${v.id}:service`, 'vehicle', `Service: ${v.make_model}`, v.service_due, { note: v.plate }));
-    if (v.insurance_from) out.push(ro(`veh:${v.id}:ins`, 'vehicle', `Versicherung: ${v.make_model}`, v.insurance_from, { repeat: 'yearly', note: v.plate }));
+    if (v.first_aid_kit_expires_on) out.push(ro(`veh:${v.id}:kit`, 'vehicle', `Verbandskasten läuft ab: ${v.make_model}`, v.first_aid_kit_expires_on, { note: v.plate }));
   }
   for (const p of await many(`SELECT id, name, maintenance_due, maintenance_note FROM properties WHERE (owner_user_id=$1 OR team_id IN (SELECT team_id FROM team_members WHERE user_id=$1)) AND maintenance_due IS NOT NULL`, [userId])) {
     out.push(ro(`house:${p.id}`, 'house', `Wartung: ${p.name}`, p.maintenance_due, { note: p.maintenance_note }));

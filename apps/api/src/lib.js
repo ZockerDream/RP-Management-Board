@@ -8,7 +8,7 @@ const parse = (s) => new Date(`${s}T00:00:00Z`);
 export function addInterval(dateStr, freq, interval = 1) {
   const d = parse(dateStr);
   const day = d.getUTCDate();
-  if (freq === 'daily') d.setUTCDate(day + interval);
+  if (freq === 'daily' || freq === 'custom') d.setUTCDate(day + interval);
   else if (freq === 'weekly') d.setUTCDate(day + 7 * interval);
   else {
     const months = freq === 'yearly' ? 12 * interval : interval;
@@ -23,7 +23,7 @@ export function addInterval(dateStr, freq, interval = 1) {
 // n-te Wiederholung relativ zum Startdatum (verhindert Tagesdrift 31. → 28. → 28.)
 export function nthOccurrence(start, freq, interval, n) {
   const d = parse(start);
-  if (freq === 'daily') d.setUTCDate(d.getUTCDate() + interval * n);
+  if (freq === 'daily' || freq === 'custom') d.setUTCDate(d.getUTCDate() + interval * n);
   else if (freq === 'weekly') d.setUTCDate(d.getUTCDate() + 7 * interval * n);
   else {
     const day = d.getUTCDate();

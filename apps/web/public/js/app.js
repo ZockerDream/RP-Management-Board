@@ -1,5 +1,5 @@
 import { api, refresh, setToken, onLogout, hasToken } from './api.js';
-import { $, $$, esc, toast, setCurrency } from './ui.js';
+import { $, $$, esc, toast, setCurrency, bindPasswordToggles, passwordToggleButton } from './ui.js';
 import { md5 } from './md5.js';
 
 export const state = { me: null, perms: new Set(), mfaSetup: false };
@@ -23,6 +23,7 @@ const PAGES = {
   teams: { perm: 'team:read', load: () => import('./pages/teams.js') },
   calendar: { perm: 'calendar:read', load: () => import('./pages/calendar.js') },
   assets: { perm: 'key:read', load: () => import('./pages/assets.js') },
+  help: { perm: null, load: () => import('./pages/help.js') },
   admin: { perm: 'admin:access', load: () => import('./pages/admin.js') },
   settings: { perm: null, load: () => import('./pages/settings.js') },
 };
@@ -61,10 +62,13 @@ const card = (title, lead, body) => `<div class="auth-card"><div class="auth-bra
 function authForm(id, fields, submit, extra = '') {
   return `<form id="${id}" class="auth-form" novalidate>${fields}<p class="auth-error" role="alert" hidden></p><button class="btn auth-submit" type="submit">${esc(submit)}</button></form>${extra}`;
 }
-const inp = (name, label, type = 'text', ac = '') => `<label class="field">${esc(label)}<input name="${name}" type="${type}" ${ac ? `autocomplete="${ac}"` : ''} required></label>`;
+const inp = (name, label, type = 'text', ac = '') => `<label class="field">${esc(label)}${type === 'password'
+  ? `<span class="password-control"><input name="${name}" type="password" ${ac ? `autocomplete="${ac}"` : ''} required>${passwordToggleButton(label)}</span>`
+  : `<input name="${name}" type="${type}" ${ac ? `autocomplete="${ac}"` : ''} required`}</label>`;
 
 function bind(id, fn) {
   const f = $(`#${id}`);
+  bindPasswordToggles(f);
   const err = $('.auth-error', f);
   f.addEventListener('submit', async (e) => {
     e.preventDefault();

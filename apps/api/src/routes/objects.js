@@ -1,8 +1,11 @@
 import { z } from 'zod';
+import QRCode from 'qrcode';
 import { one, many, q, tx } from '../db.js';
-import { authz, bad, notFound, budgetAccess } from '../authz.js';
+import { authz, bad, notFound, budgetAccess, forbidden } from '../authz.js';
 import { addInterval, today } from '../lib.js';
 import { audit } from '../audit.js';
+import { config } from '../config.js';
+import { decrypt, encrypt, totpValid, verifyPassword } from '../security.js';
 
 const money = z.union([z.string(), z.number()]).transform((v) => String(v).replace(',', '.')).refine((v) => /^\d{1,12}(\.\d{1,2})?$/.test(v), 'Ungültiger Betrag');
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -51,9 +54,9 @@ const KINDS = {
     perm: 'vehicle', asset: 'vehicle', label: (r) => `${r.make_model} (${r.plate})`,
     schema: z.object({
       plate: z.string().min(1).max(20), make_model: z.string().min(1).max(100), status: z.enum(['available', 'in_use', 'workshop', 'retired']).default('available'), ...ownerFields,
-      service_due: date.nullish(), odometer_km: z.number().int().min(0).nullish(), service_interval_km: z.number().int().min(1).nullish(), service_due_km: z.number().int().min(0).nullish(), insurance_from: date.nullish(), note: str(2000).default(''), ...costFields,
+      registered_owner: str(100).default(''), service_due: date.nullish(), odometer_km: z.number().int().min(0).nullish(), service_interval_km: z.number().int().min(1).nullish(), service_due_km: z.number().int().min(0).nullish(), first_aid_kit_expires_on: date.nullish(), note: str(2000).default(''), ...costFields,
     }),
-    cols: ['plate', 'make_model', 'status', 'service_due', 'odometer_km', 'service_interval_km', 'service_due_km', 'insurance_from', 'note'],
+    cols: ['plate', 'make_model', 'status', 'registered_owner', 'service_due', 'odometer_km', 'service_interval_km', 'service_due_km', 'first_aid_kit_expires_on', 'note'],
   },
   keys: {
     perm: 'key', asset: 'key', label: (r) => r.label,
@@ -159,6 +162,7 @@ export default async function routes(app) {
     app.get(`/${path}`, authz(`${K.perm}:read`), async (req) => {
       if (path === 'keys') return (await many(`${keyStatusSql} WHERE ${ownerSql('k')} ORDER BY k.label`, [req.user.id])).map(withStatus);
       const rows = await many(`SELECT x.*, b.name cost_budget_name FROM ${table} x LEFT JOIN budgets b ON b.id=x.cost_budget_id WHERE ${ownerSql('x')} ORDER BY ${path === 'vehicles' ? 'x.plate' : 'x.name'}`, [req.user.id]);
+      if (path === 'properties') return rows.map(({ door_pin_enc, ...property }) => property);
       return rows;
     });
     app.post(`/${path}`, authz(`${K.perm}:create`), async (req) => {
@@ -219,6 +223,58 @@ export default async function routes(app) {
       return { ok: true };
     });
   }
+
+  async function reauthenticatePin(req, credentials) {
+    if (req.viaApiKey) throw forbidden('Tür-PINs sind nur in einer angemeldeten Sitzung verfügbar');
+    if (!req.user.password_hash || !(await verifyPassword(req.user.password_hash, credentials.password))) {
+      throw bad('Passwort ist falsch', 'wrong_password');
+    }
+    if (req.user.totp_enabled && (!credentials.code || !req.user.totp_secret_enc || !totpValid(decrypt(req.user.totp_secret_enc), credentials.code))) {
+      throw bad('2FA-Code ist ungültig', 'invalid_code');
+    }
+  }
+  async function recordPinAccess(req, propertyId, action) {
+    await q(
+      'INSERT INTO audit_log(user_id,user_name,action,entity,entity_id,ip,details) VALUES ($1,$2,$3,\'property\',$4,$5,$6)',
+      [req.user.id, req.user.name, `property.pin.${action}`, propertyId, req.ip, JSON.stringify({ field: 'door_pin' })],
+    );
+  }
+  app.post('/properties/:id/pin/reveal', {
+    ...authz('property:read'),
+    config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
+  }, async (req) => {
+    const credentials = z.object({ password: z.string().min(1), code: z.string().max(10).optional() }).parse(req.body);
+    await reauthenticatePin(req, credentials);
+    const property = await one(`SELECT * FROM properties p WHERE p.id=$1 AND ${ownerSql('p')}`, [req.params.id, req.user.id]);
+    if (!property || !property.door_pin_enc) throw notFound('Kein Tür-PIN hinterlegt');
+    await recordPinAccess(req, property.id, 'revealed');
+    return { pin: decrypt(property.door_pin_enc) };
+  });
+  app.post('/properties/:id/pin', {
+    ...authz('property:update'),
+    config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
+  }, async (req) => {
+    const body = z.object({ pin: z.string().max(80), password: z.string().min(1), code: z.string().max(10).optional() }).parse(req.body);
+    await reauthenticatePin(req, body);
+    const property = await one('SELECT * FROM properties WHERE id=$1', [req.params.id]);
+    if (!property) throw notFound();
+    await assertOwner(req, property, true);
+    await tx(async (client) => {
+      await client.query('UPDATE properties SET door_pin_enc=$2 WHERE id=$1', [property.id, body.pin ? encrypt(body.pin) : null]);
+      await client.query(
+        'INSERT INTO audit_log(user_id,user_name,action,entity,entity_id,ip,details) VALUES ($1,$2,$3,\'property\',$4,$5,$6)',
+        [req.user.id, req.user.name, `property.pin.${body.pin ? 'updated' : 'removed'}`, property.id, req.ip, JSON.stringify({ field: 'door_pin' })],
+      );
+    });
+    return { ok: true };
+  });
+
+  app.get('/keys/:id/qr', authz('key:read'), async (req) => {
+    const key = await one(`SELECT k.id FROM keys k WHERE k.id=$1 AND ${ownerSql('k')}`, [req.params.id, req.user.id]);
+    if (!key) throw notFound();
+    const url = `${config.appUrl}/#/assets?tab=keys&key=${encodeURIComponent(key.id)}`;
+    return { image: await QRCode.toDataURL(url, { errorCorrectionLevel: 'M', margin: 2, width: 320 }) };
+  });
 
   // ---- Schlüsselausgabe
   app.post('/keys/:id/assign', authz('key:assign'), async (req) => {

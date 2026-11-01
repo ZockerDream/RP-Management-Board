@@ -23,6 +23,15 @@ export async function recurringRun(log) {
         );
         booked += res.rowCount;
         if (r.type === 'expense') watch.add(r.budget_id);
+        if (r.recipient_status === 'accepted' && r.recipient_budget_id) {
+          const shared = await q(
+            `INSERT INTO transactions(budget_id,category_id,created_by,type,amount,booked_at,title,source,recurring_id,income_kind)
+             VALUES ($1,NULL,$2,$3,$4,$5,$6,'recurring',$7,$8) ON CONFLICT DO NOTHING`,
+            [r.recipient_budget_id, r.created_by, r.type, r.amount, d, r.name, r.id, r.income_kind || 'other'],
+          );
+          booked += shared.rowCount;
+          if (r.type === 'expense') watch.add(r.recipient_budget_id);
+        }
       }
       n++;
       d = nthOccurrence(r.start_date, r.frequency, r.interval, n);
@@ -64,9 +73,11 @@ export async function reminders(log) {
     sent++;
   }
   const soon = addInterval(t, 'daily', 14);
-  for (const v of await many(`SELECT id, plate, make_model, service_due, odometer_km, service_due_km, owner_user_id, team_id
-    FROM vehicles WHERE service_due BETWEEN $1 AND $2
-      OR (odometer_km IS NOT NULL AND service_due_km IS NOT NULL AND odometer_km >= service_due_km)`, [t, soon])) {
+  const kitSoon = addInterval(t, 'daily', 30);
+  for (const v of await many(`SELECT id, plate, make_model, service_due, odometer_km, service_due_km, first_aid_kit_expires_on, owner_user_id, team_id
+    FROM vehicles WHERE (service_due IS NOT NULL AND service_due <= $2)
+      OR (odometer_km IS NOT NULL AND service_due_km IS NOT NULL AND odometer_km >= service_due_km)
+      OR (first_aid_kit_expires_on IS NOT NULL AND first_aid_kit_expires_on <= $3)`, [t, soon, kitSoon])) {
     const users = v.owner_user_id
       ? [v.owner_user_id]
       : (await many('SELECT user_id FROM team_members WHERE team_id=$1', [v.team_id])).map((member) => member.user_id);
@@ -78,15 +89,24 @@ export async function reminders(log) {
       const key = v.service_due_km != null && v.odometer_km != null && v.odometer_km >= v.service_due_km
         ? `veh:${v.id}:km:${v.service_due_km}`
         : `veh:${v.id}:${v.service_due}`;
-      await notify(userId, 'vehicle_service', `Service fällig: ${v.make_model}`, `${v.plate} – ${details}`, key);
+      if (v.service_due && v.service_due <= soon || (v.odometer_km != null && v.service_due_km != null && v.odometer_km >= v.service_due_km)) {
+        await notify(userId, 'vehicle_service', `Service fällig: ${v.make_model}`, `${v.plate} – ${details}`, key);
+      }
+      if (v.first_aid_kit_expires_on && v.first_aid_kit_expires_on <= kitSoon) {
+        const status = v.first_aid_kit_expires_on < t ? 'abgelaufen' : `läuft am ${v.first_aid_kit_expires_on} ab`;
+        await notify(userId, 'first_aid_kit', `Verbandskasten: ${v.make_model}`, `${v.plate} – ${status}`, `veh:${v.id}:kit:${v.first_aid_kit_expires_on}`);
+      }
     }
   }
   for (const a of await many(`SELECT a.id, k.label, k.owner_user_id, k.team_id, a.due_at FROM key_assignments a JOIN keys k ON k.id=a.key_id
-    WHERE a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at < $1`, [t])) {
+    WHERE a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at IS NOT NULL AND a.due_at <= $2`, [t, soon])) {
     const users = a.owner_user_id
       ? [a.owner_user_id]
       : (await many('SELECT user_id FROM team_members WHERE team_id=$1', [a.team_id])).map((member) => member.user_id);
-    for (const userId of users) await notify(userId, 'key_overdue', `Schlüssel überfällig: ${a.label}`, `Fällig seit ${a.due_at}`, `key:${a.id}:${userId}`);
+    for (const userId of users) {
+      const body = a.due_at < t ? `Überfällig seit ${a.due_at}` : `Rückgabe bis ${a.due_at}`;
+      await notify(userId, 'key_overdue', `Schlüssel-Rückgabe: ${a.label}`, body, `key:${a.id}:${userId}`);
+    }
   }
   return `${sent} Erinnerungen`;
 }

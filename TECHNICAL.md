@@ -84,8 +84,9 @@ transactions(id, budget_id, category_id, created_by, type[income|expense|deposit
              amount numeric(14,2) CHECK (amount > 0), booked_at date, note, tags text[],
              source[manual|recurring|asset|import], recurring_id NULL, asset_type NULL, asset_id NULL,
              goal_id NULL)
-recurring_rules(id, budget_id, category_id, created_by, type, amount, frequency, interval,
-                start_date, end_date NULL, next_run, active,
+recurring_rules(id, budget_id, category_id, created_by, type, amount, frequency[daily|weekly|monthly|yearly|custom], interval,
+                start_date, end_date NULL, next_run, active, recipient_user_id NULL, recipient_budget_id NULL,
+                recipient_status[pending|accepted|declined|revoked] NULL,
                 source[manual|asset], asset_type NULL, asset_id NULL)
 goals(id, budget_id, name, target_amount, target_date, monthly_amount NULL)
 attachments(id, transaction_id, storage_key, mime, size, sha256)
@@ -96,9 +97,10 @@ Der Saldo wird aus `transactions` berechnet, nicht gespeichert. Sparziel-Fortsch
 ```
 people(id, name, kind[employee|external|family], function, phone, email,
        user_id NULL REFERENCES users, active, note)      -- NULL = kein Panel-Zugang
-properties(id, name, type[home|office|storage|holiday], address, responsible_person_id, note, <cost>)
+properties(id, name, type[home|office|storage|holiday], address, responsible_person_id, maintenance_due,
+           maintenance_note, door_pin_enc (AES-256-GCM), note, <cost>)
 vehicles(id, plate unique, make_model, status[available|in_use|workshop|retired],
-         service_due date NULL, insurance_from date NULL, note, <cost>)
+         registered_owner, service_due date NULL, first_aid_kit_expires_on date NULL, note, <cost>)
 keys(id, label, kind, property_id NULL, vehicle_id NULL, copies int, note, <cost>)
   CHECK (property_id IS NOT NULL OR vehicle_id IS NOT NULL)
 key_assignments(id, key_id, person_id, copy_no, issued_at, due_at NULL, returned_at NULL,
@@ -110,7 +112,11 @@ key_assignments(id, key_id, person_id, copy_no, issued_at, due_at NULL, returned
          cost_recurring_id NULL (vom System verwaltet)
   CHECK (cost_amount IS NULL OR (cost_interval IS NOT NULL AND cost_budget_id IS NOT NULL))
 ```
-Der Schlüsselstatus wird aus den Zuweisungen abgeleitet: ausgegeben (offene Zuweisung), überfällig (`due_at < now()`), verloren (`lost_at`), sonst im Safe. Fahrzeuge haben bewusst kein Standort- und kein Fahrerfeld.
+Der Schlüsselstatus wird aus den Zuweisungen abgeleitet: ausgegeben (offene Zuweisung), überfällig (`due_at < now()`), verloren (`lost_at`), sonst im Safe. Schlüsselarten sind frei eingebbar; `copies` verwaltet die Exemplare je Haus oder Fahrzeug. QR-Codes verweisen auf eine Schlüssel-ID, die Bestandsansicht zeigt Gesamtbestand, Ausgaben und Verluste. Benutzerdefinierte Daueraufträge verwenden `interval` als Abstand in Tagen. Ein manueller Dauerauftrag kann nach Zustimmung eines Team-Nutzers zusätzlich in dessen persönliches Budget buchen; dafür sind gleiche Währungen erforderlich. Die Annahme überträgt vorhandene Buchungen und aktiviert die Doppelbuchung für künftige Termine.
+
+Tür-PINs werden verschlüsselt gespeichert, nie über die regulären Objekt-Endpunkte ausgegeben und nur nach erneuter Passwort- sowie gegebenenfalls 2FA-Prüfung sichtbar. Anzeigen, Ändern und Entfernen werden im Audit-Log protokolliert. Die Migration überführt vorhandene Klartext-PINs und entfernt anschließend die Legacy-Spalte.
+
+`users.weekly_work_hours` konfiguriert das persönliche Wochen-Soll. Der Monatsbericht verteilt dieses auf Montag bis Freitag und liefert Tagessummen, Gesamtstunden, Soll und Saldo; der PDF-Endpunkt exportiert die Monatsübersicht.
 
 ### 4.4 Kalender, Benachrichtigungen, System
 ```
@@ -182,7 +188,7 @@ Beim Speichern von Haus, Fahrzeug oder Schlüssel in einer Transaktion:
 Wiederholte Ausführung ist idempotent: Eindeutigkeit über `(recurring_id, booked_at)`.
 
 ### 7.3 Kalender
-- Der Server liefert für `[from, to]` die Vereinigung aus: eigene Termine (RRULE expandiert), fällige `recurring_rules`, Fahrzeugfristen (`service_due`, `insurance_from`), offene Schlüsselzuweisungen mit `due_at`, Wartungstermine von Häusern und Feiertagen (Bibliothek `date-holidays`, Bundesland einstellbar).
+- Der Server liefert für `[from, to]` die Vereinigung aus: eigene Termine (RRULE expandiert), fällige `recurring_rules`, Fahrzeug-Servicefristen (`service_due`), offene Schlüsselzuweisungen mit `due_at`, Wartungstermine von Häusern und Feiertagen (Bibliothek `date-holidays`, Bundesland einstellbar).
 - Berechtigung: Nur Quellen, die der User lesen darf, erscheinen im Kalender. Die Filter der Seitenleiste sind rein clientseitig.
 - Mockup-Verhalten, das übernommen wird: Wiederholung wöchentlich/monatlich/jährlich, Ganztags- und Zeitraster (07–20 Uhr), Jetzt-Linie, „+n weitere“ im Monatsraster, Zahlungssaldo des Monats aus den Beträgen der sichtbaren Termine.
 - Bekannte Lücke im Mockup: Änderungen gelten für die ganze Serie. Produktiv braucht es „nur dieser Termin / ab diesem Termin“ (`calendar_exceptions`). Monatliche Wiederholung am 29.–31. muss auf den letzten Tag des Monats einrasten.
