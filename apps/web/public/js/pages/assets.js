@@ -87,12 +87,13 @@ const formPerson = (o) => openForm({
 
 const actions = (id, perm) => `${can(`${perm}:update`) ? `<button class="btn ghost sm" data-edit="${id}">Bearbeiten</button>` : ''}${can(`${perm}:delete`) ? ` <button class="btn ghost sm" data-del="${id}">Löschen</button>` : ''}`;
 
-export async function render(view) {
+export async function render(view, params) {
   const D = {};
   const tabs = [['overview', 'Übersicht'], ['keys', 'Schlüssel'], ['properties', 'Häuser'], ['vehicles', 'Fahrzeuge'], ['people', 'Personen'], ['costs', 'Kosten'], ['log', 'Protokoll']]
     .filter(([k]) => can({ keys: 'key:read', properties: 'property:read', vehicles: 'vehicle:read', people: 'person:read' }[k] || 'key:read') || k === 'overview');
+  const initial = tabs.some(([k]) => k === params?.get('tab')) ? params.get('tab') : tabs[0][0];
   view.innerHTML = `<div class="page-head"><div><h1>Schlüssel &amp; Objekte</h1><p>Häuser, Fahrzeuge, Schlüsselausgabe und Personen</p></div><div class="actions" id="a-actions"></div></div>
-    <div><div class="tabs">${tabs.map(([k, l], i) => `<button data-tab="${k}" class="${i ? '' : 'on'}">${l}</button>`).join('')}</div>${tabs.map(([k], i) => `<div class="tab-panel ${i ? '' : 'on'}" data-panel="${k}"></div>`).join('')}</div>`;
+    <div><div class="tabs">${tabs.map(([k, l]) => `<button data-tab="${k}" class="${k === initial ? 'on' : ''}">${l}</button>`).join('')}</div>${tabs.map(([k]) => `<div class="tab-panel ${k === initial ? 'on' : ''}" data-panel="${k}"></div>`).join('')}</div>`;
 
   const ADD = { keys: ['key:create', 'Neuer Schlüssel'], properties: ['property:create', 'Neues Haus'], vehicles: ['vehicle:create', 'Neues Fahrzeug'], people: ['person:create', 'Neue Person'] };
   const cur = () => $('.tabs .on', view).dataset.tab;
@@ -182,5 +183,5 @@ export async function render(view) {
       if (changed) show();
     } catch (x) { toast(x.message, true); }
   });
-  await show('overview');
+  await show(initial);
 }

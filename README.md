@@ -66,6 +66,19 @@ docker compose down                      # Stoppen (Daten bleiben in Volumes)
 
 Persistente Daten liegen in den Docker-Volumes `db_data`, `uploads`, `backups`.
 
+### Bestehende Git-Installation aktualisieren
+
+Im Projektverzeichnis den aktuellen Stand des installierten Branches holen und die Images neu bauen:
+
+```bash
+git status                              # eigene Änderungen vorher sichern
+git pull --ff-only                      # aktualisiert den ausgecheckten Branch
+docker compose up -d --build            # baut und startet die aktualisierten Services
+docker compose ps                       # Status und Healthchecks prüfen
+```
+
+Falls lokale Änderungen vorhanden sind, diese vor `git pull` committen oder anderweitig sichern. Datenbankmigrationen laufen beim Start automatisch; die Docker-Volumes bleiben erhalten. Bei Problemen helfen `docker compose logs -f api worker`. Vor größeren Updates empfiehlt sich ein Backup.
+
 ### Backup & Restore
 
 Backups (pg_dump, AES-256-GCM-verschlüsselt) laufen nächtlich und manuell über *Verwaltung → System*. Aufbewahrung: `BACKUP_RETENTION_DAYS`.
