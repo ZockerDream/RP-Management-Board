@@ -109,13 +109,12 @@ Sichere zusätzlich `.env` (insbesondere `ENCRYPTION_KEY`) getrennt vom Backup.
 ## Bekannte Abgrenzungen
 Nicht enthalten: SSO/OIDC, LDAP, Bankanbindung (FinTS/PSD2), MT940-Import, S3/SFTP-Backupziele, E-Mail-Bestätigungsfluss bei Registrierung.
 
-## GitLab einrichten (manuell)
-`gitlab.zd-d.com` war aus der Entwicklungsumgebung nicht erreichbar, daher wurde kein Repository angelegt und kein Remote gesetzt.
+## GitLab veröffentlichen
+Der lokale Commit ist angelegt. Auf einem Rechner mit Zugriff auf `gitlab.zd-d.com` legt ein Skript das Projekt `budget-manager` (privat) an, setzt `origin` und pusht `main`. Zugangsdaten werden nicht gespeichert.
 
-0. Lokal: `git init -b main && git add . && git commit -m "Initial commit"` (`.env` ist per `.gitignore` ausgeschlossen).
-1. Auf https://gitlab.zd-d.com ein leeres Projekt `budget-manager` anlegen (Beschreibung: „Selbst gehostete Budget-, Team- und Objektverwaltung mit Docker Compose“), ohne README.
-2. Authentifizierung über SSH-Key, Credential-Helper oder `glab auth login` (keine Zugangsdaten ins Repo).
-3. ```bash
-   git remote add origin git@gitlab.zd-d.com:<gruppe>/budget-manager.git
-   git push -u origin main
-   ```
+```bash
+glab auth login --hostname gitlab.zd-d.com && ./scripts/gitlab-publish.sh
+# oder mit Token nur für diesen Aufruf (Scope: api):
+GITLAB_TOKEN=... ./scripts/gitlab-publish.sh
+```
+Optional `GITLAB_NAMESPACE=<gruppe>`. Alternativ manuell: leeres Projekt anlegen, `git remote add origin git@gitlab.zd-d.com:<gruppe>/budget-manager.git`, `git push -u origin main`.
