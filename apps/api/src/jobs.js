@@ -64,13 +64,29 @@ export async function reminders(log) {
     sent++;
   }
   const soon = addInterval(t, 'daily', 14);
-  for (const v of await many('SELECT id, plate, make_model, service_due FROM vehicles WHERE service_due BETWEEN $1 AND $2', [t, soon])) {
-    for (const u of await many("SELECT DISTINCT u.id FROM users u JOIN user_roles ur ON ur.user_id=u.id JOIN roles r ON r.id=ur.role_id WHERE r.name='Admin' AND u.status='active'")) {
-      await notify(u.id, 'vehicle_service', `Service fällig: ${v.make_model}`, `${v.plate} – ${v.service_due}`, `veh:${v.id}:${v.service_due}`);
+  for (const v of await many(`SELECT id, plate, make_model, service_due, odometer_km, service_due_km, owner_user_id, team_id
+    FROM vehicles WHERE service_due BETWEEN $1 AND $2
+      OR (odometer_km IS NOT NULL AND service_due_km IS NOT NULL AND odometer_km >= service_due_km)`, [t, soon])) {
+    const users = v.owner_user_id
+      ? [v.owner_user_id]
+      : (await many('SELECT user_id FROM team_members WHERE team_id=$1', [v.team_id])).map((member) => member.user_id);
+    for (const userId of users) {
+      const details = [
+        v.service_due ? `Datum: ${v.service_due}` : null,
+        v.service_due_km != null ? `Fällig bei ${Number(v.service_due_km).toLocaleString('de-DE')} km${v.odometer_km != null ? ` (aktuell ${Number(v.odometer_km).toLocaleString('de-DE')} km)` : ''}` : null,
+      ].filter(Boolean).join(' · ');
+      const key = v.service_due_km != null && v.odometer_km != null && v.odometer_km >= v.service_due_km
+        ? `veh:${v.id}:km:${v.service_due_km}`
+        : `veh:${v.id}:${v.service_due}`;
+      await notify(userId, 'vehicle_service', `Service fällig: ${v.make_model}`, `${v.plate} – ${details}`, key);
     }
   }
-  for (const a of await many(`SELECT a.id, a.issued_by_user_id uid, k.label, a.due_at FROM key_assignments a JOIN keys k ON k.id=a.key_id WHERE a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at < $1 AND a.issued_by_user_id IS NOT NULL`, [t])) {
-    await notify(a.uid, 'key_overdue', `Schlüssel überfällig: ${a.label}`, `Fällig seit ${a.due_at}`, `key:${a.id}`);
+  for (const a of await many(`SELECT a.id, k.label, k.owner_user_id, k.team_id, a.due_at FROM key_assignments a JOIN keys k ON k.id=a.key_id
+    WHERE a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at < $1`, [t])) {
+    const users = a.owner_user_id
+      ? [a.owner_user_id]
+      : (await many('SELECT user_id FROM team_members WHERE team_id=$1', [a.team_id])).map((member) => member.user_id);
+    for (const userId of users) await notify(userId, 'key_overdue', `Schlüssel überfällig: ${a.label}`, `Fällig seit ${a.due_at}`, `key:${a.id}:${userId}`);
   }
   return `${sent} Erinnerungen`;
 }

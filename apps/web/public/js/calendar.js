@@ -16,6 +16,7 @@ export const TYPES = {
   vehicle: { label: 'Fahrzeuge', color: 'var(--warn)' },
   key: { label: 'Schlüssel', color: 'var(--bad)' },
   house: { label: 'Häuser', color: 'var(--ok)' },
+  external: { label: 'Google / Outlook', color: '#0ea5e9' },
   team: { label: 'Team', color: '#8b5cf6' },
   personal: { label: 'Privat', color: '#0ea5e9' },
   holiday: { label: 'Feiertage', color: 'var(--muted)' },

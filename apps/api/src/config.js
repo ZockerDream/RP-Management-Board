@@ -44,6 +44,28 @@ export const config = {
     pass: env.SMTP_PASSWORD || '',
     from: env.SMTP_FROM || 'Budget Manager <noreply@localhost>',
   },
+  oauth: {
+    googleClientId: env.GOOGLE_CLIENT_ID || '',
+    googleClientSecret: env.GOOGLE_CLIENT_SECRET || '',
+    microsoftClientId: env.MICROSOFT_CLIENT_ID || '',
+    microsoftClientSecret: env.MICROSOFT_CLIENT_SECRET || '',
+  },
+  githubIssues: {
+    token: env.GITHUB_ISSUES_TOKEN || '',
+    repository: env.GITHUB_ISSUES_REPOSITORY || 'ZockerDream/budget-manager',
+  },
+  imprint: {
+    name: env.IMPRINT_NAME || '',
+    representative: env.IMPRINT_REPRESENTATIVE || '',
+    street: env.IMPRINT_STREET || '',
+    postalCode: env.IMPRINT_POSTAL_CODE || '',
+    city: env.IMPRINT_CITY || '',
+    email: env.IMPRINT_EMAIL || '',
+    phone: env.IMPRINT_PHONE || '',
+    register: env.IMPRINT_REGISTER || '',
+    vatId: env.IMPRINT_VAT_ID || '',
+    responsible: env.IMPRINT_RESPONSIBLE || '',
+  },
   logLevel: env.LOG_LEVEL || 'info',
   tz: env.TZ || 'Europe/Berlin',
 };
