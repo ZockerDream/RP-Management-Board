@@ -29,6 +29,13 @@
   background: transparent; border: 1px solid var(--border); color: var(--text); font: inherit; font-size: 13px; font-weight: 500; transition: background .15s;
 }
 .icon-btn:hover { background: var(--surface-2); }
+.notification-btn { position: relative; width: 36px; padding: 0; border: 0; }
+.notification-count {
+  position: absolute; top: -4px; right: -5px; min-width: 17px; height: 17px; padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center; border: 2px solid var(--bg); border-radius: 99px;
+  background: var(--bad); color: #fff; font-size: 10px; font-weight: 650; line-height: 1; font-variant-numeric: tabular-nums;
+}
+.notification-count[hidden] { display: none; }
 input, select, textarea {
   width: 100%; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius-sm); padding: 8px 12px; outline: none; transition: border-color .15s, box-shadow .15s;

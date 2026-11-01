@@ -182,13 +182,28 @@ export default async function routes(app) {
     return { ok: true };
   });
 
+  app.get('/bug-reports', requireAuth, async (req) => ({
+    github_enabled: Boolean(config.githubIssues.token),
+    items: await many(
+      `SELECT id, title, description, steps, github_issue_number, github_url, github_sync_error, created_at
+       FROM bug_reports WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50`,
+      [req.user.id],
+    ),
+  }));
+
   app.post('/bug-reports', requireAuth, async (req) => {
-    if (!config.githubIssues.token) throw bad('GitHub-Fehlerberichte sind nicht konfiguriert');
     const report = z.object({
       title: z.string().trim().min(5).max(120),
       description: z.string().trim().min(20).max(10000),
       steps: z.string().max(5000).default(''),
     }).parse(req.body);
+    let ticket = await one(
+      `INSERT INTO bug_reports(user_id,title,description,steps) VALUES ($1,$2,$3,$4)
+       RETURNING id,title,description,steps,github_issue_number,github_url,github_sync_error,created_at`,
+      [req.user.id, report.title, report.description, report.steps],
+    );
+    if (!config.githubIssues.token) return { ...ticket, github_enabled: false };
+    try {
     const [owner, repo] = config.githubIssues.repository.split('/');
     if (!owner || !repo || config.githubIssues.repository.split('/').length !== 2) throw new Error('GITHUB_ISSUES_REPOSITORY muss owner/repo sein');
     const response = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues`, {
@@ -196,12 +211,27 @@ export default async function routes(app) {
       headers: { authorization: `Bearer ${config.githubIssues.token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', 'content-type': 'application/json' },
       body: JSON.stringify({
         title: report.title,
-        body: `${report.description}\n\n${report.steps ? `### Reproduktionsschritte\n${report.steps}\n\n` : ''}---\nGemeldet über Budget Manager.`,
+        body: `Interne Ticket-ID: ${ticket.id}\n\n${report.description}\n\n${report.steps ? `### Reproduktionsschritte\n${report.steps}\n\n` : ''}---\nGemeldet über Budget Manager.`,
       }),
       signal: AbortSignal.timeout(15000),
     });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw bad(`GitHub konnte den Fehlerbericht nicht anlegen (${response.status}): ${result.message || 'Unbekannter Fehler'}`);
-    return { url: result.html_url, number: result.number };
+    if (!response.ok) throw new Error(`GitHub konnte keinen Eintrag anlegen (${response.status}): ${result.message || 'Unbekannter Fehler'}`);
+    if (!result.number || new URL(result.html_url).origin !== 'https://github.com') throw new Error('GitHub lieferte keinen gültigen Issue-Link zurück');
+    ticket = await one(
+      `UPDATE bug_reports SET github_issue_number=$2,github_url=$3,github_sync_error=''
+       WHERE id=$1 RETURNING id,title,description,steps,github_issue_number,github_url,github_sync_error,created_at`,
+      [ticket.id, result.number, result.html_url],
+    );
+    } catch (error) {
+      const message = error.message || 'Unbekannter GitHub-Fehler';
+      app.log.error({ err: error, ticketId: ticket.id }, 'Fehlerbericht konnte nicht an GitHub übertragen werden');
+      ticket = await one(
+        `UPDATE bug_reports SET github_sync_error=$2
+         WHERE id=$1 RETURNING id,title,description,steps,github_issue_number,github_url,github_sync_error,created_at`,
+        [ticket.id, message.slice(0, 1000)],
+      );
+    }
+    return { ...ticket, github_enabled: true };
   });
 }
