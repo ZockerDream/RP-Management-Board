@@ -52,7 +52,7 @@ export function renderAvatars() {
 const authEl = $('#auth');
 const appEl = $('.app');
 
-const card = (title, lead, body) => `<div class="auth-card"><div class="auth-brand"><span class="brand-mark"></span><span>Budget Manager</span></div>
+const card = (title, lead, body) => `<div class="auth-card"><div class="auth-brand"><svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="bmg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#17171f"/><stop offset="1" stop-color="#08080b"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#bmg2)"/><rect x=".5" y=".5" width="31" height="31" rx="8.5" fill="none" stroke="#fff" stroke-opacity=".14"/><rect x="7" y="16" width="4.5" height="9" rx="2.25" fill="#fff" fill-opacity=".32"/><rect x="13.75" y="11" width="4.5" height="14" rx="2.25" fill="#fff" fill-opacity=".6"/><rect x="20.5" y="6" width="4.5" height="19" rx="2.25" fill="var(--primary)"/></svg><span>Budget Manager</span></div>
   <h1>${esc(title)}</h1><p class="auth-lead">${lead}</p>${body}</div>`;
 
 function authForm(id, fields, submit, extra = '') {
