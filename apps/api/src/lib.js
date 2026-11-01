@@ -38,6 +38,15 @@ export function nthOccurrence(start, freq, interval, n) {
 export function periodRange(b, ref = new Date()) {
   const y = ref.getUTCFullYear();
   const m = ref.getUTCMonth();
+  if (b.period_type === 'daily') {
+    const date = ymd(ref);
+    return [date, date];
+  }
+  if (b.period_type === 'weekly') {
+    const start = new Date(Date.UTC(y, m, ref.getUTCDate() - ((ref.getUTCDay() + 6) % 7)));
+    const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate() + 6));
+    return [ymd(start), ymd(end)];
+  }
   if (b.period_type === 'monthly') return [ymd(new Date(Date.UTC(y, m, 1))), ymd(new Date(Date.UTC(y, m + 1, 0)))];
   if (b.period_type === 'yearly') return [`${y}-01-01`, `${y}-12-31`];
   if (b.period_type === 'custom') return [b.period_start || '0001-01-01', b.period_end || '9999-12-31'];

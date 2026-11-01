@@ -14,6 +14,7 @@ async function form(r) {
     title: r ? 'Dauerauftrag bearbeiten' : 'Neuer Dauerauftrag', fields: [
       { name: 'name', label: 'Name', value: r?.name, required: true, full: true },
       { name: 'type', label: 'Art', type: 'select', options: [{ v: 'expense', l: 'Ausgabe' }, { v: 'income', l: 'Einnahme' }], value: r?.type || 'expense' },
+      { name: 'income_kind', label: 'Einnahmeart', type: 'select', options: [{ v: 'other', l: 'Sonstige Einnahme' }, { v: 'salary', l: 'Gehalt' }], value: r?.income_kind || 'other' },
       { name: 'amount', label: 'Betrag', value: r ? String(r.amount).replace('.', ',') : '', required: true },
       { name: 'budget_id', label: 'Budget', type: 'select', options: budgets.map((b) => ({ v: b.id, l: b.name })), value: bid },
       { name: 'category_id', label: 'Kategorie', type: 'select', options: catOpts(bid), value: r?.category_id || '' },
@@ -24,11 +25,16 @@ async function form(r) {
       { name: 'active', label: 'Aktiv', type: 'checkbox', value: r ? r.active : true },
     ],
     onSubmit: async (v) => {
-      const body = { name: v.name.trim(), type: v.type, amount: parseAmount(v.amount), category_id: v.category_id || null, frequency: v.frequency, interval: Number(v.interval) || 1, start_date: v.start_date, end_date: v.end_date || null, active: v.active };
+      const body = { name: v.name.trim(), type: v.type, income_kind: v.type === 'income' ? v.income_kind : 'other', amount: parseAmount(v.amount), category_id: v.category_id || null, frequency: v.frequency, interval: Number(v.interval) || 1, start_date: v.start_date, end_date: v.end_date || null, active: v.active };
       if (r) await api.patch(`/recurring/${r.id}`, body); else await api.post('/recurring', { ...body, budget_id: v.budget_id });
     },
   });
   const sel = $('#f-budget_id');
+  const typeSel = $('#f-type');
+  const incomeKind = $('#f-income_kind')?.closest('label');
+  const updateIncomeKind = () => { if (incomeKind) incomeKind.hidden = typeSel?.value !== 'income'; };
+  typeSel?.addEventListener('change', updateIncomeKind);
+  updateIncomeKind();
   if (r) sel.disabled = true;
   sel.addEventListener('change', () => { $('#f-category_id').innerHTML = catOpts(sel.value).map((o) => `<option value="${esc(o.v)}">${esc(o.l)}</option>`).join(''); });
   return p;
@@ -41,7 +47,7 @@ export async function render(view) {
   async function load() {
     rules = await api.get('/recurring');
     $('#r-body').innerHTML = rules.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Budget</th><th>Rhythmus</th><th>Nächste Buchung</th><th style="text-align:right">Betrag</th><th>Status</th><th></th></tr></thead><tbody>${rules.map((r) => `<tr>
-      <td><b>${esc(r.name)}</b><br><small class="muted">${esc(r.category_name || '–')}</small></td><td>${esc(r.budget_name)}</td>
+      <td><b>${esc(r.name)}</b>${r.income_kind === 'salary' ? ' <span class="tag">Gehalt</span>' : ''}<br><small class="muted">${esc(r.category_name || '–')}</small></td><td>${esc(r.budget_name)}</td>
       <td>${r.interval > 1 ? `alle ${r.interval} · ` : ''}${FREQ[r.frequency]}</td><td>${r.active ? fdate(r.next_run) : '–'}</td>
       <td style="text-align:right" class="${r.type === 'expense' ? 'down' : 'up'}"><b>${r.type === 'expense' ? '−' : '+'}${eur(r.amount)}</b></td>
       <td><span class="tag ${r.active ? 'ok' : 'warn'}">${r.active ? 'Aktiv' : 'Pausiert'}</span>${r.source === 'asset' ? ' <span class="tag">Objekt</span>' : ''}</td>

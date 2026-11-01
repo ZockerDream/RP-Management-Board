@@ -157,7 +157,6 @@ label.field > :is(input, select) { margin-top: 6px; color: var(--text); font-siz
 .cost-block { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
 .cost-block .card-head { margin-bottom: 12px; }
 .card.kpi .delta.muted { color: var(--muted); }
-#view.dashboard-view { max-width: 1680px; }
 .dashboard-extras { align-items: stretch; }
 .dashboard-summary { display: flex; flex-wrap: wrap; gap: 8px; margin: -2px 0 8px; color: var(--muted); font-size: 12px; }
 .dashboard-summary span { padding: 4px 9px; border-radius: 99px; background: var(--surface-2); }

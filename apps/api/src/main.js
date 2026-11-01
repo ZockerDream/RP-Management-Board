@@ -88,7 +88,7 @@ await waitForDb();
 await migrate(app.log);
 await seed(app.log);
 
-const modules = ['auth', 'me', 'finance', 'teams', 'objects', 'calendar', 'admin', 'attachments'];
+const modules = ['auth', 'me', 'finance', 'teams', 'objects', 'calendar', 'admin', 'attachments', 'work'];
 await app.register(
   async (api) => {
     for (const m of modules) await api.register((await import(`./routes/${m}.js`)).default);
