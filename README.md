@@ -112,9 +112,9 @@ Sichere zusätzlich `.env` (insbesondere `ENCRYPTION_KEY`) getrennt vom Backup.
 ## Bekannte Abgrenzungen
 Nicht enthalten: SSO/OIDC, LDAP, Bankanbindung (FinTS/PSD2), MT940-Import, S3/SFTP-Backupziele, E-Mail-Bestätigungsfluss bei Registrierung.
 
-## GitLab veröffentlichen
-Remote ist `https://gitlab.zd-c.com/timpner/budget-manager.git`. Push (legt das private Projekt beim ersten Mal an; Passwort oder Access Token mit `write_repository`):
+## Repository
+Remote ist `git@github.com:ZockerDream/budget-manager.git` (Branch `develop`):
 
 ```bash
-git push -u origin main
+git clone -b develop git@github.com:ZockerDream/budget-manager.git
 ```
