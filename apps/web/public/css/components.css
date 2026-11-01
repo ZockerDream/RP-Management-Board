@@ -157,6 +157,14 @@ label.field > :is(input, select) { margin-top: 6px; color: var(--text); font-siz
 .cost-block { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
 .cost-block .card-head { margin-bottom: 12px; }
 .card.kpi .delta.muted { color: var(--muted); }
+#view.dashboard-view { max-width: 1680px; }
+.dashboard-extras { align-items: stretch; }
+.dashboard-summary { display: flex; flex-wrap: wrap; gap: 8px; margin: -2px 0 8px; color: var(--muted); font-size: 12px; }
+.dashboard-summary span { padding: 4px 9px; border-radius: 99px; background: var(--surface-2); }
+.dashboard-event { align-items: center; }
+.dashboard-date { min-width: 76px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.dashboard-more { display: inline-block; margin-top: 12px; color: var(--muted); font-size: 12px; text-decoration: none; }
+.dashboard-more:hover { color: var(--text); }
 .matrix td, .matrix th { text-align: center; } .matrix td:first-child, .matrix th:first-child { text-align: left; }
 .role-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: var(--radius-sm); cursor: pointer; color: var(--muted); font-weight: 500; }
 .role-item:hover { background: var(--surface-2); } .role-item.on { background: var(--surface-2); color: var(--text); font-weight: 600; }
