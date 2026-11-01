@@ -363,8 +363,8 @@ export default async function routes(app) {
   const goalBody = z.object({
     budget_id: id, name: z.string().min(1).max(100), target_amount: money.refine((v) => Number(v) > 0),
     target_date: date.nullish(), installment_amount: money.nullish().refine((v) => v == null || Number(v) > 0),
-    installment_frequency: z.enum(['daily', 'weekly', 'monthly', 'yearly']).default('monthly'),
-    installment_interval: z.number().int().min(1).max(60).default(1),
+    installment_frequency: z.enum(['daily', 'weekly', 'monthly', 'yearly', 'custom']).default('monthly'),
+    installment_interval: z.number().int().min(1).max(3650).default(1),
   });
   app.get('/goals', authz('goal:read'), async (req) =>
     many(
@@ -443,8 +443,8 @@ export default async function routes(app) {
   // ---- Berichte
   app.get('/reports/saved', authz('report:read'), async (req) => many('SELECT * FROM saved_reports WHERE owner_id=$1 ORDER BY kind', [req.user.id]));
   app.post('/reports/saved', authz('report:create'), async (req) => {
-    const b = z.object({ kind: z.enum(['monthly', 'categories', 'costs']), rhythm: z.enum(['weekly', 'monthly', 'quarterly']), recipients: z.array(z.string().email()).max(10).default([]) }).parse(req.body);
-    return one('INSERT INTO saved_reports(owner_id,kind,rhythm,recipients) VALUES ($1,$2,$3,$4) RETURNING id', [req.user.id, b.kind, b.rhythm, b.recipients]);
+    const b = z.object({ kind: z.enum(['monthly', 'categories', 'costs']), rhythm: z.enum(['daily', 'weekly', 'monthly', 'yearly', 'custom']), rhythm_interval: z.number().int().min(1).max(3650).default(1), recipients: z.array(z.string().email()).max(10).default([]) }).parse(req.body);
+    return one('INSERT INTO saved_reports(owner_id,kind,rhythm,rhythm_interval,recipients) VALUES ($1,$2,$3,$4,$5) RETURNING id', [req.user.id, b.kind, b.rhythm, b.rhythm_interval, b.recipients]);
   });
   app.delete('/reports/saved/:id', authz('report:create'), async (req) => {
     await q('DELETE FROM saved_reports WHERE id=$1 AND owner_id=$2', [req.params.id, req.user.id]);

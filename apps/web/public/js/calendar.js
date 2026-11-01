@@ -29,10 +29,17 @@ const st = { view: 'month', cursor: new Date(today), hidden: new Set(['holiday']
 const occursOn = (e, d) => {
   const s = parse(e.date);
   if (d < s) return false;
+  const interval = e.repeat_interval || 1;
+  const days = Math.round((d - s) / 86400000);
   switch (e.repeat) {
-    case 'weekly': return d.getDay() === s.getDay();
-    case 'monthly': return d.getDate() === s.getDate();
-    case 'yearly': return d.getDate() === s.getDate() && d.getMonth() === s.getMonth();
+    case 'daily':
+    case 'custom': return days % interval === 0;
+    case 'weekly': return d.getDay() === s.getDay() && Math.floor(days / 7) % interval === 0;
+    case 'monthly': {
+      const months = (d.getFullYear() - s.getFullYear()) * 12 + d.getMonth() - s.getMonth();
+      return d.getDate() === s.getDate() && months % interval === 0;
+    }
+    case 'yearly': return d.getDate() === s.getDate() && d.getMonth() === s.getMonth() && (d.getFullYear() - s.getFullYear()) % interval === 0;
     default: return ymd(d) === e.date;
   }
 };
@@ -132,6 +139,8 @@ function openEvent(id, date, day) {
   f('start').value = e?.start || '09:00';
   f('end').value = e?.end || '10:00';
   f('repeat').value = e?.repeat || 'none';
+  f('repeat-interval').value = e?.repeat_interval || 1;
+  $('#ev-repeat-interval-wrap').hidden = f('repeat').value !== 'custom';
   f('remind').value = e?.remind || 'none';
   f('amount').value = e?.amount ?? '';
   f('note').value = e?.note || '';
@@ -147,7 +156,8 @@ async function save() {
   if (!f('title').value.trim()) return f('title').focus();
   const allDay = f('allday').checked;
   const amountRaw = f('amount').value.trim().replace(',', '.');
-  const data = { title: f('title').value.trim(), type: f('type').value, team_id: f('type').value === 'team' ? f('team').value || null : null, date: f('date').value, allDay, start: allDay ? null : f('start').value, end: allDay ? null : f('end').value, repeat: f('repeat').value, remind: f('remind').value, amount: amountRaw === '' ? null : amountRaw, note: f('note').value.trim() };
+  const repeat = f('repeat').value;
+  const data = { title: f('title').value.trim(), type: f('type').value, team_id: f('type').value === 'team' ? f('team').value || null : null, date: f('date').value, allDay, start: allDay ? null : f('start').value, end: allDay ? null : f('end').value, repeat, repeat_interval: repeat === 'custom' ? Number(f('repeat-interval').value) : 1, remind: f('remind').value, amount: amountRaw === '' ? null : amountRaw, note: f('note').value.trim() };
   if (!allDay && data.end <= data.start) return f('end').focus();
   try {
     if (st.editing) await api.put('/calendar/events/' + encodeURIComponent(st.editing.id), data); else await api.post('/calendar/events', data);
@@ -183,6 +193,7 @@ document.addEventListener('click', e => {
 document.addEventListener('change', e => {
   if (e.target.dataset.filter) { e.target.checked ? st.hidden.delete(e.target.dataset.filter) : st.hidden.add(e.target.dataset.filter); render(); }
   if (e.target.id === 'ev-type') $('#ev-team-wrap').hidden = e.target.value !== 'team';
+  if (e.target.id === 'ev-repeat') $('#ev-repeat-interval-wrap').hidden = e.target.value !== 'custom';
   if (e.target.id === 'ev-allday') setTimes(e.target.checked);
 });
 

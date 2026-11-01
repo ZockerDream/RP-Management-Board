@@ -10,7 +10,7 @@ const errBox = (x) => `<div class="card"><p class="auth-error">${esc(x.message)}
 const btn = (attr, label) => `<button class="btn ghost sm" ${attr}>${label}</button>`;
 
 export async function render(view) {
-  const ALL = [['overview', 'Übersicht', 'admin:access'], ['users', 'Benutzer', 'user:read'], ['roles', 'Rollen & Rechte', 'role:read'], ['groups', 'Gruppen', 'group:read'], ['teams', 'Teams', 'team:read'],
+  const ALL = [['overview', 'Übersicht', 'admin:access'], ['tickets', 'Tickets', 'admin:access'], ['users', 'Benutzer', 'user:read'], ['roles', 'Rollen & Rechte', 'role:read'], ['groups', 'Gruppen', 'group:read'], ['teams', 'Teams', 'team:read'],
     ['settings', 'Sicherheit & Einstellungen', 'settings:read'], ['system', 'System & Backups', 'settings:read'], ['integr', 'Integrationen', 'settings:read'], ['audit', 'Audit-Log', 'audit:read']].filter((t) => can(t[2]));
   const D = { roles: [], groups: [], users: [] };
   view.innerHTML = `<div class="page-head"><div><h1>Verwaltung</h1><p>Benutzer, Rollen, Sicherheit und System</p></div><div class="actions" id="ad-actions"></div></div>
@@ -114,6 +114,16 @@ export async function render(view) {
         <td style="white-space:nowrap">${can('user:update') ? `${btn(`data-uedit="${u.id}"`, 'Bearbeiten')} ${btn(`data-u2fa="${u.id}"`, '2FA zurücksetzen')} ${btn(`data-usess="${u.id}"`, 'Sitzungen beenden')}` : ''}${can('user:delete') ? ` ${btn(`data-udel="${u.id}"`, 'Löschen')}` : ''}</td></tr>`).join('')}</tbody></table></div>` : empty('Keine Benutzer gefunden.')}</div>`;
       const i = $('#u-q', el);
       i.addEventListener('input', debounce(async (e) => { el._q = e.target.value.trim(); await P.users(el); const n = $('#u-q', el); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }));
+    },
+    async tickets(el) {
+      const { items } = await api.get('/admin/bug-reports');
+      el.innerHTML = `<div class="card"><div class="card-head"><h2>Gemeldete Tickets</h2></div>${items.length ? items.map((ticket) => `<div class="list-item"><div class="grow">
+        <b>#${ticket.id} · ${esc(ticket.title)}</b><small>${esc(ticket.user_name)} · ${esc(ticket.user_email)} · ${fdatetime(ticket.created_at)}</small>
+        <p style="white-space:pre-wrap;margin:8px 0">${esc(ticket.description)}</p>
+        ${ticket.steps ? `<small style="white-space:pre-wrap">Schritte: ${esc(ticket.steps)}</small>` : ''}
+        ${ticket.github_url ? `<small><a href="${esc(ticket.github_url)}" target="_blank" rel="noopener noreferrer">GitHub-Issue #${ticket.github_issue_number}</a></small>` : ''}
+        ${ticket.github_sync_error ? `<small class="auth-error">GitHub-Synchronisierung fehlgeschlagen: ${esc(ticket.github_sync_error)}</small>` : ''}
+      </div></div>`).join('') : empty('Noch keine Tickets gemeldet.')}</div>`;
     },
     async roles(el) {
       await loadRoles();

@@ -7,22 +7,49 @@ const STATUS = { available: ['ok', 'Verfügbar'], out: ['warn', 'Ausgegeben'], o
 const VSTATUS = { available: 'Verfügbar', in_use: 'Im Einsatz', workshop: 'Werkstatt', retired: 'Ausgemustert' };
 const PTYPE = { home: 'Wohnung/Haus', office: 'Büro', storage: 'Lager', holiday: 'Ferienobjekt' };
 const PKIND = { employee: 'Mitarbeiter', external: 'Extern', family: 'Familie' };
-const INTERVAL = { daily: 'Täglich', weekly: 'Wöchentlich', monthly: 'Monatlich', quarterly: 'Vierteljährlich', yearly: 'Jährlich', once: 'Einmalig' };
+const INTERVAL = { once: 'Einmalig', daily: 'Täglich', weekly: 'Wöchentlich', monthly: 'Monatlich', yearly: 'Jährlich', custom: 'Benutzerdefiniert (Tage)' };
 const EVENT = { issued: 'Ausgegeben', returned: 'Zurückgegeben', lost: 'Als verloren gemeldet' };
 const ASSET_TYPE = { house: 'Haus', vehicle: 'Fahrzeug', key: 'Schlüssel' };
 
-const costFields = (o, budgets, daily = false) => [
+const costFields = (o, budgets) => [
   { type: 'html', html: '<div class="cost-block"><b>Laufende Kosten (optional)</b><p class="muted">Werden automatisch als Buchung bzw. Dauerauftrag im gewählten Budget geführt.</p></div>' },
   { name: 'cost_amount', label: 'Betrag', value: o?.cost_amount ? String(o.cost_amount).replace('.', ',') : '' },
-  { name: 'cost_interval', label: 'Intervall', type: 'select', options: Object.entries(INTERVAL).filter(([v]) => daily || v !== 'daily').map(([v, l]) => ({ v, l })), value: o?.cost_interval || 'monthly' },
+  { name: 'cost_interval', label: 'Intervall', type: 'select', options: Object.entries(INTERVAL).map(([v, l]) => ({ v, l })), value: o?.cost_interval || 'monthly' },
+  { name: 'cost_interval_count', label: 'Alle … Tage', type: 'number', min: 1, max: 3650, value: o?.cost_interval_count || 1, help: 'Benutzerdefinierte Intervalle in Tagen; frühere Vierteljahreskosten in Monaten.' },
   { name: 'cost_budget_id', label: 'Budget', type: 'select', options: [{ v: '', l: '– Keines –' }, ...budgets.map((b) => ({ v: b.id, l: b.name }))], value: o?.cost_budget_id || '' },
   { name: 'cost_category_id', label: 'Kategorie', type: 'select', options: [{ v: '', l: '– Keine –' }, ...budgets.flatMap((b) => b.categories.map((c) => ({ v: c.id, l: `${b.name} › ${c.name}` })))], value: o?.cost_category_id || '' },
   { name: 'cost_tracking', label: 'Kosten im Budget verbuchen', type: 'checkbox', value: o ? o.cost_tracking !== false : true },
 ];
 const costBody = (v) => ({
   cost_amount: v.cost_amount ? parseAmount(v.cost_amount) : null, cost_interval: v.cost_amount ? v.cost_interval : null,
+  cost_interval_count: v.cost_amount ? (Number(v.cost_interval_count) || 1) : 1,
   cost_budget_id: v.cost_amount ? v.cost_budget_id || null : null, cost_category_id: v.cost_amount ? v.cost_category_id || null : null, cost_tracking: v.cost_tracking,
 });
+const costForm = (options) => {
+  const dialog = openForm(options);
+  const interval = $('#f-cost_interval');
+  const countInput = $('#f-cost_interval_count');
+  const count = countInput?.closest('label');
+  let selectedInterval = interval?.value;
+  const update = () => {
+    if (count) {
+      count.hidden = interval.value !== 'custom' && !(interval.value === 'monthly' && Number(countInput.value) > 1);
+      count.firstChild.textContent = interval.value === 'custom' ? 'Abstand in Tagen' : 'Abstand in Monaten';
+    }
+  };
+  interval?.addEventListener('change', () => {
+    if (interval.value !== selectedInterval && interval.value !== 'custom') countInput.value = '1';
+    selectedInterval = interval.value;
+    update();
+  });
+  update();
+  return dialog;
+};
+const costIntervalText = (interval, count) => interval === 'custom'
+  ? `alle ${count || 1} Tage`
+  : interval === 'monthly' && Number(count) > 1
+    ? `alle ${count} Monate`
+    : INTERVAL[interval] || '–';
 const save = (path, o, body) => (o ? api.patch(`/${path}/${o.id}`, body) : api.post(`/${path}`, body));
 async function ownershipFields(o) {
   const teams = can('team:read') ? (await api.get('/teams')).filter((team) => team.role !== 'viewer') : [];
@@ -36,7 +63,7 @@ const ownershipBody = (v) => ({ scope: v.scope, team_id: v.scope === 'team' ? v.
 async function formProperty(o, people) {
   const budgets = await loadBudgets();
   const ownership = await ownershipFields(o);
-  return openForm({
+  return costForm({
     title: o ? 'Haus bearbeiten' : 'Neues Haus / Objekt', wide: true, fields: [
       { name: 'name', label: 'Name', value: o?.name, required: true },
       { name: 'type', label: 'Art', type: 'select', options: Object.entries(PTYPE).map(([v, l]) => ({ v, l })), value: o?.type || 'home' },
@@ -54,12 +81,12 @@ async function formProperty(o, people) {
 async function formVehicle(o) {
   const budgets = await loadBudgets();
   const ownership = await ownershipFields(o);
-  return openForm({
+  return costForm({
     title: o ? 'Fahrzeug bearbeiten' : 'Neues Fahrzeug', wide: true, fields: [
       { name: 'plate', label: 'Kennzeichen', value: o?.plate, required: true },
       { name: 'make_model', label: 'Marke / Modell', value: o?.make_model, required: true },
       { name: 'status', label: 'Status', type: 'select', options: Object.entries(VSTATUS).map(([v, l]) => ({ v, l })), value: o?.status || 'available' },
-      { name: 'registered_owner', label: 'Fahrzeughalter / Besitzer', value: o?.registered_owner, full: true },
+      { name: 'registered_owner', label: 'Besitzer', value: o?.registered_owner, full: true },
       { name: 'service_due', label: 'Service fällig', type: 'date', value: o?.service_due?.slice(0, 10) },
       { name: 'odometer_km', label: 'Kilometerstand', type: 'number', min: 0, value: o?.odometer_km },
       { name: 'service_interval_km', label: 'Service-Intervall (km)', type: 'number', min: 1, value: o?.service_interval_km },
@@ -67,7 +94,7 @@ async function formVehicle(o) {
       { name: 'first_aid_kit_expires_on', label: 'Verbandskasten gültig bis', type: 'date', value: o?.first_aid_kit_expires_on?.slice(0, 10) },
       { name: 'note', label: 'Notiz', type: 'textarea', value: o?.note, full: true },
       ...ownership,
-      ...costFields(o, budgets, true),
+      ...costFields(o, budgets),
     ],
     onSubmit: (v) => {
       const odometerKm = v.odometer_km === '' ? null : Number(v.odometer_km);
@@ -82,7 +109,7 @@ async function formVehicle(o) {
 async function formKey(o, props, vehicles) {
   const budgets = await loadBudgets();
   const ownership = await ownershipFields(o);
-  return openForm({
+  return costForm({
     title: o ? 'Schlüssel bearbeiten' : 'Neuer Schlüssel', wide: true, fields: [
       { name: 'code', label: 'Schlüssel-Nr.', value: o?.code, required: true },
       { name: 'label', label: 'Bezeichnung', value: o?.label, required: true },
@@ -169,11 +196,11 @@ export async function render(view, params) {
     },
     async properties(el) {
       await fetchAll();
-      el.innerHTML = `<div class="card">${D.props.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Art</th><th>Adresse</th><th>Verantwortlich</th><th>Wartung</th><th>Schlüssel-Inventur</th><th>Tür-PIN</th><th>Kosten</th><th></th></tr></thead><tbody>${D.props.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td>${PTYPE[p.type]}</td><td>${esc(p.address)}</td><td>${esc(D.people.find((x) => x.id === p.responsible_person_id)?.name || '–')}</td><td>${fdate(p.maintenance_due)}</td><td>${keyInventory('property_id', p.id, 'house')}</td><td>${pinEye(p.id)}${can('property:update') ? ` <button class="btn ghost sm" data-set-pin="${p.id}">PIN ändern</button>` : ''}</td><td>${p.cost_amount ? `${eur(p.cost_amount)} ${INTERVAL[p.cost_interval].toLowerCase()}` : '–'}</td><td style="white-space:nowrap">${actions(p.id, 'property')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Häuser.')}</div>`;
+      el.innerHTML = `<div class="card">${D.props.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Art</th><th>Adresse</th><th>Verantwortlich</th><th>Wartung</th><th>Schlüssel-Inventur</th><th>Tür-PIN</th><th>Kosten</th><th></th></tr></thead><tbody>${D.props.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td>${PTYPE[p.type]}</td><td>${esc(p.address)}</td><td>${esc(D.people.find((x) => x.id === p.responsible_person_id)?.name || '–')}</td><td>${fdate(p.maintenance_due)}</td><td>${keyInventory('property_id', p.id, 'house')}</td><td>${pinEye(p.id)}${can('property:update') ? ` <button class="btn ghost sm" data-set-pin="${p.id}">PIN ändern</button>` : ''}</td><td>${p.cost_amount ? `${eur(p.cost_amount)} ${costIntervalText(p.cost_interval, p.cost_interval_count)}` : '–'}</td><td style="white-space:nowrap">${actions(p.id, 'property')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Häuser.')}</div>`;
     },
     async vehicles(el) {
       await fetchAll();
-      el.innerHTML = `<div class="card">${D.vehicles.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Kennzeichen</th><th>Modell</th><th>Besitzer</th><th>Status</th><th>Service</th><th>Verbandskasten</th><th>Schlüssel-Inventur</th><th>Kosten</th><th></th></tr></thead><tbody>${D.vehicles.map((v) => `<tr><td><b>${esc(v.plate)}</b></td><td>${esc(v.make_model)}</td><td>${esc(v.registered_owner || '–')}</td><td>${VSTATUS[v.status]}</td><td>${fdate(v.service_due)}${v.service_due_km != null ? `<br><small class="muted">bei ${Number(v.service_due_km).toLocaleString('de-DE')} km</small>` : ''}</td><td>${fdate(v.first_aid_kit_expires_on)}</td><td>${keyInventory('vehicle_id', v.id, 'vehicle')}</td><td>${v.cost_amount ? `${eur(v.cost_amount)} ${INTERVAL[v.cost_interval].toLowerCase()}` : '–'}</td><td style="white-space:nowrap">${actions(v.id, 'vehicle')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Fahrzeuge.')}</div>`;
+      el.innerHTML = `<div class="card">${D.vehicles.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Kennzeichen</th><th>Modell</th><th>Besitzer</th><th>Status</th><th>Service</th><th>Verbandskasten</th><th>Schlüssel-Inventur</th><th>Kosten</th><th></th></tr></thead><tbody>${D.vehicles.map((v) => `<tr><td><b>${esc(v.plate)}</b></td><td>${esc(v.make_model)}</td><td>${esc(v.registered_owner || '–')}</td><td>${VSTATUS[v.status]}</td><td>${fdate(v.service_due)}${v.service_due_km != null ? `<br><small class="muted">bei ${Number(v.service_due_km).toLocaleString('de-DE')} km</small>` : ''}</td><td>${fdate(v.first_aid_kit_expires_on)}</td><td>${keyInventory('vehicle_id', v.id, 'vehicle')}</td><td>${v.cost_amount ? `${eur(v.cost_amount)} ${costIntervalText(v.cost_interval, v.cost_interval_count)}` : '–'}</td><td style="white-space:nowrap">${actions(v.id, 'vehicle')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Fahrzeuge.')}</div>`;
     },
     async people(el) {
       await fetchAll();
@@ -181,7 +208,7 @@ export async function render(view, params) {
     },
     async costs(el) {
       const c = await api.get('/assets/costs');
-      el.innerHTML = `<div class="card"><div class="card-head"><h2>Laufende Objektkosten</h2><b>${eur(c.yearly_total)} / Jahr</b></div>${c.items.length ? `<table class="table"><thead><tr><th>Objekt</th><th>Typ</th><th>Intervall</th><th>Budget</th><th style="text-align:right">Betrag</th><th style="text-align:right">pro Jahr</th></tr></thead><tbody>${c.items.map((i) => `<tr><td>${esc(i.name)}</td><td>${ASSET_TYPE[i.type]}</td><td>${INTERVAL[i.interval]}</td><td>${esc(i.budget_name || '–')}${i.tracking ? '' : ' <span class="tag warn">nicht verbucht</span>'}</td><td style="text-align:right">${eur(i.amount)}</td><td style="text-align:right">${i.interval === 'once' ? '–' : eur(i.yearly)}</td></tr>`).join('')}</tbody></table>` : empty('Keine Kosten erfasst.')}</div>`;
+      el.innerHTML = `<div class="card"><div class="card-head"><h2>Laufende Objektkosten</h2><b>${eur(c.yearly_total)} / Jahr</b></div>${c.items.length ? `<table class="table"><thead><tr><th>Objekt</th><th>Typ</th><th>Intervall</th><th>Budget</th><th style="text-align:right">Betrag</th><th style="text-align:right">pro Jahr</th></tr></thead><tbody>${c.items.map((i) => `<tr><td>${esc(i.name)}</td><td>${ASSET_TYPE[i.type]}</td><td>${costIntervalText(i.interval, i.interval_count)}</td><td>${esc(i.budget_name || '–')}${i.tracking ? '' : ' <span class="tag warn">nicht verbucht</span>'}</td><td style="text-align:right">${eur(i.amount)}</td><td style="text-align:right">${i.interval === 'once' ? '–' : eur(i.yearly)}</td></tr>`).join('')}</tbody></table>` : empty('Keine Kosten erfasst.')}</div>`;
     },
     async log(el) {
       const l = await api.get('/assets/log');

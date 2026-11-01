@@ -46,10 +46,13 @@ export async function render(view) {
         const start = event.date.slice(0, 10);
         if (key < start) return;
         const origin = new Date(`${start}T00:00:00`);
-        const repeats = event.repeat === 'weekly' ? day.getDay() === origin.getDay()
-          : event.repeat === 'monthly' ? day.getDate() === origin.getDate()
-            : event.repeat === 'yearly' ? day.getDate() === origin.getDate() && day.getMonth() === origin.getMonth()
-              : key === start;
+        const interval = event.repeat_interval || 1;
+        const days = Math.round((day - origin) / 86400000);
+        const repeats = event.repeat === 'daily' || event.repeat === 'custom' ? days % interval === 0
+          : event.repeat === 'weekly' ? day.getDay() === origin.getDay() && Math.floor(days / 7) % interval === 0
+            : event.repeat === 'monthly' ? day.getDate() === origin.getDate() && ((day.getFullYear() - origin.getFullYear()) * 12 + day.getMonth() - origin.getMonth()) % interval === 0
+              : event.repeat === 'yearly' ? day.getDate() === origin.getDate() && day.getMonth() === origin.getMonth() && (day.getFullYear() - origin.getFullYear()) % interval === 0
+                : key === start;
         if (repeats && event.type !== 'holiday') upcoming.push({ ...event, occurrence: key });
       });
     }
