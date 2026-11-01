@@ -110,11 +110,9 @@ Sichere zusätzlich `.env` (insbesondere `ENCRYPTION_KEY`) getrennt vom Backup.
 Nicht enthalten: SSO/OIDC, LDAP, Bankanbindung (FinTS/PSD2), MT940-Import, S3/SFTP-Backupziele, E-Mail-Bestätigungsfluss bei Registrierung.
 
 ## GitLab veröffentlichen
-Der lokale Commit ist angelegt. Auf einem Rechner mit Zugriff auf `gitlab.zd-d.com` legt ein Skript das Projekt `budget-manager` (privat) an, setzt `origin` und pusht `main`. Zugangsdaten werden nicht gespeichert.
+Leeres Projekt `budget-manager` auf https://gitlab.zd-d.com anlegen (ohne README), dann:
 
 ```bash
-glab auth login --hostname gitlab.zd-d.com && ./scripts/gitlab-publish.sh
-# oder mit Token nur für diesen Aufruf (Scope: api):
-GITLAB_TOKEN=... ./scripts/gitlab-publish.sh
+git remote add origin git@gitlab.zd-d.com:<gruppe>/budget-manager.git
+git push -u origin main
 ```
-Optional `GITLAB_NAMESPACE=<gruppe>`. Alternativ manuell: leeres Projekt anlegen, `git remote add origin git@gitlab.zd-d.com:<gruppe>/budget-manager.git`, `git push -u origin main`.
