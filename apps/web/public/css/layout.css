@@ -1,0 +1,76 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font: 14px/1.5 var(--font);
+  background: var(--bg);
+  color: var(--text);
+  transition: background .2s, color .2s;
+}
+svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+.app { display: grid; grid-template-columns: 252px 1fr; min-height: 100vh; }
+
+/* Sidebar */
+.sidebar {
+  position: sticky; top: 0; height: 100vh; overflow-y: auto; scrollbar-width: none;
+  background: var(--bg); border-right: 1px solid var(--border);
+  padding: 28px 16px 20px; display: flex; flex-direction: column; gap: 2px;
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 15px; letter-spacing: -.01em; padding: 0 12px 28px; }
+.brand-mark { width: 10px; height: 10px; border-radius: 50%; background: var(--primary); }
+.nav-label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 26px 12px 6px; }
+.nav-label.first { padding-top: 14px; }
+.nav {
+  position: relative; display: block; padding: 8px 12px; border-radius: var(--radius-sm);
+  color: var(--muted); text-decoration: none; font-weight: 500; transition: color .15s, background .15s;
+}
+.nav:hover { color: var(--text); background: var(--surface-2); }
+.nav.active { color: var(--text); background: var(--surface-2); font-weight: 600; }
+.nav.active::before { content: ""; position: absolute; left: -16px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--primary); }
+.sidebar-user {
+  margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); text-decoration: none; color: inherit; transition: background .15s;
+}
+.sidebar-user:hover { background: var(--surface-2); }
+.sidebar-user small { color: var(--muted); display: block; font-size: 12px; }
+
+/* Main */
+.main { min-width: 0; display: flex; flex-direction: column; }
+.topbar {
+  position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px;
+  padding: 16px 40px; background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+}
+.icon-btn.menu-btn { display: none; }
+.search { flex: 1; max-width: 360px; position: relative; }
+.search input { background: var(--surface-2); border-color: transparent; }
+.spacer { flex: 1; }
+#view { padding: 20px 40px 64px; max-width: 1240px; width: 100%; animation: fade .25s ease; }
+@keyframes fade { from { opacity: 0; transform: translateY(6px); } }
+
+.page-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 28px; }
+.page-head h1 { font-size: 26px; font-weight: 650; letter-spacing: -.025em; }
+.page-head p { color: var(--muted); margin-top: 4px; }
+.actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+/* Grid helpers */
+.grid { display: grid; gap: 18px; margin-bottom: 18px; }
+.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cols-21 { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.cols-12 { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.row.start { justify-content: flex-start; }
+.wrap { flex-wrap: wrap; }
+
+@media (max-width: 1100px) { .cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .cols-21, .cols-12 { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar { position: fixed; z-index: 20; left: 0; width: 252px; transform: translateX(-100%); transition: transform .2s; }
+  .sidebar.open { transform: none; box-shadow: var(--shadow); }
+  .icon-btn.menu-btn { display: inline-grid; }
+  .cols-3, .cols-2, .cols-4 { grid-template-columns: minmax(0, 1fr); }
+  #view, .topbar { padding-left: 18px; padding-right: 18px; }
+}

@@ -1,0 +1,360 @@
+import { z } from 'zod';
+import { one, many, q, tx } from '../db.js';
+import { authz, bad, notFound, forbidden, budgetAccess, accessibleBudgetIds } from '../authz.js';
+import { addDefaultCategories } from '../seed.js';
+import { periodRange, budgetUsed, budgetWatch, toCsv, today } from '../lib.js';
+import { audit } from '../audit.js';
+
+const money = z.union([z.string(), z.number()]).transform((v) => String(v).replace(',', '.')).refine((v) => /^\d{1,12}(\.\d{1,2})?$/.test(v), 'Ungültiger Betrag');
+const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const id = z.string().uuid();
+
+const budgetBody = z.object({
+  name: z.string().min(1).max(100),
+  type: z.enum(['solo', 'shared']),
+  team_id: id.nullish(),
+  currency: z.string().length(3).default('EUR'),
+  period_type: z.enum(['monthly', 'yearly', 'custom', 'goal']).default('monthly'),
+  period_start: date.nullish(),
+  period_end: date.nullish(),
+  limit_amount: money.default('0'),
+});
+
+async function decorate(b, role, teamName) {
+  const used = await budgetUsed(b);
+  const lim = Number(b.limit_amount);
+  const cats = await many(
+    `SELECT c.id, c.name, c.color, c.limit_amount,
+       COALESCE((SELECT sum(amount) FROM transactions t WHERE t.category_id=c.id AND t.type='expense' AND t.booked_at BETWEEN $2 AND $3),0) used
+     FROM categories c WHERE c.budget_id=$1 ORDER BY c.name`,
+    [b.id, ...periodRange(b)],
+  );
+  return { ...b, role, team_name: teamName || null, used, pct: lim > 0 ? Math.round((Number(used) / lim) * 1000) / 10 : 0, categories: cats };
+}
+
+export default async function routes(app) {
+  // ---- Budgets
+  app.get('/budgets', authz('budget:read'), async (req) => {
+    const rows = await many(
+      `SELECT b.*, t.name team_name, CASE WHEN b.type='solo' THEN 'owner' ELSE tm.team_role END role
+       FROM budgets b LEFT JOIN teams t ON t.id=b.team_id LEFT JOIN team_members tm ON tm.team_id=b.team_id AND tm.user_id=$1
+       WHERE (b.type='solo' AND b.owner_user_id=$1) OR (b.type='shared' AND tm.user_id IS NOT NULL)
+       ORDER BY b.archived, b.type, b.name`,
+      [req.user.id],
+    );
+    return Promise.all(rows.map((b) => decorate(b, b.role, b.team_name)));
+  });
+
+  app.post('/budgets', authz('budget:create'), async (req) => {
+    const b = budgetBody.parse(req.body);
+    if (b.period_type === 'custom' && (!b.period_start || !b.period_end || b.period_end < b.period_start)) throw bad('Zeitraum ungültig');
+    if (b.type === 'shared') {
+      if (!b.team_id) throw bad('Team erforderlich');
+      const m = await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [b.team_id, req.user.id]);
+      if (!m || m.team_role === 'viewer') throw forbidden();
+    } else {
+      const max = req.user.max_budgets ?? Math.max(...req.userRoles.map((r) => r.max_budgets ?? 1e9), 0);
+      const n = (await one("SELECT count(*)::int n FROM budgets WHERE owner_user_id=$1 AND NOT archived", [req.user.id])).n;
+      if (n >= (max || 1e9)) throw bad(`Budget-Limit erreicht (${max})`, 'limit');
+    }
+    const id_ = await tx(async (c) => {
+      const r = (
+        await c.query(
+          `INSERT INTO budgets(name,type,owner_user_id,team_id,currency,period_type,period_start,period_end,limit_amount)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+          [b.name, b.type, b.type === 'solo' ? req.user.id : null, b.type === 'shared' ? b.team_id : null, b.currency, b.period_type, b.period_start || null, b.period_end || null, b.limit_amount],
+        )
+      ).rows[0].id;
+      await addDefaultCategories(c, r);
+      return r;
+    });
+    await audit(req, 'budget.created', 'budget', id_);
+    return { id: id_ };
+  });
+
+  app.patch('/budgets/:id', authz('budget:update'), async (req) => {
+    const { budget } = await budgetAccess(req.user.id, req.params.id, true);
+    const b = budgetBody.pick({ name: true, currency: true, period_type: true, period_start: true, period_end: true, limit_amount: true }).partial().extend({ archived: z.boolean().optional() }).parse(req.body);
+    const keys = Object.keys(b);
+    if (keys.length) await q(`UPDATE budgets SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')}, updated_at=now() WHERE id=$1`, [budget.id, ...keys.map((k) => b[k] ?? null)]);
+    return { ok: true };
+  });
+
+  app.delete('/budgets/:id', authz('budget:delete'), async (req) => {
+    const { role } = await budgetAccess(req.user.id, req.params.id, true);
+    if (role !== 'owner') throw forbidden('Nur der Eigentümer kann ein Budget löschen');
+    // Objektkosten, die dieses Budget nutzen, zurücksetzen (sonst verletzt SET NULL den Kosten-Check)
+    for (const t of ['properties', 'vehicles', 'keys']) {
+      await q(`UPDATE ${t} SET cost_amount=NULL, cost_interval=NULL, cost_category_id=NULL, cost_recurring_id=NULL WHERE cost_budget_id=$1`, [req.params.id]);
+    }
+    await q('DELETE FROM budgets WHERE id=$1', [req.params.id]);
+    await audit(req, 'budget.deleted', 'budget', req.params.id);
+    return { ok: true };
+  });
+
+  // ---- Kategorien
+  app.post('/budgets/:id/categories', authz('budget:update'), async (req) => {
+    await budgetAccess(req.user.id, req.params.id, true);
+    const b = z.object({ name: z.string().min(1).max(60), limit_amount: money.nullish(), color: z.string().max(20).nullish() }).parse(req.body);
+    try {
+      return await one('INSERT INTO categories(budget_id,name,limit_amount,color) VALUES ($1,$2,$3,$4) RETURNING id', [req.params.id, b.name, b.limit_amount || null, b.color || null]);
+    } catch (e) {
+      if (e.code === '23505') throw bad('Kategorie existiert bereits');
+      throw e;
+    }
+  });
+  app.patch('/categories/:id', authz('budget:update'), async (req) => {
+    const c = await one('SELECT budget_id FROM categories WHERE id=$1', [req.params.id]);
+    if (!c) throw notFound();
+    await budgetAccess(req.user.id, c.budget_id, true);
+    const b = z.object({ name: z.string().min(1).max(60), limit_amount: money.nullish(), color: z.string().max(20).nullish() }).partial().parse(req.body);
+    await q('UPDATE categories SET name=COALESCE($2,name), limit_amount=CASE WHEN $3 THEN $4 ELSE limit_amount END, color=COALESCE($5,color) WHERE id=$1',
+      [req.params.id, b.name ?? null, 'limit_amount' in b, b.limit_amount || null, b.color ?? null]);
+    return { ok: true };
+  });
+  app.delete('/categories/:id', authz('budget:update'), async (req) => {
+    const c = await one('SELECT budget_id FROM categories WHERE id=$1', [req.params.id]);
+    if (!c) throw notFound();
+    await budgetAccess(req.user.id, c.budget_id, true);
+    await q('DELETE FROM categories WHERE id=$1', [req.params.id]);
+    return { ok: true };
+  });
+
+  // ---- Transaktionen
+  const txFilter = async (req) => {
+    const f = z.object({
+      budget_id: id.optional(), type: z.enum(['income', 'expense', 'deposit']).optional(), category_id: id.optional(),
+      from: date.optional(), to: date.optional(), q: z.string().max(100).optional(), scope: z.enum(['solo', 'shared', 'all']).default('all'),
+      limit: z.coerce.number().int().min(1).max(500).default(50), offset: z.coerce.number().int().min(0).default(0),
+    }).parse(req.query);
+    let ids = await accessibleBudgetIds(req.user.id);
+    if (f.budget_id) ids = ids.filter((i) => i === f.budget_id);
+    const p = [ids];
+    const w = ['t.budget_id = ANY($1)'];
+    const add = (sql, v) => { p.push(v); w.push(sql.replace('?', `$${p.length}`)); };
+    if (f.scope !== 'all') add('b.type = ?', f.scope);
+    if (f.type) add('t.type = ?', f.type);
+    if (f.category_id) add('t.category_id = ?', f.category_id);
+    if (f.from) add('t.booked_at >= ?', f.from);
+    if (f.to) add('t.booked_at <= ?', f.to);
+    if (f.q) {
+      p.push(`%${f.q.replace(/[%_\\]/g, '\\$&')}%`);
+      const n = p.length;
+      w.push(`(t.title ILIKE $${n} OR t.note ILIKE $${n} OR EXISTS (SELECT 1 FROM unnest(t.tags) g WHERE g ILIKE $${n}))`);
+    }
+    return { f, where: w.join(' AND '), params: p };
+  };
+
+  app.get('/transactions', authz('transaction:read'), async (req) => {
+    const { f, where, params } = await txFilter(req);
+    const rows = await many(
+      `SELECT t.id, t.budget_id, b.name budget_name, b.type budget_type, t.category_id, c.name category_name, t.type, t.amount, t.booked_at, t.title, t.note, t.tags, t.source, t.goal_id,
+         (SELECT count(*)::int FROM attachments a WHERE a.transaction_id=t.id) attachments, u.name created_by_name
+       FROM transactions t JOIN budgets b ON b.id=t.budget_id LEFT JOIN categories c ON c.id=t.category_id LEFT JOIN users u ON u.id=t.created_by
+       WHERE ${where} ORDER BY t.booked_at DESC, t.created_at DESC LIMIT ${f.limit} OFFSET ${f.offset}`,
+      params,
+    );
+    const tot = await one(
+      `SELECT count(*)::int n, COALESCE(sum(amount) FILTER (WHERE t.type='income'),0) income, COALESCE(sum(amount) FILTER (WHERE t.type='expense'),0) expense
+       FROM transactions t JOIN budgets b ON b.id=t.budget_id WHERE ${where}`,
+      params,
+    );
+    return { items: rows, total: tot.n, income: tot.income, expense: tot.expense };
+  });
+
+  const txBody = z.object({
+    budget_id: id, category_id: id.nullish(), type: z.enum(['income', 'expense', 'deposit']), amount: money.refine((v) => Number(v) > 0, 'Betrag muss > 0 sein'),
+    booked_at: date, title: z.string().max(200).default(''), note: z.string().max(2000).default(''), tags: z.array(z.string().max(30)).max(10).default([]), goal_id: id.nullish(),
+  });
+
+  async function checkRefs(b, budget) {
+    if (b.category_id && !(await one('SELECT 1 FROM categories WHERE id=$1 AND budget_id=$2', [b.category_id, budget.id]))) throw bad('Kategorie gehört nicht zum Budget');
+    if (b.goal_id && !(await one('SELECT 1 FROM goals WHERE id=$1 AND budget_id=$2', [b.goal_id, budget.id]))) throw bad('Sparziel gehört nicht zum Budget');
+  }
+
+  app.post('/transactions', authz('transaction:create'), async (req) => {
+    const b = txBody.parse(req.body);
+    const idem = req.headers['idempotency-key'];
+    if (idem) {
+      const hit = await one('SELECT response FROM idempotency_keys WHERE user_id=$1 AND key=$2', [req.user.id, String(idem).slice(0, 100)]);
+      if (hit) return hit.response;
+    }
+    const { budget } = await budgetAccess(req.user.id, b.budget_id, true);
+    await checkRefs(b, budget);
+    const r = await one(
+      `INSERT INTO transactions(budget_id,category_id,created_by,type,amount,booked_at,title,note,tags,goal_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [b.budget_id, b.category_id || null, req.user.id, b.type, b.amount, b.booked_at, b.title, b.note, b.tags, b.goal_id || null],
+    );
+    if (idem) await q('INSERT INTO idempotency_keys(key, user_id, response) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [String(idem).slice(0, 100), req.user.id, JSON.stringify(r)]);
+    if (b.type === 'expense') await budgetWatch(b.budget_id, req.log);
+    await audit(req, 'transaction.created', 'transaction', r.id);
+    return r;
+  });
+
+  app.patch('/transactions/:id', authz('transaction:update'), async (req) => {
+    const t = await one('SELECT * FROM transactions WHERE id=$1', [req.params.id]);
+    if (!t) throw notFound();
+    const { budget } = await budgetAccess(req.user.id, t.budget_id, true);
+    const b = txBody.omit({ budget_id: true }).partial().parse(req.body);
+    await checkRefs(b, budget);
+    const keys = Object.keys(b);
+    if (keys.length) await q(`UPDATE transactions SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1`, [t.id, ...keys.map((k) => b[k] ?? null)]);
+    await budgetWatch(t.budget_id, req.log);
+    return { ok: true };
+  });
+
+  app.delete('/transactions/:id', authz('transaction:delete'), async (req) => {
+    const t = await one('SELECT budget_id FROM transactions WHERE id=$1', [req.params.id]);
+    if (!t) throw notFound();
+    await budgetAccess(req.user.id, t.budget_id, true);
+    await q('DELETE FROM transactions WHERE id=$1', [req.params.id]);
+    await audit(req, 'transaction.deleted', 'transaction', req.params.id);
+    return { ok: true };
+  });
+
+  app.get('/transactions/export.csv', authz('transaction:export'), async (req, reply) => {
+    const { where, params } = await txFilter(req);
+    const rows = await many(
+      `SELECT t.booked_at, b.name budget, c.name category, t.type, t.amount, t.title, t.note, array_to_string(t.tags, ',') tags
+       FROM transactions t JOIN budgets b ON b.id=t.budget_id LEFT JOIN categories c ON c.id=t.category_id WHERE ${where} ORDER BY t.booked_at DESC LIMIT 50000`,
+      params,
+    );
+    await audit(req, 'transactions.exported', 'transaction', null, { rows: rows.length });
+    reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', 'attachment; filename="transaktionen.csv"');
+    return toCsv(rows, ['booked_at', 'budget', 'category', 'type', 'amount', 'title', 'note', 'tags']);
+  });
+
+  // ---- Daueraufträge
+  const recBody = z.object({
+    name: z.string().min(1).max(100), budget_id: id, category_id: id.nullish(), type: z.enum(['income', 'expense']), amount: money.refine((v) => Number(v) > 0),
+    frequency: z.enum(['daily', 'weekly', 'monthly', 'yearly']), interval: z.number().int().min(1).max(60).default(1),
+    start_date: date, end_date: date.nullish(), active: z.boolean().default(true),
+  });
+  app.get('/recurring', authz('recurring:read'), async (req) =>
+    many(
+      `SELECT r.*, b.name budget_name, c.name category_name FROM recurring_rules r JOIN budgets b ON b.id=r.budget_id LEFT JOIN categories c ON c.id=r.category_id
+       WHERE r.budget_id = ANY($1) ORDER BY r.active DESC, r.next_run`,
+      [await accessibleBudgetIds(req.user.id)],
+    ));
+  app.post('/recurring', authz('recurring:create'), async (req) => {
+    const b = recBody.parse(req.body);
+    const { budget } = await budgetAccess(req.user.id, b.budget_id, true);
+    await checkRefs(b, budget);
+    return one(
+      `INSERT INTO recurring_rules(name,budget_id,category_id,created_by,type,amount,frequency,interval,start_date,end_date,next_run,active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$9,$11) RETURNING id`,
+      [b.name, b.budget_id, b.category_id || null, req.user.id, b.type, b.amount, b.frequency, b.interval, b.start_date, b.end_date || null, b.active],
+    );
+  });
+  app.patch('/recurring/:id', authz('recurring:update'), async (req) => {
+    const r = await one('SELECT * FROM recurring_rules WHERE id=$1', [req.params.id]);
+    if (!r || r.source === 'asset') throw notFound();
+    await budgetAccess(req.user.id, r.budget_id, true);
+    const b = recBody.omit({ budget_id: true }).partial().parse(req.body);
+    const keys = Object.keys(b);
+    if (keys.length) await q(`UPDATE recurring_rules SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1`, [r.id, ...keys.map((k) => b[k] ?? null)]);
+    return { ok: true };
+  });
+  app.delete('/recurring/:id', authz('recurring:delete'), async (req) => {
+    const r = await one('SELECT * FROM recurring_rules WHERE id=$1', [req.params.id]);
+    if (!r || r.source === 'asset') throw notFound();
+    await budgetAccess(req.user.id, r.budget_id, true);
+    await q('DELETE FROM recurring_rules WHERE id=$1', [r.id]);
+    return { ok: true };
+  });
+
+  // ---- Sparziele
+  const goalBody = z.object({ budget_id: id, name: z.string().min(1).max(100), target_amount: money.refine((v) => Number(v) > 0), target_date: date.nullish(), monthly_amount: money.nullish() });
+  app.get('/goals', authz('goal:read'), async (req) =>
+    many(
+      `SELECT g.*, b.name budget_name, COALESCE((SELECT sum(amount) FROM transactions t WHERE t.goal_id=g.id AND t.type='deposit'),0) saved
+       FROM goals g JOIN budgets b ON b.id=g.budget_id WHERE g.budget_id = ANY($1) ORDER BY g.target_date NULLS LAST, g.name`,
+      [await accessibleBudgetIds(req.user.id)],
+    ));
+  app.post('/goals', authz('goal:create'), async (req) => {
+    const b = goalBody.parse(req.body);
+    await budgetAccess(req.user.id, b.budget_id, true);
+    return one('INSERT INTO goals(budget_id,name,target_amount,target_date,monthly_amount) VALUES ($1,$2,$3,$4,$5) RETURNING id', [b.budget_id, b.name, b.target_amount, b.target_date || null, b.monthly_amount || null]);
+  });
+  app.patch('/goals/:id', authz('goal:update'), async (req) => {
+    const g = await one('SELECT * FROM goals WHERE id=$1', [req.params.id]);
+    if (!g) throw notFound();
+    await budgetAccess(req.user.id, g.budget_id, true);
+    const b = goalBody.omit({ budget_id: true }).partial().parse(req.body);
+    const keys = Object.keys(b);
+    if (keys.length) await q(`UPDATE goals SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1`, [g.id, ...keys.map((k) => b[k] ?? null)]);
+    return { ok: true };
+  });
+  app.delete('/goals/:id', authz('goal:delete'), async (req) => {
+    const g = await one('SELECT * FROM goals WHERE id=$1', [req.params.id]);
+    if (!g) throw notFound();
+    await budgetAccess(req.user.id, g.budget_id, true);
+    await q('DELETE FROM goals WHERE id=$1', [g.id]);
+    return { ok: true };
+  });
+
+  // ---- Statistiken
+  const statScope = async (req) => {
+    const f = z.object({ scope: z.enum(['solo', 'shared', 'all']).default('all'), budget_id: id.optional(), from: date.optional(), to: date.optional(), months: z.coerce.number().int().min(1).max(36).default(6) }).parse(req.query);
+    let ids = await accessibleBudgetIds(req.user.id);
+    if (f.budget_id) ids = ids.filter((i) => i === f.budget_id);
+    if (f.scope !== 'all') ids = (await many('SELECT id FROM budgets WHERE id = ANY($1) AND type=$2', [ids, f.scope])).map((r) => r.id);
+    const now = new Date();
+    const from = f.from || `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01`;
+    const to = f.to || today();
+    return { f, ids, from, to };
+  };
+
+  app.get('/stats/overview', authz('budget:read'), async (req) => {
+    const { ids, from, to } = await statScope(req);
+    const k = await one(
+      `SELECT COALESCE(sum(amount) FILTER (WHERE type='income'),0) income, COALESCE(sum(amount) FILTER (WHERE type='expense'),0) expense,
+         COALESCE(sum(amount) FILTER (WHERE type='deposit'),0) deposit FROM transactions WHERE budget_id = ANY($1) AND booked_at BETWEEN $2 AND $3`,
+      [ids, from, to],
+    );
+    const saldo = await one(
+      `SELECT COALESCE(sum(CASE WHEN type='expense' THEN -amount ELSE amount END),0) s FROM transactions WHERE budget_id = ANY($1) AND booked_at <= $2`,
+      [ids, today()],
+    );
+    return { from, to, income: k.income, expense: k.expense, deposit: k.deposit, balance: (Number(k.income) - Number(k.expense)).toFixed(2), saldo: saldo.s };
+  });
+
+  app.get('/stats/by-category', authz('budget:read'), async (req) => {
+    const { ids, from, to } = await statScope(req);
+    return many(
+      `SELECT COALESCE(c.name,'Ohne Kategorie') name, COALESCE(c.color,'#94a3b8') color, sum(t.amount) total FROM transactions t LEFT JOIN categories c ON c.id=t.category_id
+       WHERE t.budget_id = ANY($1) AND t.type='expense' AND t.booked_at BETWEEN $2 AND $3 GROUP BY 1,2 ORDER BY total DESC`,
+      [ids, from, to],
+    );
+  });
+
+  app.get('/stats/timeline', authz('budget:read'), async (req) => {
+    const { f, ids } = await statScope(req);
+    return many(
+      `SELECT to_char(m, 'YYYY-MM') AS month,
+         COALESCE(sum(t.amount) FILTER (WHERE t.type='income'),0) income, COALESCE(sum(t.amount) FILTER (WHERE t.type='expense'),0) expense
+       FROM generate_series(date_trunc('month', now()) - ($2 || ' months')::interval + interval '1 month', date_trunc('month', now()), interval '1 month') m
+       LEFT JOIN transactions t ON t.budget_id = ANY($1) AND date_trunc('month', t.booked_at) = m GROUP BY m ORDER BY m`,
+      [ids, String(f.months)],
+    );
+  });
+
+  // ---- Berichte
+  app.get('/reports/saved', authz('report:read'), async (req) => many('SELECT * FROM saved_reports WHERE owner_id=$1 ORDER BY kind', [req.user.id]));
+  app.post('/reports/saved', authz('report:create'), async (req) => {
+    const b = z.object({ kind: z.enum(['monthly', 'categories', 'costs']), rhythm: z.enum(['weekly', 'monthly', 'quarterly']), recipients: z.array(z.string().email()).max(10).default([]) }).parse(req.body);
+    return one('INSERT INTO saved_reports(owner_id,kind,rhythm,recipients) VALUES ($1,$2,$3,$4) RETURNING id', [req.user.id, b.kind, b.rhythm, b.recipients]);
+  });
+  app.delete('/reports/saved/:id', authz('report:create'), async (req) => {
+    await q('DELETE FROM saved_reports WHERE id=$1 AND owner_id=$2', [req.params.id, req.user.id]);
+    return { ok: true };
+  });
+  app.get('/reports/costs', authz('report:read'), async (req) => {
+    const { ids, from, to } = await statScope(req);
+    return many(
+      `SELECT COALESCE(asset_type,'sonstige') asset_type, sum(amount) total, count(*)::int n FROM transactions
+       WHERE budget_id = ANY($1) AND type='expense' AND booked_at BETWEEN $2 AND $3 AND source IN ('asset') GROUP BY 1 ORDER BY total DESC`,
+      [ids, from, to],
+    );
+  });
+}

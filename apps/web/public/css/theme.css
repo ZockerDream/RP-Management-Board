@@ -1,0 +1,85 @@
+/* Basis-Tokens: Modus (hell/dunkel) */
+:root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --border: #e7e7ea;
+  --text: #18181b;
+  --muted: #71717a;
+  --ok: #16a34a;
+  --warn: #d97706;
+  --bad: #dc2626;
+  --shadow: none;
+  --radius: 14px;
+  --radius-sm: 9px;
+  --font: Inter, system-ui, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light;
+}
+
+/* --primary wird je Element aufgelöst, damit Theme-Vorschauen eigene Farben zeigen */
+:root, [data-theme="light"] { --primary: var(--accent-l); }
+
+[data-theme="dark"] {
+  --bg: #0c0c0e;
+  --surface: #141417;
+  --surface-2: #1c1c21;
+  --border: #26262c;
+  --text: #ececef;
+  --muted: #8b8b95;
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --bad: #f87171;
+  --primary: var(--accent-d);
+  color-scheme: dark;
+}
+
+/* Abgeleitete Tokens */
+:root, [data-theme] {
+  --primary-soft: color-mix(in srgb, var(--primary) 11%, transparent);
+  --ok-soft: color-mix(in srgb, var(--ok) 13%, transparent);
+  --warn-soft: color-mix(in srgb, var(--warn) 14%, transparent);
+  --bad-soft: color-mix(in srgb, var(--bad) 13%, transparent);
+  --on-primary: #fff;
+}
+
+/* Farbthemen: Akzent + Diagrammpalette (c1–c5) */
+:root, [data-accent="indigo"] {
+  --accent-l: #4f46e5; --accent-d: #818cf8;
+  --c1: #4f46e5; --c2: #0ea5e9; --c3: #f59e0b; --c4: #ec4899; --c5: #a1a1aa;
+}
+[data-accent="emerald"] {
+  --accent-l: #059669; --accent-d: #34d399;
+  --c1: #059669; --c2: #0d9488; --c3: #84cc16; --c4: #f59e0b; --c5: #a1a1aa;
+}
+[data-accent="rose"] {
+  --accent-l: #e11d48; --accent-d: #fb7185;
+  --c1: #e11d48; --c2: #f97316; --c3: #a855f7; --c4: #0ea5e9; --c5: #a1a1aa;
+}
+[data-accent="amber"] {
+  --accent-l: #d97706; --accent-d: #fbbf24;
+  --c1: #d97706; --c2: #dc2626; --c3: #65a30d; --c4: #0891b2; --c5: #a1a1aa;
+}
+[data-accent="ocean"] {
+  --accent-l: #0284c7; --accent-d: #38bdf8;
+  --c1: #0284c7; --c2: #0d9488; --c3: #6366f1; --c4: #f59e0b; --c5: #a1a1aa;
+}
+[data-accent="mono"] {
+  --accent-l: #18181b; --accent-d: #f4f4f5;
+  --c1: #18181b; --c2: #52525b; --c3: #a1a1aa; --c4: #d4d4d8; --c5: #e4e4e7;
+}
+[data-theme="dark"][data-accent="mono"] {
+  --c1: #f4f4f5; --c2: #a1a1aa; --c3: #71717a; --c4: #52525b; --c5: #3f3f46;
+  --on-primary: #18181b;
+}
+
+/* Eigene Flächenfarben je Theme und Modus */
+[data-accent="emerald"][data-theme="light"] { --bg: #f6faf8; --surface-2: #edf5f1; --border: #dce8e2; --text: #12201a; --muted: #66786f; }
+[data-accent="emerald"][data-theme="dark"]  { --bg: #08100d; --surface: #0f1a15; --surface-2: #16241d; --border: #1f3329; --text: #e6f2ec; --muted: #84988d; }
+[data-accent="ocean"][data-theme="light"]   { --bg: #f5f9fc; --surface-2: #ebf2f8; --border: #dae5ee; --text: #0f1c27; --muted: #64788a; }
+[data-accent="ocean"][data-theme="dark"]    { --bg: #070d14; --surface: #0d1621; --surface-2: #142130; --border: #1c2e42; --text: #e4eef7; --muted: #7f93a6; }
+[data-accent="rose"][data-theme="light"]    { --bg: #fcf7f8; --surface-2: #f7eced; --border: #efdfe2; --text: #231519; --muted: #7d6168; }
+[data-accent="rose"][data-theme="dark"]     { --bg: #110a0c; --surface: #1a1013; --surface-2: #25161a; --border: #351f25; --text: #f5e8eb; --muted: #a08890; }
+[data-accent="amber"][data-theme="light"]   { --bg: #fbf8f2; --surface-2: #f5efe2; --border: #ebe2cf; --text: #211a0e; --muted: #7a6d55; }
+[data-accent="amber"][data-theme="dark"]    { --bg: #100d07; --surface: #19150b; --surface-2: #241e10; --border: #352c18; --text: #f4eddd; --muted: #a09478; }
+[data-accent="mono"][data-theme="light"]    { --bg: #ffffff; --surface-2: #f4f4f4; --border: #e4e4e4; --text: #0a0a0a; --muted: #737373; }
+[data-accent="mono"][data-theme="dark"]    { --bg: #000000; --surface: #0a0a0a; --surface-2: #141414; --border: #262626; --text: #fafafa; --muted: #8a8a8a; --c1: #f4f4f5; --c2: #a1a1aa; --c3: #71717a; --c4: #52525b; --c5: #3f3f46; --on-primary: #18181b; }

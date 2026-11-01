@@ -1,0 +1,125 @@
+name: budget-manager
+
+x-api-env: &api-env
+  NODE_ENV: production
+  TZ: ${TZ:-Europe/Berlin}
+  APP_URL: ${APP_URL:?APP_URL fehlt in .env}
+  DATABASE_URL: postgres://${DB_USER:-budget}:${DB_PASSWORD:?DB_PASSWORD fehlt in .env}@db:5432/${DB_NAME:-budget}
+  JWT_SECRET: ${JWT_SECRET:?JWT_SECRET fehlt in .env}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY fehlt in .env}
+  ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+  ADMIN_NAME: ${ADMIN_NAME:-Administrator}
+  ACCESS_TOKEN_TTL_SEC: ${ACCESS_TOKEN_TTL_SEC:-900}
+  REFRESH_TOKEN_TTL_DAYS: ${REFRESH_TOKEN_TTL_DAYS:-14}
+  ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-false}
+  HIBP_CHECK: ${HIBP_CHECK:-false}
+  HOLIDAY_COUNTRY: ${HOLIDAY_COUNTRY:-DE}
+  HOLIDAY_REGION: ${HOLIDAY_REGION:-}
+  MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-10}
+  BACKUP_ENCRYPT: ${BACKUP_ENCRYPT:-true}
+  BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+  BACKUP_HOUR: ${BACKUP_HOUR:-3}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_SECURE: ${SMTP_SECURE:-false}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_FROM: ${SMTP_FROM:-Budget Manager <noreply@localhost>}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
+x-hardening: &hardening
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  db:
+    <<: *hardening
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-budget}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD fehlt in .env}
+      POSTGRES_DB: ${DB_NAME:-budget}
+      TZ: ${TZ:-Europe/Berlin}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks: [backend]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE, FOWNER]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  api:
+    <<: *hardening
+    build: ./apps/api
+    image: budget-manager-api:${APP_VERSION:-latest}
+    environment: *api-env
+    volumes:
+      - uploads:/data/uploads
+      - backups:/data/backups
+    networks: [backend, frontend, public]
+    depends_on:
+      db: { condition: service_healthy }
+    read_only: true
+    tmpfs: [/tmp]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  worker:
+    <<: *hardening
+    image: budget-manager-api:${APP_VERSION:-latest}
+    command: ["node", "src/worker.js"]
+    environment: *api-env
+    volumes:
+      - backups:/data/backups
+    networks: [backend, public]
+    depends_on:
+      api: { condition: service_healthy }
+    read_only: true
+    tmpfs: [/tmp]
+    healthcheck:
+      test: ["CMD", "node", "-e", "import('pg').then(async({default:pg})=>{const c=new pg.Client({connectionString:process.env.DATABASE_URL});await c.connect();await c.query('select 1');process.exit(0)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  web:
+    <<: *hardening
+    build: ./apps/web
+    image: budget-manager-web:${APP_VERSION:-latest}
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${HTTP_PORT:-8080}:8080"
+    networks: [frontend, public]
+    depends_on:
+      api: { condition: service_healthy }
+    read_only: true
+    tmpfs: [/tmp]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+networks:
+  backend:
+    internal: true
+  frontend:
+    internal: true
+  public:
+
+volumes:
+  db_data:
+  uploads:
+  backups:

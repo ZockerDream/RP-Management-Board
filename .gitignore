@@ -1,0 +1,24 @@
+# Secrets & lokale Konfiguration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Laufzeitdaten & Backups
+data/
+backups/
+logs/
+*.dump
+*.dump.enc
+
+# Node
+node_modules/
+npm-debug.log*
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
