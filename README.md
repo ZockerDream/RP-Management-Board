@@ -49,7 +49,10 @@ server {
 }
 ```
 
-Läuft der Proxy auf demselben Host, setze `BIND_ADDR=127.0.0.1`, damit der Port nicht von außen erreichbar ist. HSTS im Proxy-Server-Block aktivieren (`add_header Strict-Transport-Security "max-age=31536000" always;`). Lokaler Test ohne Proxy: `APP_URL=http://localhost:8080`.
+Läuft der Proxy auf demselben Host, setze `BIND_ADDR=127.0.0.1`, damit der Port nicht von außen erreichbar ist. HSTS im Proxy-Server-Block aktivieren (`add_header Strict-Transport-Security "max-age=31536000" always;`).
+
+### Betrieb ohne Proxy
+Der Stack enthält keinen Proxy und läuft auch ohne: `APP_URL=http://<server-ip>:8080` setzen, `docker compose up -d`, dann direkt `http://<server-ip>:8080` öffnen (Cookies sind bei `http://` nicht `Secure`). Für Produktion im Internet TLS über einen vorgelagerten Proxy empfohlen.
 
 ## Konfiguration (`.env`)
 
@@ -110,9 +113,8 @@ Sichere zusätzlich `.env` (insbesondere `ENCRYPTION_KEY`) getrennt vom Backup.
 Nicht enthalten: SSO/OIDC, LDAP, Bankanbindung (FinTS/PSD2), MT940-Import, S3/SFTP-Backupziele, E-Mail-Bestätigungsfluss bei Registrierung.
 
 ## GitLab veröffentlichen
-Leeres Projekt `budget-manager` auf https://gitlab.zd-c.com anlegen (ohne README), dann:
+Remote ist `https://gitlab.zd-c.com/timpner/budget-manager.git`. Push (legt das private Projekt beim ersten Mal an; Passwort oder Access Token mit `write_repository`):
 
 ```bash
-git remote add origin git@gitlab.zd-c.com:<gruppe>/budget-manager.git
 git push -u origin main
 ```
