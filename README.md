@@ -110,9 +110,9 @@ Sichere zusätzlich `.env` (insbesondere `ENCRYPTION_KEY`) getrennt vom Backup.
 Nicht enthalten: SSO/OIDC, LDAP, Bankanbindung (FinTS/PSD2), MT940-Import, S3/SFTP-Backupziele, E-Mail-Bestätigungsfluss bei Registrierung.
 
 ## GitLab veröffentlichen
-Leeres Projekt `budget-manager` auf https://gitlab.zd-d.com anlegen (ohne README), dann:
+Leeres Projekt `budget-manager` auf https://gitlab.zd-c.com anlegen (ohne README), dann:
 
 ```bash
-git remote add origin git@gitlab.zd-d.com:<gruppe>/budget-manager.git
+git remote add origin git@gitlab.zd-c.com:<gruppe>/budget-manager.git
 git push -u origin main
 ```
