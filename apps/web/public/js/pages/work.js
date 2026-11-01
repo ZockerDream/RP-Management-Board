@@ -1,19 +1,39 @@
 import { api } from '../api.js';
 import { $, esc, empty, openForm, confirmBox, toast, todayStr } from '../ui.js';
+import { can } from '../app.js';
 
 const hoursText = (hours) => `${Number(hours).toLocaleString('de-DE', { maximumFractionDigits: 2 })} Std.`;
 const dateText = (date) => String(date).slice(0, 10).split('-').reverse().join('.');
+const timeText = (time) => (time ? String(time).slice(0, 5) : '–');
+const asDate = (value) => {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day);
+};
+const localDate = (date) => date.toLocaleDateString('sv-SE');
+function range(mode, value) {
+  const selected = asDate(value);
+  if (mode === 'day') return [value, value];
+  const start = new Date(selected);
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  return [localDate(start), localDate(end)];
+}
 
-async function entryForm(entry) {
+async function entryForm(entry, projects) {
   return openForm({
-    title: entry ? 'Stundeneintrag bearbeiten' : 'Stunden erfassen',
+    title: entry ? 'Stundeneintrag bearbeiten' : 'Stunden manuell erfassen',
     fields: [
       { name: 'work_date', label: 'Datum', type: 'date', value: entry?.work_date?.slice(0, 10) || todayStr(), required: true },
-      { name: 'hours', label: 'Arbeitsstunden', type: 'number', min: 0.01, max: 24, step: 0.25, value: entry?.hours || '', required: true },
-      { name: 'note', label: 'Notiz (optional)', type: 'textarea', value: entry?.note || '', full: true },
+      { name: 'project_id', label: 'Projekt / Kunde', type: 'select', options: [{ v: '', l: '– Ohne Projekt –' }, ...projects.map((p) => ({ v: p.id, l: `${p.name}${p.team_name ? ` · ${p.team_name}` : ''}` }))], value: entry?.project_id || '' },
+      { name: 'hours', label: 'Arbeitsstunden', type: 'number', min: 0.01, max: 24, step: 0.01, value: entry?.hours || '', required: true },
+      { name: 'started_at', label: 'Beginn (optional)', type: 'time', value: entry?.started_at?.slice(0, 5) || '' },
+      { name: 'ended_at', label: 'Ende (optional)', type: 'time', value: entry?.ended_at?.slice(0, 5) || '' },
+      { name: 'break_minutes', label: 'Pause in Minuten', type: 'number', min: 0, max: 1440, value: entry?.break_minutes || 0 },
+      { name: 'note', label: 'Notiz', type: 'textarea', value: entry?.note || '', full: true },
     ],
     onSubmit: async (v) => {
-      const body = { work_date: v.work_date, hours: Number(v.hours), note: v.note };
+      const body = { work_date: v.work_date, hours: Number(v.hours), project_id: v.project_id || null, started_at: v.started_at || null, ended_at: v.ended_at || null, break_minutes: Number(v.break_minutes) || 0, note: v.note };
       if (entry) await api.patch(`/work-hours/${entry.id}`, body);
       else await api.post('/work-hours', body);
     },
@@ -21,44 +41,125 @@ async function entryForm(entry) {
 }
 
 export async function render(view) {
-  const now = new Date();
-  const from = new Date(now.getFullYear(), now.getMonth(), 1).toLocaleDateString('sv-SE');
-  const to = new Date(now.getFullYear(), now.getMonth() + 1, 0).toLocaleDateString('sv-SE');
   let entries = [];
-  view.innerHTML = `<div class="page-head"><div><h1>Stundenerfassung</h1><p>Arbeitszeit getrennt von Gehaltsbuchungen erfassen</p></div>
-    <button class="btn" id="work-new">Stunden erfassen</button></div>
-    <div class="card"><div class="toolbar" style="gap:8px;flex-wrap:wrap"><label class="field">Von<input id="work-from" type="date" value="${from}"></label>
-    <label class="field">Bis<input id="work-to" type="date" value="${to}"></label><b id="work-total" class="up"></b></div>
-    <div id="work-list"></div></div>`;
+  let projects = [];
+  let timer = null;
+  const teams = can('team:read') ? (await api.get('/teams')).filter((team) => team.role !== 'viewer') : [];
+  const today = todayStr();
+  view.innerHTML = `<div class="page-head"><div><h1>Stundenerfassung</h1><p>Arbeitszeit, Pausen und Projekte unabhängig vom Gehalt erfassen</p></div>
+    <div class="actions"><button class="btn ghost" id="work-export">CSV-Export</button><button class="btn ghost" id="project-new">Projekt anlegen</button><button class="btn" id="work-new">Manuell erfassen</button></div></div>
+    <div class="card"><div class="card-head"><h2>Zeiterfassung</h2><span id="timer-state" class="tag">Inaktiv</span></div>
+      <div class="toolbar" style="gap:8px;flex-wrap:wrap"><select id="timer-project"><option value="">Ohne Projekt</option></select>
+      <input id="timer-note" maxlength="500" placeholder="Notiz (optional)" style="flex:1;min-width:180px">
+      <b id="timer-clock" class="value">00:00:00</b><button class="btn" id="timer-start">Start</button>
+      <button class="btn ghost" id="timer-pause" hidden>Pause</button><button class="btn ghost" id="timer-stop" hidden>Beenden</button></div>
+      <small id="timer-hint" class="muted"></small></div>
+    <div class="card"><div class="card-head"><h2>Auswertung</h2><b id="work-total" class="up"></b></div>
+      <div class="toolbar" style="gap:8px;flex-wrap:wrap"><select id="work-mode"><option value="week">Woche</option><option value="day">Tag</option></select>
+      <input id="work-date" type="date" value="${today}"><span id="work-range" class="muted"></span></div><div id="work-list"></div></div>
+    <div class="card"><div class="card-head"><h2>Projekte / Kunden</h2></div><div id="project-list"></div></div>`;
 
+  function updateProjectOptions() {
+    $('#timer-project').innerHTML = `<option value="">Ohne Projekt</option>${projects.filter((p) => p.active).map((p) => `<option value="${p.id}">${esc(p.name)}${p.team_name ? ` · ${esc(p.team_name)}` : ''}</option>`).join('')}`;
+  }
+  function elapsedSeconds() {
+    if (!timer) return 0;
+    const now = timer.paused_at ? new Date(timer.paused_at).getTime() : Date.now();
+    return Math.max(0, Math.floor((now - new Date(timer.started_at).getTime()) / 1000) - Number(timer.paused_seconds || 0));
+  }
+  function drawTimer() {
+    const running = Boolean(timer);
+    $('#timer-state').textContent = !running ? 'Inaktiv' : timer.paused_at ? 'Pausiert' : 'Läuft';
+    $('#timer-state').className = `tag ${running ? timer.paused_at ? 'warn' : 'ok' : ''}`;
+    $('#timer-start').hidden = running;
+    $('#timer-project').disabled = running;
+    $('#timer-note').disabled = running;
+    $('#timer-pause').hidden = !running;
+    $('#timer-pause').textContent = timer?.paused_at ? 'Fortsetzen' : 'Pause';
+    $('#timer-stop').hidden = !running;
+    $('#timer-clock').textContent = new Date(elapsedSeconds() * 1000).toISOString().slice(11, 19);
+    $('#timer-hint').textContent = running
+      ? `Gestartet: ${new Date(timer.started_at).toLocaleString('de-DE')}${timer.project_name ? ` · ${timer.project_name}` : ''}`
+      : 'Pausen werden nicht als Arbeitszeit gezählt.';
+  }
+  async function loadProjects() {
+    projects = await api.get('/work-projects');
+    updateProjectOptions();
+    $('#project-list').innerHTML = projects.length ? projects.map((p) => `<div class="list-item"><div class="grow"><b>${esc(p.name)}</b><small>${p.team_name ? `Team: ${esc(p.team_name)}` : 'Privat'} · ${p.active ? 'Aktiv' : 'Archiviert'}</small></div>
+      <button class="btn ghost sm" data-project-toggle="${p.id}">${p.active ? 'Archivieren' : 'Aktivieren'}</button>${p.owner_user_id ? ` <button class="btn ghost sm" data-project-delete="${p.id}">Löschen</button>` : ''}</div>`).join('') : empty('Noch keine Projekte angelegt.');
+  }
+  async function loadTimer() {
+    timer = await api.get('/work-hours/timer');
+    drawTimer();
+  }
   async function load() {
-    const params = new URLSearchParams(Object.entries({ from: $('#work-from').value, to: $('#work-to').value }).filter(([, value]) => value));
+    const [from, to] = range($('#work-mode').value, $('#work-date').value);
+    $('#work-range').textContent = `${dateText(from)} – ${dateText(to)}`;
+    const params = new URLSearchParams({ from, to });
     const result = await api.get(`/work-hours?${params}`);
     entries = result.items;
     $('#work-total').textContent = `Gesamt: ${hoursText(result.total_hours)}`;
-    $('#work-list').innerHTML = entries.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Datum</th><th>Stunden</th><th>Notiz</th><th></th></tr></thead><tbody>${entries.map((item) => `<tr>
-      <td>${dateText(item.work_date)}</td><td><b>${hoursText(item.hours)}</b></td><td>${esc(item.note || '–')}</td>
-      <td style="white-space:nowrap"><button class="btn ghost sm" data-edit="${item.id}">Bearbeiten</button> <button class="btn ghost sm" data-del="${item.id}">Löschen</button></td></tr>`).join('')}</tbody></table></div>` : empty('Keine Stunden im gewählten Zeitraum erfasst.');
+    $('#work-list').innerHTML = entries.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Datum</th><th>Projekt / Kunde</th><th>Zeitraum</th><th>Pause</th><th>Arbeitszeit</th><th>Notiz</th><th></th></tr></thead><tbody>${entries.map((item) => `<tr>
+      <td>${dateText(item.work_date)}</td><td>${esc(item.project_name || '–')}</td><td>${timeText(item.started_at)} – ${timeText(item.ended_at)}</td>
+      <td>${item.break_minutes || 0} Min.</td><td><b>${hoursText(item.hours)}</b></td><td>${esc(item.note || '–')}</td>
+      <td style="white-space:nowrap"><button class="btn ghost sm" data-edit="${item.id}">Bearbeiten</button> <button class="btn ghost sm" data-del="${item.id}">Löschen</button></td></tr>`).join('')}</tbody></table></div>` : empty('Keine Arbeitszeit im gewählten Zeitraum erfasst.');
+  }
+  async function projectForm() {
+    return openForm({
+      title: 'Projekt / Kunde anlegen',
+      fields: [
+        { name: 'name', label: 'Name', required: true, full: true },
+        { name: 'team_id', label: 'Sichtbarkeit', type: 'select', options: [{ v: '', l: 'Privat' }, ...teams.map((team) => ({ v: team.id, l: `Team: ${team.name}` }))], value: '' },
+      ],
+      onSubmit: async (v) => api.post('/work-projects', { name: v.name.trim(), team_id: v.team_id || null }),
+    });
   }
 
   view.addEventListener('change', (event) => {
-    if (event.target.matches('#work-from, #work-to')) load().catch((error) => toast(error.message, true));
+    if (event.target.matches('#work-mode, #work-date')) load().catch((error) => toast(error.message, true));
   });
   view.addEventListener('click', async (event) => {
     const target = event.target.closest('button');
     if (!target) return;
     try {
       if (target.id === 'work-new') {
-        if (await entryForm()) await load();
+        if (await entryForm(null, projects)) await load();
+      } else if (target.id === 'project-new') {
+        if (await projectForm()) { await loadProjects(); await load(); }
+      } else if (target.id === 'work-export') {
+        const [from, to] = range($('#work-mode').value, $('#work-date').value);
+        await api.download(`/work-hours/export.csv?${new URLSearchParams({ from, to })}`, 'arbeitszeiten.csv');
+      } else if (target.id === 'timer-start') {
+        await api.post('/work-hours/timer/start', { project_id: $('#timer-project').value || null, note: $('#timer-note').value });
+        await loadTimer();
+      } else if (target.id === 'timer-pause') {
+        await api.post(`/work-hours/timer/${timer.paused_at ? 'resume' : 'pause'}`);
+        await loadTimer();
+      } else if (target.id === 'timer-stop') {
+        await api.post('/work-hours/timer/stop');
+        await loadTimer();
+        await load();
       } else if (target.dataset.edit) {
-        if (await entryForm(entries.find((item) => item.id === target.dataset.edit))) await load();
+        if (await entryForm(entries.find((item) => item.id === target.dataset.edit), projects)) await load();
       } else if (target.dataset.del && await confirmBox('Stundeneintrag löschen', 'Diesen Eintrag wirklich löschen?')) {
         await api.del(`/work-hours/${target.dataset.del}`);
+        await load();
+      } else if (target.dataset.projectToggle) {
+        const project = projects.find((item) => item.id === target.dataset.projectToggle);
+        await api.patch(`/work-projects/${project.id}`, { active: !project.active });
+        await loadProjects();
+      } else if (target.dataset.projectDelete && await confirmBox('Projekt löschen', 'Das Projekt wird entfernt; erfasste Stunden bleiben ohne Projektzuordnung erhalten.')) {
+        await api.del(`/work-projects/${target.dataset.projectDelete}`);
+        await loadProjects();
         await load();
       }
     } catch (error) {
       toast(error.message, true);
     }
   });
-  await load();
+  await Promise.all([loadProjects(), loadTimer(), load()]);
+  const tick = setInterval(() => {
+    if (!view.isConnected) clearInterval(tick);
+    else if (timer && !timer.paused_at) drawTimer();
+  }, 1000);
 }

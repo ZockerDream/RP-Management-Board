@@ -1,6 +1,6 @@
 # Budget Manager
 
-Selbst gehostete Haushalts- und Teambudget-Verwaltung: Budgets, Transaktionen, Daueraufträge, Sparziele, Berichte, Teams, Kalender, Schlüssel-/Objektverwaltung, Rollen & Rechte, 2FA, verschlüsselte Backups. Konzept: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md).
+Selbst gehostete Haushalts- und Teambudget-Verwaltung: Budgets, Transaktionen, Daueraufträge, Sparziele, Zeiterfassung, Berichte, Teams, Kalender, Google-/Outlook-Sync, Schlüssel-/Objektverwaltung, Rollen & Rechte, 2FA, verschlüsselte Backups. Konzept: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md).
 
 ## Architektur
 
@@ -43,7 +43,7 @@ Ohne Proxy direkt `http://<server-ip>:8080` öffnen. Bei HTTP sind Cookies nicht
 | `TZ` | Zeitzone |
 | `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Datenbank |
 | `JWT_SECRET` | Signatur der Access-Tokens (mind. 32 Zeichen) |
-| `ENCRYPTION_KEY` | verschlüsselt 2FA-Secrets, SMTP-Passwort, Backups. **Nie verlieren oder ändern**, sonst sind diese Daten unlesbar |
+| `ENCRYPTION_KEY` | verschlüsselt 2FA-Secrets, SMTP-Passwort, Provider-Tokens und Backups. **Nie verlieren oder ändern**, sonst sind diese Daten unlesbar |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` | initialer Administrator (nur beim ersten Start) |
 | `ACCESS_TOKEN_TTL_SEC`, `REFRESH_TOKEN_TTL_DAYS` | Token-Laufzeiten |
 | `ALLOW_REGISTRATION` | Selbstregistrierung an/aus (Standard aus) |
@@ -53,8 +53,14 @@ Ohne Proxy direkt `http://<server-ip>:8080` öffnen. Bei HTTP sind Cookies nicht
 | `MAX_UPLOAD_MB` | Belegupload-Limit |
 | `HOLIDAY_COUNTRY`, `HOLIDAY_REGION` | Feiertage im Kalender |
 | `LOG_LEVEL` | Log-Level |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth für Kontakte und Kalender; Redirect-URI `APP_URL/api/integrations/google/callback`, Scopes `contacts.readonly` und `calendar.readonly` |
+| `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` | Microsoft OAuth für Kontakte und Kalender; Redirect-URI `APP_URL/api/integrations/microsoft/callback`, API-Berechtigungen `Contacts.Read`, `Calendars.Read`, `User.Read` sowie `offline_access` |
+| `GITHUB_ISSUES_TOKEN`, `GITHUB_ISSUES_REPOSITORY` | Fehlerberichte als GitHub Issues; Token benötigt Issues-Schreibzugriff im Zielrepository |
+| `IMPRINT_*` | Angaben für die öffentliche Impressumsseite |
 
 Alle weiteren Einstellungen (Passwortregeln, Branding, Wartungsmodus) pflegt der Admin unter *Verwaltung → Einstellungen*.
+
+Google- und Microsoft-Verbindungen importieren Kontakte und Kalendertermine ausschließlich lesend. Verbindungen und importierte Daten können in *Einstellungen → API & Kalender* wieder getrennt bzw. gelöscht werden. Die Zeiterfassung bietet Timer mit Pausen, private oder teamweite Projekte, manuelle Einträge sowie Wochen-/Tagesübersicht und CSV-Export. Objekte, Schlüssel und Personen werden beim Anlegen privat gespeichert; Teamfreigabe kann pro Datensatz gewählt werden. Bereits vorhandene globale Objekte werden beim Update dem ersten Admin privat zugeordnet.
 
 ## Betrieb
 

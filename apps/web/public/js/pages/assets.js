@@ -24,9 +24,18 @@ const costBody = (v) => ({
   cost_budget_id: v.cost_amount ? v.cost_budget_id || null : null, cost_category_id: v.cost_amount ? v.cost_category_id || null : null, cost_tracking: v.cost_tracking,
 });
 const save = (path, o, body) => (o ? api.patch(`/${path}/${o.id}`, body) : api.post(`/${path}`, body));
+async function ownershipFields(o) {
+  const teams = can('team:read') ? (await api.get('/teams')).filter((team) => team.role !== 'viewer') : [];
+  return [
+    { name: 'scope', label: 'Sichtbarkeit', type: 'select', options: [{ v: 'personal', l: 'Privat' }, ...(teams.length ? [{ v: 'team', l: 'Team' }] : [])], value: o?.team_id ? 'team' : 'personal' },
+    { name: 'team_id', label: 'Team', type: 'select', options: [{ v: '', l: '–' }, ...teams.map((team) => ({ v: team.id, l: team.name }))], value: o?.team_id || '' },
+  ];
+}
+const ownershipBody = (v) => ({ scope: v.scope, team_id: v.scope === 'team' ? v.team_id || null : null });
 
 async function formProperty(o, people) {
   const budgets = await loadBudgets();
+  const ownership = await ownershipFields(o);
   return openForm({
     title: o ? 'Haus bearbeiten' : 'Neues Haus / Objekt', wide: true, fields: [
       { name: 'name', label: 'Name', value: o?.name, required: true },
@@ -36,13 +45,15 @@ async function formProperty(o, people) {
       { name: 'maintenance_due', label: 'Wartung fällig', type: 'date', value: o?.maintenance_due?.slice(0, 10) },
       { name: 'maintenance_note', label: 'Wartungshinweis', value: o?.maintenance_note, full: true },
       { name: 'note', label: 'Notiz', type: 'textarea', value: o?.note, full: true },
+      ...ownership,
       ...costFields(o, budgets),
     ],
-    onSubmit: (v) => save('properties', o, { name: v.name.trim(), type: v.type, address: v.address, responsible_person_id: v.responsible_person_id || null, maintenance_due: v.maintenance_due || null, maintenance_note: v.maintenance_note, note: v.note, ...costBody(v) }),
+    onSubmit: (v) => save('properties', o, { name: v.name.trim(), type: v.type, address: v.address, responsible_person_id: v.responsible_person_id || null, maintenance_due: v.maintenance_due || null, maintenance_note: v.maintenance_note, note: v.note, ...ownershipBody(v), ...costBody(v) }),
   });
 }
 async function formVehicle(o) {
   const budgets = await loadBudgets();
+  const ownership = await ownershipFields(o);
   return openForm({
     title: o ? 'Fahrzeug bearbeiten' : 'Neues Fahrzeug', wide: true, fields: [
       { name: 'plate', label: 'Kennzeichen', value: o?.plate, required: true },
@@ -54,13 +65,22 @@ async function formVehicle(o) {
       { name: 'service_due_km', label: 'Service fällig bei (km)', type: 'number', min: 0, value: o?.service_due_km },
       { name: 'insurance_from', label: 'Versicherung ab', type: 'date', value: o?.insurance_from?.slice(0, 10) },
       { name: 'note', label: 'Notiz', type: 'textarea', value: o?.note, full: true },
+      ...ownership,
       ...costFields(o, budgets),
     ],
-    onSubmit: (v) => save('vehicles', o, { plate: v.plate.trim(), make_model: v.make_model.trim(), status: v.status, service_due: v.service_due || null, odometer_km: v.odometer_km === '' ? null : Number(v.odometer_km), service_interval_km: v.service_interval_km === '' ? null : Number(v.service_interval_km), service_due_km: v.service_due_km === '' ? null : Number(v.service_due_km), insurance_from: v.insurance_from || null, note: v.note, ...costBody(v) }),
+    onSubmit: (v) => {
+      const odometerKm = v.odometer_km === '' ? null : Number(v.odometer_km);
+      const serviceIntervalKm = v.service_interval_km === '' ? null : Number(v.service_interval_km);
+      const serviceDueKm = v.service_due_km === ''
+        ? (odometerKm !== null && serviceIntervalKm !== null ? odometerKm + serviceIntervalKm : null)
+        : Number(v.service_due_km);
+      return save('vehicles', o, { plate: v.plate.trim(), make_model: v.make_model.trim(), status: v.status, service_due: v.service_due || null, odometer_km: odometerKm, service_interval_km: serviceIntervalKm, service_due_km: serviceDueKm, insurance_from: v.insurance_from || null, note: v.note, ...ownershipBody(v), ...costBody(v) });
+    },
   });
 }
 async function formKey(o, props, vehicles) {
   const budgets = await loadBudgets();
+  const ownership = await ownershipFields(o);
   return openForm({
     title: o ? 'Schlüssel bearbeiten' : 'Neuer Schlüssel', wide: true, fields: [
       { name: 'code', label: 'Schlüssel-Nr.', value: o?.code, required: true },
@@ -70,12 +90,15 @@ async function formKey(o, props, vehicles) {
       { name: 'property_id', label: 'Haus', type: 'select', options: [{ v: '', l: '–' }, ...props.map((p) => ({ v: p.id, l: p.name }))], value: o?.property_id || '' },
       { name: 'vehicle_id', label: 'Fahrzeug', type: 'select', options: [{ v: '', l: '–' }, ...vehicles.map((p) => ({ v: p.id, l: `${p.make_model} (${p.plate})` }))], value: o?.vehicle_id || '' },
       { name: 'note', label: 'Notiz', type: 'textarea', value: o?.note, full: true },
+      ...ownership,
       ...costFields(o, budgets),
     ],
-    onSubmit: (v) => save('keys', o, { code: v.code.trim(), label: v.label.trim(), kind: v.kind, copies: Number(v.copies) || 1, property_id: v.property_id || null, vehicle_id: v.vehicle_id || null, note: v.note, ...costBody(v) }),
+    onSubmit: (v) => save('keys', o, { code: v.code.trim(), label: v.label.trim(), kind: v.kind, copies: Number(v.copies) || 1, property_id: v.property_id || null, vehicle_id: v.vehicle_id || null, note: v.note, ...ownershipBody(v), ...costBody(v) }),
   });
 }
-const formPerson = (o) => openForm({
+async function formPerson(o) {
+  const ownership = await ownershipFields(o);
+  return openForm({
   title: o ? 'Person bearbeiten' : 'Neue Person', fields: [
     { name: 'name', label: 'Name', value: o?.name, required: true },
     { name: 'kind', label: 'Art', type: 'select', options: Object.entries(PKIND).map(([v, l]) => ({ v, l })), value: o?.kind || 'employee' },
@@ -84,9 +107,11 @@ const formPerson = (o) => openForm({
     { name: 'email', label: 'E-Mail', type: 'email', value: o?.email, full: true },
     { name: 'active', label: 'Aktiv', type: 'checkbox', value: o ? o.active : true },
     { name: 'note', label: 'Notiz', type: 'textarea', value: o?.note, full: true },
+    ...ownership,
   ],
-  onSubmit: (v) => save('people', o, { name: v.name.trim(), kind: v.kind, function: v.function, phone: v.phone, email: v.email, active: v.active, note: v.note }),
-});
+  onSubmit: (v) => save('people', o, { name: v.name.trim(), kind: v.kind, function: v.function, phone: v.phone, email: v.email, active: v.active, note: v.note, ...ownershipBody(v) }),
+  });
+}
 
 const actions = (id, perm) => `${can(`${perm}:update`) ? `<button class="btn ghost sm" data-edit="${id}">Bearbeiten</button>` : ''}${can(`${perm}:delete`) ? ` <button class="btn ghost sm" data-del="${id}">Löschen</button>` : ''}`;
 
@@ -111,7 +136,7 @@ export async function render(view, params) {
       const c = o.counts;
       el.innerHTML = `<div class="grid cols-4">${[['Häuser', c.properties], ['Fahrzeuge', c.vehicles], ['Schlüssel', `${c.issued} ausgegeben / ${c.keys}`], ['Personen', c.people]].map(([l, v]) => `<div class="card kpi"><span class="label">${l}</span><span class="value">${v}</span></div>`).join('')}</div>
       <div class="grid cols-3"><div class="card"><div class="card-head"><h2>Schlüssel-Warnungen</h2></div>${o.key_alerts.length ? o.key_alerts.map((k) => `<div class="list-item"><div class="grow"><b>${esc(k.label)}</b><small>${esc(k.person || '–')} · Kopie ${k.copy_no}</small></div><span class="tag bad">${k.lost_at ? 'Verloren' : `fällig ${fdate(k.due_at)}`}</span></div>`).join('') : empty('Keine Warnungen.')}</div>
-      <div class="card"><div class="card-head"><h2>Fahrzeug-Service (30 Tage)</h2></div>${o.vehicle_service.length ? o.vehicle_service.map((v) => `<div class="list-item"><div class="grow"><b>${esc(v.make_model)}</b><small>${esc(v.plate)}</small></div><span class="tag warn">${fdate(v.service_due)}</span></div>`).join('') : empty('Keine fälligen Services.')}</div>
+      <div class="card"><div class="card-head"><h2>Fahrzeug-Service</h2></div>${o.vehicle_service.length ? o.vehicle_service.map((v) => `<div class="list-item"><div class="grow"><b>${esc(v.make_model)}</b><small>${esc(v.plate)}</small></div><span class="tag warn">${v.service_due ? fdate(v.service_due) : ''}${v.service_due_km != null ? `${v.service_due ? ' · ' : ''}${v.odometer_km != null && Number(v.odometer_km) >= Number(v.service_due_km) ? 'fällig' : 'bei'} ${Number(v.service_due_km).toLocaleString('de-DE')} km` : ''}</span></div>`).join('') : empty('Keine fälligen Services.')}</div>
       <div class="card"><div class="card-head"><h2>Hauswartung (30 Tage)</h2></div>${o.property_maintenance.length ? o.property_maintenance.map((p) => `<div class="list-item"><div class="grow"><b>${esc(p.name)}</b><small>${esc(p.maintenance_note || '')}</small></div><span class="tag warn">${fdate(p.maintenance_due)}</span></div>`).join('') : empty('Keine fälligen Wartungen.')}</div></div>`;
     },
     async keys(el) {

@@ -3,6 +3,7 @@ import Holidays from 'date-holidays';
 import { one, many, q } from '../db.js';
 import { authz, bad, notFound, forbidden, accessibleBudgetIds } from '../authz.js';
 import { nthOccurrence, addInterval, today } from '../lib.js';
+import { config } from '../config.js';
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const time = z.string().regex(/^\d{2}:\d{2}$/);
@@ -30,6 +31,25 @@ export async function buildFeed(userId, from, to) {
   );
   out.push(...own.map((e) => ({ ...shape(e), start: e.start_time, end: e.end_time })));
 
+  const imported = await many(
+    `SELECT provider, external_id, title, starts_at, ends_at, all_day FROM synced_calendar_events
+     WHERE user_id=$1 AND (
+       (all_day AND starts_at >= ($2::date::timestamp AT TIME ZONE 'UTC')
+         AND starts_at < (($3::date + 1)::timestamp AT TIME ZONE 'UTC'))
+       OR (NOT all_day AND starts_at >= ($2::date::timestamp AT TIME ZONE $4)
+         AND starts_at < (($3::date + 1)::timestamp AT TIME ZONE $4))
+     )`,
+    [userId, from, to, config.tz],
+  );
+  const dateInZone = (value) => new Intl.DateTimeFormat('sv-SE', { timeZone: config.tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(value);
+  out.push(...imported.map((event) => ({
+    id: `sync:${event.provider}:${event.external_id}`, source: 'external', type: 'external',
+    title: event.title, date: event.all_day ? new Date(event.starts_at).toISOString().slice(0, 10) : dateInZone(event.starts_at),
+    start: event.all_day ? null : new Intl.DateTimeFormat('en-GB', { timeZone: config.tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(event.starts_at),
+    end: event.ends_at && !event.all_day ? new Intl.DateTimeFormat('en-GB', { timeZone: config.tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(event.ends_at) : null,
+    allDay: event.all_day, repeat: 'none', amount: null, note: event.provider === 'google' ? 'Google Kalender' : 'Outlook', remind: 'none', locked: true,
+  })));
+
   const ids = await accessibleBudgetIds(userId);
   const rules = await many('SELECT * FROM recurring_rules WHERE active AND budget_id = ANY($1)', [ids]);
   for (const r of rules) {
@@ -44,14 +64,17 @@ export async function buildFeed(userId, from, to) {
       }
     }
   }
-  for (const v of await many('SELECT id, plate, make_model, service_due, insurance_from FROM vehicles')) {
+  for (const v of await many(`SELECT id, plate, make_model, service_due, insurance_from FROM vehicles
+    WHERE owner_user_id=$1 OR team_id IN (SELECT team_id FROM team_members WHERE user_id=$1)`, [userId])) {
     if (v.service_due) out.push(ro(`veh:${v.id}:service`, 'vehicle', `Service: ${v.make_model}`, v.service_due, { note: v.plate }));
     if (v.insurance_from) out.push(ro(`veh:${v.id}:ins`, 'vehicle', `Versicherung: ${v.make_model}`, v.insurance_from, { repeat: 'yearly', note: v.plate }));
   }
-  for (const p of await many('SELECT id, name, maintenance_due, maintenance_note FROM properties WHERE maintenance_due IS NOT NULL')) {
+  for (const p of await many(`SELECT id, name, maintenance_due, maintenance_note FROM properties WHERE (owner_user_id=$1 OR team_id IN (SELECT team_id FROM team_members WHERE user_id=$1)) AND maintenance_due IS NOT NULL`, [userId])) {
     out.push(ro(`house:${p.id}`, 'house', `Wartung: ${p.name}`, p.maintenance_due, { note: p.maintenance_note }));
   }
-  for (const a of await many(`SELECT a.id, a.due_at, k.label, pe.name person FROM key_assignments a JOIN keys k ON k.id=a.key_id LEFT JOIN people pe ON pe.id=a.person_id WHERE a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at IS NOT NULL`)) {
+  for (const a of await many(`SELECT a.id, a.due_at, k.label, pe.name person FROM key_assignments a JOIN keys k ON k.id=a.key_id
+    LEFT JOIN people pe ON pe.id=a.person_id AND (pe.owner_user_id=$1 OR pe.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1))
+    WHERE (k.owner_user_id=$1 OR k.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1)) AND a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at IS NOT NULL`, [userId])) {
     out.push(ro(`key:${a.id}`, 'key', `Rückgabe: ${a.label}`, a.due_at, { note: a.person || '' }));
   }
   for (const g of await many('SELECT id, name, target_date FROM goals WHERE target_date IS NOT NULL AND budget_id = ANY($1)', [ids])) {

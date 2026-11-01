@@ -161,7 +161,13 @@ export default async function routes(app) {
     const transactions = await many(
       `SELECT t.* FROM transactions t JOIN budgets b ON b.id=t.budget_id WHERE b.owner_user_id=$1 ORDER BY booked_at`, [req.user.id]);
     const work_entries = await many('SELECT * FROM work_entries WHERE user_id=$1 ORDER BY work_date', [req.user.id]);
-    return { exported_at: new Date().toISOString(), user: u, budgets, transactions, work_entries };
+    const [work_projects, timer, contacts, calendar_events] = await Promise.all([
+      many('SELECT * FROM work_projects WHERE owner_user_id=$1 OR team_id IN (SELECT team_id FROM team_members WHERE user_id=$1) ORDER BY name', [req.user.id]),
+      one('SELECT * FROM work_timers WHERE user_id=$1', [req.user.id]),
+      many('SELECT provider,external_id,name,email,phone,updated_at FROM synced_contacts WHERE user_id=$1 ORDER BY provider,name', [req.user.id]),
+      many('SELECT provider,external_id,title,starts_at,ends_at,all_day,updated_at FROM synced_calendar_events WHERE user_id=$1 ORDER BY starts_at', [req.user.id]),
+    ]);
+    return { exported_at: new Date().toISOString(), user: u, budgets, transactions, work_entries, work_projects, work_timer: timer, contacts, calendar_events };
   });
 }
 
