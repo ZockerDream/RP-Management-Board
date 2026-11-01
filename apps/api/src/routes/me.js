@@ -160,7 +160,8 @@ export default async function routes(app) {
       `SELECT * FROM budgets WHERE owner_user_id=$1`, [req.user.id]);
     const transactions = await many(
       `SELECT t.* FROM transactions t JOIN budgets b ON b.id=t.budget_id WHERE b.owner_user_id=$1 ORDER BY booked_at`, [req.user.id]);
-    return { exported_at: new Date().toISOString(), user: u, budgets, transactions };
+    const work_entries = await many('SELECT * FROM work_entries WHERE user_id=$1 ORDER BY work_date', [req.user.id]);
+    return { exported_at: new Date().toISOString(), user: u, budgets, transactions, work_entries };
   });
 }
 

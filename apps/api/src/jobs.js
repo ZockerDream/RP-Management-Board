@@ -17,9 +17,9 @@ export async function recurringRun(log) {
       if (r.end_date && d > r.end_date) break;
       if (d >= r.next_run) {
         const res = await q(
-          `INSERT INTO transactions(budget_id,category_id,created_by,type,amount,booked_at,title,source,recurring_id,asset_type,asset_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
-          [r.budget_id, r.category_id, r.created_by, r.type, r.amount, d, r.name, r.source === 'asset' ? 'asset' : 'recurring', r.id, r.asset_type, r.asset_id],
+          `INSERT INTO transactions(budget_id,category_id,created_by,type,amount,booked_at,title,source,recurring_id,asset_type,asset_id,income_kind)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING`,
+          [r.budget_id, r.category_id, r.created_by, r.type, r.amount, d, r.name, r.source === 'asset' ? 'asset' : 'recurring', r.id, r.asset_type, r.asset_id, r.income_kind || 'other'],
         );
         booked += res.rowCount;
         if (r.type === 'expense') watch.add(r.budget_id);

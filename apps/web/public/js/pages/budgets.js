@@ -3,7 +3,7 @@ import { $, esc, eur, empty, budgetTag, progress, openForm, confirmBox, toast, p
 import { loadBudgets } from './common.js';
 import { can } from '../app.js';
 
-const PERIODS = [{ v: 'monthly', l: 'Monatlich' }, { v: 'yearly', l: 'Jährlich' }, { v: 'custom', l: 'Zeitraum' }, { v: 'goal', l: 'Sparziel' }];
+const PERIODS = [{ v: 'daily', l: 'Täglich' }, { v: 'weekly', l: 'Wöchentlich' }, { v: 'monthly', l: 'Monatlich' }, { v: 'yearly', l: 'Jährlich' }, { v: 'custom', l: 'Zeitraum' }, { v: 'goal', l: 'Sparziel' }];
 const periodLabel = (b) => (b.period_type === 'custom' ? `${fdate(b.period_start)} – ${fdate(b.period_end)}` : PERIODS.find((p) => p.v === b.period_type)?.l);
 
 async function budgetForm(b) {

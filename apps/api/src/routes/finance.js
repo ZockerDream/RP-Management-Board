@@ -14,7 +14,7 @@ const budgetBody = z.object({
   type: z.enum(['solo', 'shared']),
   team_id: id.nullish(),
   currency: z.string().length(3).default('EUR'),
-  period_type: z.enum(['monthly', 'yearly', 'custom', 'goal']).default('monthly'),
+  period_type: z.enum(['daily', 'weekly', 'monthly', 'yearly', 'custom', 'goal']).default('monthly'),
   period_start: date.nullish(),
   period_end: date.nullish(),
   limit_amount: money.default('0'),
@@ -123,7 +123,7 @@ export default async function routes(app) {
   // ---- Transaktionen
   const txFilter = async (req) => {
     const f = z.object({
-      budget_id: id.optional(), type: z.enum(['income', 'expense', 'deposit']).optional(), category_id: id.optional(),
+      budget_id: id.optional(), type: z.enum(['income', 'expense', 'deposit']).optional(), income_kind: z.enum(['other', 'salary']).optional(), category_id: id.optional(),
       from: date.optional(), to: date.optional(), q: z.string().max(100).optional(), scope: z.enum(['solo', 'shared', 'all']).default('all'),
       limit: z.coerce.number().int().min(1).max(500).default(50), offset: z.coerce.number().int().min(0).default(0),
     }).parse(req.query);
@@ -134,6 +134,7 @@ export default async function routes(app) {
     const add = (sql, v) => { p.push(v); w.push(sql.replace('?', `$${p.length}`)); };
     if (f.scope !== 'all') add('b.type = ?', f.scope);
     if (f.type) add('t.type = ?', f.type);
+    if (f.income_kind) add('t.income_kind = ?', f.income_kind);
     if (f.category_id) add('t.category_id = ?', f.category_id);
     if (f.from) add('t.booked_at >= ?', f.from);
     if (f.to) add('t.booked_at <= ?', f.to);
@@ -148,23 +149,25 @@ export default async function routes(app) {
   app.get('/transactions', authz('transaction:read'), async (req) => {
     const { f, where, params } = await txFilter(req);
     const rows = await many(
-      `SELECT t.id, t.budget_id, b.name budget_name, b.type budget_type, t.category_id, c.name category_name, t.type, t.amount, t.booked_at, t.title, t.note, t.tags, t.source, t.goal_id,
+      `SELECT t.id, t.budget_id, b.name budget_name, b.type budget_type, t.category_id, c.name category_name, t.type, t.income_kind, t.amount, t.booked_at, t.title, t.note, t.tags, t.source, t.goal_id,
          (SELECT count(*)::int FROM attachments a WHERE a.transaction_id=t.id) attachments, u.name created_by_name
        FROM transactions t JOIN budgets b ON b.id=t.budget_id LEFT JOIN categories c ON c.id=t.category_id LEFT JOIN users u ON u.id=t.created_by
        WHERE ${where} ORDER BY t.booked_at DESC, t.created_at DESC LIMIT ${f.limit} OFFSET ${f.offset}`,
       params,
     );
     const tot = await one(
-      `SELECT count(*)::int n, COALESCE(sum(amount) FILTER (WHERE t.type='income'),0) income, COALESCE(sum(amount) FILTER (WHERE t.type='expense'),0) expense
+      `SELECT count(*)::int n, COALESCE(sum(amount) FILTER (WHERE t.type='income'),0) income,
+         COALESCE(sum(amount) FILTER (WHERE t.type='income' AND t.income_kind='salary'),0) salary_income,
+         COALESCE(sum(amount) FILTER (WHERE t.type='expense'),0) expense
        FROM transactions t JOIN budgets b ON b.id=t.budget_id WHERE ${where}`,
       params,
     );
-    return { items: rows, total: tot.n, income: tot.income, expense: tot.expense };
+    return { items: rows, total: tot.n, income: tot.income, salary_income: tot.salary_income, expense: tot.expense };
   });
 
   const txBody = z.object({
     budget_id: id, category_id: id.nullish(), type: z.enum(['income', 'expense', 'deposit']), amount: money.refine((v) => Number(v) > 0, 'Betrag muss > 0 sein'),
-    booked_at: date, title: z.string().max(200).default(''), note: z.string().max(2000).default(''), tags: z.array(z.string().max(30)).max(10).default([]), goal_id: id.nullish(),
+    booked_at: date, title: z.string().max(200).default(''), note: z.string().max(2000).default(''), tags: z.array(z.string().max(30)).max(10).default([]), goal_id: id.nullish(), income_kind: z.enum(['other', 'salary']).default('other'),
   });
 
   async function checkRefs(b, budget) {
@@ -182,8 +185,8 @@ export default async function routes(app) {
     const { budget } = await budgetAccess(req.user.id, b.budget_id, true);
     await checkRefs(b, budget);
     const r = await one(
-      `INSERT INTO transactions(budget_id,category_id,created_by,type,amount,booked_at,title,note,tags,goal_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-      [b.budget_id, b.category_id || null, req.user.id, b.type, b.amount, b.booked_at, b.title, b.note, b.tags, b.goal_id || null],
+      `INSERT INTO transactions(budget_id,category_id,created_by,type,amount,booked_at,title,note,tags,goal_id,income_kind) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+      [b.budget_id, b.category_id || null, req.user.id, b.type, b.amount, b.booked_at, b.title, b.note, b.tags, b.goal_id || null, b.type === 'income' ? b.income_kind : 'other'],
     );
     if (idem) await q('INSERT INTO idempotency_keys(key, user_id, response) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [String(idem).slice(0, 100), req.user.id, JSON.stringify(r)]);
     if (b.type === 'expense') await budgetWatch(b.budget_id, req.log);
@@ -197,8 +200,10 @@ export default async function routes(app) {
     const { budget } = await budgetAccess(req.user.id, t.budget_id, true);
     const b = txBody.omit({ budget_id: true }).partial().parse(req.body);
     await checkRefs(b, budget);
-    const keys = Object.keys(b);
-    if (keys.length) await q(`UPDATE transactions SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1`, [t.id, ...keys.map((k) => b[k] ?? null)]);
+    const patch = { ...b };
+    if (patch.type && patch.type !== 'income') patch.income_kind = 'other';
+    const keys = Object.keys(patch);
+    if (keys.length) await q(`UPDATE transactions SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1`, [t.id, ...keys.map((k) => patch[k] ?? null)]);
     await budgetWatch(t.budget_id, req.log);
     return { ok: true };
   });
@@ -215,19 +220,19 @@ export default async function routes(app) {
   app.get('/transactions/export.csv', authz('transaction:export'), async (req, reply) => {
     const { where, params } = await txFilter(req);
     const rows = await many(
-      `SELECT t.booked_at, b.name budget, c.name category, t.type, t.amount, t.title, t.note, array_to_string(t.tags, ',') tags
+      `SELECT t.booked_at, b.name budget, c.name category, t.type, t.income_kind, t.amount, t.title, t.note, array_to_string(t.tags, ',') tags
        FROM transactions t JOIN budgets b ON b.id=t.budget_id LEFT JOIN categories c ON c.id=t.category_id WHERE ${where} ORDER BY t.booked_at DESC LIMIT 50000`,
       params,
     );
     await audit(req, 'transactions.exported', 'transaction', null, { rows: rows.length });
     reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', 'attachment; filename="transaktionen.csv"');
-    return toCsv(rows, ['booked_at', 'budget', 'category', 'type', 'amount', 'title', 'note', 'tags']);
+    return toCsv(rows, ['booked_at', 'budget', 'category', 'type', 'income_kind', 'amount', 'title', 'note', 'tags']);
   });
 
   // ---- Daueraufträge
   const recBody = z.object({
     name: z.string().min(1).max(100), budget_id: id, category_id: id.nullish(), type: z.enum(['income', 'expense']), amount: money.refine((v) => Number(v) > 0),
-    frequency: z.enum(['daily', 'weekly', 'monthly', 'yearly']), interval: z.number().int().min(1).max(60).default(1),
+    frequency: z.enum(['daily', 'weekly', 'monthly', 'yearly']), interval: z.number().int().min(1).max(60).default(1), income_kind: z.enum(['other', 'salary']).default('other'),
     start_date: date, end_date: date.nullish(), active: z.boolean().default(true),
   });
   app.get('/recurring', authz('recurring:read'), async (req) =>
@@ -241,9 +246,9 @@ export default async function routes(app) {
     const { budget } = await budgetAccess(req.user.id, b.budget_id, true);
     await checkRefs(b, budget);
     return one(
-      `INSERT INTO recurring_rules(name,budget_id,category_id,created_by,type,amount,frequency,interval,start_date,end_date,next_run,active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$9,$11) RETURNING id`,
-      [b.name, b.budget_id, b.category_id || null, req.user.id, b.type, b.amount, b.frequency, b.interval, b.start_date, b.end_date || null, b.active],
+      `INSERT INTO recurring_rules(name,budget_id,category_id,created_by,type,amount,frequency,interval,start_date,end_date,next_run,active,income_kind)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$9,$11,$12) RETURNING id`,
+      [b.name, b.budget_id, b.category_id || null, req.user.id, b.type, b.amount, b.frequency, b.interval, b.start_date, b.end_date || null, b.active, b.type === 'income' ? b.income_kind : 'other'],
     );
   });
   app.patch('/recurring/:id', authz('recurring:update'), async (req) => {
@@ -251,8 +256,10 @@ export default async function routes(app) {
     if (!r || r.source === 'asset') throw notFound();
     await budgetAccess(req.user.id, r.budget_id, true);
     const b = recBody.omit({ budget_id: true }).partial().parse(req.body);
-    const keys = Object.keys(b);
-    if (keys.length) await q(`UPDATE recurring_rules SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1`, [r.id, ...keys.map((k) => b[k] ?? null)]);
+    const patch = { ...b };
+    if (patch.type && patch.type !== 'income') patch.income_kind = 'other';
+    const keys = Object.keys(patch);
+    if (keys.length) await q(`UPDATE recurring_rules SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1`, [r.id, ...keys.map((k) => patch[k] ?? null)]);
     return { ok: true };
   });
   app.delete('/recurring/:id', authz('recurring:delete'), async (req) => {
@@ -264,7 +271,12 @@ export default async function routes(app) {
   });
 
   // ---- Sparziele
-  const goalBody = z.object({ budget_id: id, name: z.string().min(1).max(100), target_amount: money.refine((v) => Number(v) > 0), target_date: date.nullish(), monthly_amount: money.nullish() });
+  const goalBody = z.object({
+    budget_id: id, name: z.string().min(1).max(100), target_amount: money.refine((v) => Number(v) > 0),
+    target_date: date.nullish(), installment_amount: money.nullish().refine((v) => v == null || Number(v) > 0),
+    installment_frequency: z.enum(['daily', 'weekly', 'monthly', 'yearly']).default('monthly'),
+    installment_interval: z.number().int().min(1).max(60).default(1),
+  });
   app.get('/goals', authz('goal:read'), async (req) =>
     many(
       `SELECT g.*, b.name budget_name, COALESCE((SELECT sum(amount) FROM transactions t WHERE t.goal_id=g.id AND t.type='deposit'),0) saved
@@ -274,7 +286,7 @@ export default async function routes(app) {
   app.post('/goals', authz('goal:create'), async (req) => {
     const b = goalBody.parse(req.body);
     await budgetAccess(req.user.id, b.budget_id, true);
-    return one('INSERT INTO goals(budget_id,name,target_amount,target_date,monthly_amount) VALUES ($1,$2,$3,$4,$5) RETURNING id', [b.budget_id, b.name, b.target_amount, b.target_date || null, b.monthly_amount || null]);
+    return one('INSERT INTO goals(budget_id,name,target_amount,target_date,installment_amount,installment_frequency,installment_interval) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id', [b.budget_id, b.name, b.target_amount, b.target_date || null, b.installment_amount || null, b.installment_frequency, b.installment_interval]);
   });
   app.patch('/goals/:id', authz('goal:update'), async (req) => {
     const g = await one('SELECT * FROM goals WHERE id=$1', [req.params.id]);

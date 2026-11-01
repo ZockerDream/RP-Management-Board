@@ -7,7 +7,7 @@ const STATUS = { available: ['ok', 'Verfügbar'], out: ['warn', 'Ausgegeben'], o
 const VSTATUS = { available: 'Verfügbar', in_use: 'Im Einsatz', workshop: 'Werkstatt', retired: 'Ausgemustert' };
 const PTYPE = { home: 'Wohnung/Haus', office: 'Büro', storage: 'Lager', holiday: 'Ferienobjekt' };
 const PKIND = { employee: 'Mitarbeiter', external: 'Extern', family: 'Familie' };
-const INTERVAL = { monthly: 'Monatlich', quarterly: 'Vierteljährlich', yearly: 'Jährlich', once: 'Einmalig' };
+const INTERVAL = { weekly: 'Wöchentlich', monthly: 'Monatlich', quarterly: 'Vierteljährlich', yearly: 'Jährlich', once: 'Einmalig' };
 const EVENT = { issued: 'Ausgegeben', returned: 'Zurückgegeben', lost: 'Als verloren gemeldet' };
 const ASSET_TYPE = { house: 'Haus', vehicle: 'Fahrzeug', key: 'Schlüssel' };
 
@@ -49,11 +49,14 @@ async function formVehicle(o) {
       { name: 'make_model', label: 'Marke / Modell', value: o?.make_model, required: true },
       { name: 'status', label: 'Status', type: 'select', options: Object.entries(VSTATUS).map(([v, l]) => ({ v, l })), value: o?.status || 'available' },
       { name: 'service_due', label: 'Service fällig', type: 'date', value: o?.service_due?.slice(0, 10) },
+      { name: 'odometer_km', label: 'Kilometerstand', type: 'number', min: 0, value: o?.odometer_km },
+      { name: 'service_interval_km', label: 'Service-Intervall (km)', type: 'number', min: 1, value: o?.service_interval_km },
+      { name: 'service_due_km', label: 'Service fällig bei (km)', type: 'number', min: 0, value: o?.service_due_km },
       { name: 'insurance_from', label: 'Versicherung ab', type: 'date', value: o?.insurance_from?.slice(0, 10) },
       { name: 'note', label: 'Notiz', type: 'textarea', value: o?.note, full: true },
       ...costFields(o, budgets),
     ],
-    onSubmit: (v) => save('vehicles', o, { plate: v.plate.trim(), make_model: v.make_model.trim(), status: v.status, service_due: v.service_due || null, insurance_from: v.insurance_from || null, note: v.note, ...costBody(v) }),
+    onSubmit: (v) => save('vehicles', o, { plate: v.plate.trim(), make_model: v.make_model.trim(), status: v.status, service_due: v.service_due || null, odometer_km: v.odometer_km === '' ? null : Number(v.odometer_km), service_interval_km: v.service_interval_km === '' ? null : Number(v.service_interval_km), service_due_km: v.service_due_km === '' ? null : Number(v.service_due_km), insurance_from: v.insurance_from || null, note: v.note, ...costBody(v) }),
   });
 }
 async function formKey(o, props, vehicles) {
@@ -125,7 +128,7 @@ export async function render(view, params) {
     },
     async vehicles(el) {
       await fetchAll();
-      el.innerHTML = `<div class="card">${D.vehicles.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Kennzeichen</th><th>Modell</th><th>Status</th><th>Service</th><th>Versicherung ab</th><th>Kosten</th><th></th></tr></thead><tbody>${D.vehicles.map((v) => `<tr><td><b>${esc(v.plate)}</b></td><td>${esc(v.make_model)}</td><td>${VSTATUS[v.status]}</td><td>${fdate(v.service_due)}</td><td>${fdate(v.insurance_from)}</td><td>${v.cost_amount ? `${eur(v.cost_amount)} ${INTERVAL[v.cost_interval].toLowerCase()}` : '–'}</td><td style="white-space:nowrap">${actions(v.id, 'vehicle')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Fahrzeuge.')}</div>`;
+      el.innerHTML = `<div class="card">${D.vehicles.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Kennzeichen</th><th>Modell</th><th>Status</th><th>Service</th><th>Versicherung ab</th><th>Kosten</th><th></th></tr></thead><tbody>${D.vehicles.map((v) => `<tr><td><b>${esc(v.plate)}</b></td><td>${esc(v.make_model)}</td><td>${VSTATUS[v.status]}</td><td>${fdate(v.service_due)}${v.service_due_km != null ? `<br><small class="muted">bei ${Number(v.service_due_km).toLocaleString('de-DE')} km</small>` : ''}</td><td>${fdate(v.insurance_from)}</td><td>${v.cost_amount ? `${eur(v.cost_amount)} ${INTERVAL[v.cost_interval].toLowerCase()}` : '–'}</td><td style="white-space:nowrap">${actions(v.id, 'vehicle')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Fahrzeuge.')}</div>`;
     },
     async people(el) {
       await fetchAll();

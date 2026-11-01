@@ -11,7 +11,7 @@ const str = (n = 200) => z.string().max(n);
 
 const costFields = {
   cost_amount: money.nullish(),
-  cost_interval: z.enum(['once', 'monthly', 'quarterly', 'yearly']).nullish(),
+  cost_interval: z.enum(['once', 'weekly', 'monthly', 'quarterly', 'yearly']).nullish(),
   cost_budget_id: id.nullish(),
   cost_category_id: id.nullish(),
   cost_tracking: z.boolean().optional(),
@@ -30,9 +30,9 @@ const KINDS = {
     perm: 'vehicle', asset: 'vehicle', label: (r) => `${r.make_model} (${r.plate})`,
     schema: z.object({
       plate: z.string().min(1).max(20), make_model: z.string().min(1).max(100), status: z.enum(['available', 'in_use', 'workshop', 'retired']).default('available'),
-      service_due: date.nullish(), insurance_from: date.nullish(), note: str(2000).default(''), ...costFields,
+      service_due: date.nullish(), odometer_km: z.number().int().min(0).nullish(), service_interval_km: z.number().int().min(1).nullish(), service_due_km: z.number().int().min(0).nullish(), insurance_from: date.nullish(), note: str(2000).default(''), ...costFields,
     }),
-    cols: ['plate', 'make_model', 'status', 'service_due', 'insurance_from', 'note'],
+    cols: ['plate', 'make_model', 'status', 'service_due', 'odometer_km', 'service_interval_km', 'service_due_km', 'insurance_from', 'note'],
   },
   keys: {
     perm: 'key', asset: 'key', label: (r) => r.label,
@@ -44,7 +44,7 @@ const KINDS = {
   },
 };
 const COST_COLS = ['cost_amount', 'cost_interval', 'cost_budget_id', 'cost_category_id', 'cost_tracking'];
-const PER = { monthly: ['monthly', 1], quarterly: ['monthly', 3], yearly: ['yearly', 1] };
+const PER = { weekly: ['weekly', 1], monthly: ['monthly', 1], quarterly: ['monthly', 3], yearly: ['yearly', 1] };
 
 // Kosten eines Objekts mit Budget synchronisieren (§7.1): einmalig = Buchung, sonst Dauerauftrag
 async function syncCost(c, table, kind, before, after, userId) {
@@ -219,7 +219,7 @@ export default async function routes(app) {
     for (const [t, col, type] of parts) {
       items.push(...(await many(`SELECT '${type}' type, x.id, x.${col} name, x.cost_amount amount, x.cost_interval interval, x.cost_tracking tracking, b.name budget_name FROM ${t} x LEFT JOIN budgets b ON b.id=x.cost_budget_id WHERE x.cost_amount IS NOT NULL`)));
     }
-    const factor = { once: 0, monthly: 12, quarterly: 4, yearly: 1 };
+    const factor = { once: 0, weekly: 52, monthly: 12, quarterly: 4, yearly: 1 };
     for (const i of items) i.yearly = (Number(i.amount) * factor[i.interval]).toFixed(2);
     return { items, yearly_total: items.reduce((s, i) => s + Number(i.yearly), 0).toFixed(2) };
   });

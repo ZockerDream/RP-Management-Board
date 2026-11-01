@@ -13,6 +13,7 @@ const store = {
 const PAGES = {
   dashboard: { perm: 'budget:read', load: () => import('./pages/dashboard.js') },
   transactions: { perm: 'transaction:read', load: () => import('./pages/transactions.js') },
+  work: { perm: null, load: () => import('./pages/work.js') },
   budgets: { perm: 'budget:read', load: () => import('./pages/budgets.js') },
   recurring: { perm: 'recurring:read', load: () => import('./pages/recurring.js') },
   goals: { perm: 'goal:read', load: () => import('./pages/goals.js') },
