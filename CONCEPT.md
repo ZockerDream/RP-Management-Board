@@ -105,19 +105,18 @@ Ansichten Monat, Woche, Tag und Agenda (30 Tage), Navigation vor/zurück/heute, 
 ## 9. Architektur
 
 ```
-Browser ──HTTPS──> Betreiber-NGINX (TLS) ──HTTP──> web (nginx)
-                       ├── SPA (statisch)
-                       └── /api ──> backend (REST API + Auth + Worker)
-                                └── PostgreSQL (Volume)
+Browser ──HTTP(S)──> api (SPA + REST API)
+                         ├── worker
+                         └── PostgreSQL (Volume)
 ```
 
 | Service | Zweck |
 |---|---|
-| `web` | Einstiegspunkt: SPA, Routing `/api` → backend (TLS im vorgelagerten Proxy) |
-| `frontend` | Web-UI |
-| `backend` | API, Auth, Rechteprüfung |
+| `api` | Einstiegspunkt: liefert SPA und REST-API direkt aus; kein Proxy erforderlich |
 | `worker` | Scheduler (Daueraufträge, Erinnerungen, Berichte, Backups) |
 | `db` | PostgreSQL 16, Volume, Healthcheck |
+
+Ein vorhandener Betreiber-Proxy kann optional TLS terminieren und den App-Port weiterleiten; er ist nicht Bestandteil des Repositories.
 
 Details, Stack, Datenmodell, API, Sicherheit und Betrieb stehen in [TECHNICAL.md](TECHNICAL.md).
 

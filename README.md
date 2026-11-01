@@ -6,53 +6,32 @@ Selbst gehostete Haushalts- und Teambudget-Verwaltung: Budgets, Transaktionen, D
 
 | Service  | Image / Build        | Aufgabe                                              |
 |----------|----------------------|------------------------------------------------------|
-| `web`    | nginx-unprivileged   | **einziger Einstiegspunkt** (Port 8080): statische SPA, Security-Header, `/api` → api |
-| `api`    | Node 22 / Fastify    | REST-API, Auth (JWT + Refresh-Cookie), RBAC, 2FA     |
+| `api`    | Node 22 / Fastify    | **einziger Einstiegspunkt** (Port 8080): SPA und REST-API, Auth (JWT + Refresh-Cookie), RBAC, 2FA |
 | `worker` | wie `api`            | Hintergrundjobs: Daueraufträge, Erinnerungen, Berichte, Backups |
 | `db`     | PostgreSQL           | Datenhaltung (nur im internen Netz `backend`)        |
 
-Nur `web` veröffentlicht **einen** Port (`HTTP_PORT`, Standard 8080, plain HTTP). TLS, HSTS und Domain übernimmt dein vorgelagerter NGINX-Proxy. DB und API sind nicht von außen erreichbar. Container laufen mit gedroppten Capabilities, `no-new-privileges` und Healthchecks; Restart-Policy `unless-stopped`.
+Nur `api` veröffentlicht **einen** Port (`HTTP_PORT`, Standard 8080, plain HTTP) und liefert sowohl die Weboberfläche als auch `/api` direkt aus. Das Repository enthält keinen Reverse-Proxy und benötigt keinen. `db` bleibt im internen Netz, der Worker hat keinen veröffentlichten Port. Ein bereits vorhandener NGINX kann optional vor den App-Port geschaltet werden; seine Konfiguration und sein Container sind nicht Teil dieses Repositories. Container laufen mit gedroppten Capabilities, `no-new-privileges` und Healthchecks; Restart-Policy `unless-stopped`.
 
 ## Installation
 
-Voraussetzungen: Docker ≥ 24 mit Compose v2 und ein Reverse-Proxy (z. B. NGINX) für TLS.
+Voraussetzungen: Docker ≥ 24 mit Compose v2. Ein Reverse-Proxy ist optional.
 
 ```bash
 git clone <repository-url>
 cd budget-manager
 cp .env.example .env
 ./scripts/gen-secrets.sh        # trägt DB_PASSWORD, JWT_SECRET, ENCRYPTION_KEY, ADMIN_PASSWORD in .env ein (oder manuell setzen)
-$EDITOR .env                    # APP_URL (öffentliche https-URL), ADMIN_EMAIL, SMTP_* anpassen
+$EDITOR .env                    # APP_URL (öffentliche URL), ADMIN_EMAIL, SMTP_* anpassen
 docker compose up -d
 ```
 
-Der erste Start baut die Images, legt das Schema an und erzeugt den Admin-Benutzer aus `ADMIN_EMAIL`/`ADMIN_PASSWORD`. Danach unter `APP_URL` anmelden und das Passwort ändern. Status: `docker compose ps` (alle Services `healthy`).
+Für direkten Zugriff ohne Reverse-Proxy `APP_URL` auf `http://<server-ip>:8080` setzen. Für HTTPS hinter einem bereits vorhandenen Proxy `APP_URL` auf die öffentliche `https://`-Adresse setzen; dadurch werden Refresh-Cookies als `Secure` markiert. Der erste Start baut die Images, legt das Schema an und erzeugt den Admin-Benutzer aus `ADMIN_EMAIL`/`ADMIN_PASSWORD`. Danach unter `APP_URL` anmelden und das Passwort ändern. Status: `docker compose ps` (alle Services `healthy`).
 
-### NGINX-Proxy
+### Optionaler eigener Reverse-Proxy
 
-`APP_URL` muss exakt die öffentliche Adresse sein (bei `https://` werden Cookies als `Secure` gesetzt). Beispiel-Server-Block:
+Ein vorhandener NGINX kann den veröffentlichten App-Port (`HTTP_PORT`, Standard 8080) für HTTPS verwenden. Der App-Container liefert UI und API auf demselben Ursprung aus; der Proxy muss daher keine `/api`-Weiterleitung zu einem separaten API-Dienst einrichten. Für einen Proxy auf demselben Host `BIND_ADDR=127.0.0.1` setzen. Wenn der Proxy `X-Forwarded-*`-Header setzt, `TRUST_PROXY` auf dessen vertrauenswürdige IP-Adresse(n) oder CIDR(s) setzen (mehrere kommasepariert). Standardmäßig werden solche Header nicht vertraut. `TRUST_PROXY=true` nur verwenden, wenn ausschließlich der Proxy den App-Port erreichen kann.
 
-```nginx
-server {
-  listen 443 ssl http2;
-  server_name budget.example.com;
-  # ssl_certificate ... ;
-  client_max_body_size 25m;
-
-  location / {
-    proxy_pass http://127.0.0.1:8080;      # oder Containername/Host:HTTP_PORT
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-  }
-}
-```
-
-Läuft der Proxy auf demselben Host, setze `BIND_ADDR=127.0.0.1`, damit der Port nicht von außen erreichbar ist. HSTS im Proxy-Server-Block aktivieren (`add_header Strict-Transport-Security "max-age=31536000" always;`).
-
-### Betrieb ohne Proxy
-Der Stack enthält keinen Proxy und läuft auch ohne: `APP_URL=http://<server-ip>:8080` setzen, `docker compose up -d`, dann direkt `http://<server-ip>:8080` öffnen (Cookies sind bei `http://` nicht `Secure`). Für Produktion im Internet TLS über einen vorgelagerten Proxy empfohlen.
+Ohne Proxy direkt `http://<server-ip>:8080` öffnen. Bei HTTP sind Cookies nicht `Secure`; für öffentlich erreichbare Installationen HTTPS verwenden.
 
 ## Konfiguration (`.env`)
 
@@ -60,6 +39,7 @@ Der Stack enthält keinen Proxy und läuft auch ohne: `APP_URL=http://<server-ip
 |----------|-----------|
 | `APP_URL` | öffentliche URL (Cookies, Links in Mails) |
 | `BIND_ADDR`, `HTTP_PORT` | Bindeadresse und der eine veröffentlichte Port (Standard `0.0.0.0:8080`) |
+| `TRUST_PROXY` | vertrauenswürdige Proxy-IP(s)/CIDR(s), standardmäßig `false` |
 | `TZ` | Zeitzone |
 | `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Datenbank |
 | `JWT_SECRET` | Signatur der Access-Tokens (mind. 32 Zeichen) |

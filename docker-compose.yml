@@ -12,6 +12,7 @@ x-api-env: &api-env
   ADMIN_NAME: ${ADMIN_NAME:-Administrator}
   ACCESS_TOKEN_TTL_SEC: ${ACCESS_TOKEN_TTL_SEC:-900}
   REFRESH_TOKEN_TTL_DAYS: ${REFRESH_TOKEN_TTL_DAYS:-14}
+  TRUST_PROXY: ${TRUST_PROXY:-false}
   ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-false}
   HIBP_CHECK: ${HIBP_CHECK:-false}
   HOLIDAY_COUNTRY: ${HOLIDAY_COUNTRY:-DE}
@@ -58,13 +59,17 @@ services:
 
   api:
     <<: *hardening
-    build: ./apps/api
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
     image: budget-manager-api:${APP_VERSION:-latest}
     environment: *api-env
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${HTTP_PORT:-8080}:3000"
     volumes:
       - uploads:/data/uploads
       - backups:/data/backups
-    networks: [backend, frontend, public]
+    networks: [backend, public]
     depends_on:
       db: { condition: service_healthy }
     read_only: true
@@ -95,27 +100,8 @@ services:
       retries: 3
       start_period: 30s
 
-  web:
-    <<: *hardening
-    build: ./apps/web
-    image: budget-manager-web:${APP_VERSION:-latest}
-    ports:
-      - "${BIND_ADDR:-0.0.0.0}:${HTTP_PORT:-8080}:8080"
-    networks: [frontend, public]
-    depends_on:
-      api: { condition: service_healthy }
-    read_only: true
-    tmpfs: [/tmp]
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-
 networks:
   backend:
-    internal: true
-  frontend:
     internal: true
   public:
 

@@ -3,7 +3,9 @@ import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
+import fastifyStatic from '@fastify/static';
 import { ZodError } from 'zod';
+import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { waitForDb, migrate, pool } from './db.js';
 import { seed } from './seed.js';
@@ -11,14 +13,40 @@ import { HttpError } from './authz.js';
 
 const app = Fastify({
   logger: { level: config.logLevel, redact: ['req.headers.authorization', 'req.headers.cookie'] },
-  trustProxy: true,
+  trustProxy: config.trustProxy,
   bodyLimit: 1048576,
 });
 
-await app.register(helmet, { contentSecurityPolicy: false });
+await app.register(helmet, {
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      imgSrc: ["'self'", 'data:', 'https://www.gravatar.com', 'https://secure.gravatar.com'],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      connectSrc: ["'self'"],
+      frameAncestors: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+    },
+  },
+  frameguard: { action: 'deny' },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  permissionsPolicy: { directives: { camera: [], microphone: [], geolocation: [] } },
+});
 await app.register(cookie);
 await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute' });
 await app.register(multipart, { limits: { fileSize: config.maxUploadBytes, files: 1 } });
+await app.register(fastifyStatic, {
+  root: process.env.STATIC_DIR || fileURLToPath(new URL('../../web/public', import.meta.url)),
+  prefix: '/',
+  wildcard: false,
+  dotfiles: 'ignore',
+  cacheControl: false,
+  setHeaders(reply, path) {
+    reply.header('Cache-Control', path.endsWith('.html') ? 'no-cache' : 'public, max-age=300');
+  },
+});
 
 app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
   if (!body) return done(null, {});

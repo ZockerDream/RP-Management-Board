@@ -7,11 +7,17 @@ function required(name) {
 }
 
 const appUrl = (env.APP_URL || 'http://localhost').replace(/\/+$/, '');
+const proxySetting = env.TRUST_PROXY || 'false';
 
 export const config = {
   port: Number(env.PORT || 3000),
   appUrl,
   secureCookies: appUrl.startsWith('https://'),
+  trustProxy: proxySetting === 'true'
+    ? true
+    : proxySetting === 'false'
+      ? false
+      : proxySetting.split(',').map((address) => address.trim()).filter(Boolean),
   databaseUrl: required('DATABASE_URL'),
   jwtSecret: required('JWT_SECRET'),
   encryptionKey: required('ENCRYPTION_KEY'),

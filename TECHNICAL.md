@@ -15,7 +15,7 @@ Ergänzt [CONCEPT.md](CONCEPT.md). Der Stack ist ein Vorschlag, die offene Entsc
 | Kalender | Eigene Komponente (Logik aus `calendar.js`), `rrule` für Serien | Ansichten sind schon gebaut |
 | Jobs | `pg-boss` (Queue in PostgreSQL) im Service `worker` | Keine zusätzliche Redis-Abhängigkeit, Locking inklusive |
 | Auth | Argon2id, kurzlebiges JWT + Refresh-Token, TOTP (`otplib`) | siehe 6 |
-| Einstieg | nginx (`web`) | Statische SPA + Proxy `/api`; TLS durch vorgelagerten Betreiber-Proxy |
+| Einstieg | Fastify (`api`) | Liefert SPA und REST-API direkt auf demselben Port; kein Reverse-Proxy erforderlich |
 | Tests | Vitest/Jest, Supertest, Testcontainers (echtes Postgres), Playwright (E2E) | |
 
 ## 2. Repository-Struktur
@@ -26,7 +26,7 @@ budget-manager/
 ├── docker-compose.override.yml      # Dev: Hot-Reload, exponierte Ports
 ├── .env.example
 ├── apps/
-│   ├── api/                         # NestJS, auch Einstieg für den Worker
+│   ├── api/                         # Fastify API und Worker
 │   │   ├── prisma/schema.prisma, migrations/
 │   │   └── src/
 │   │       ├── auth/ users/ roles/ groups/ teams/
@@ -36,45 +36,18 @@ budget-manager/
 │   │       ├── common/ (guards, decorators, money, pagination)
 │   │       ├── worker.ts            # startet nur Jobs, keine HTTP-Routen
 │   │       └── main.ts
-│   └── web/                         # React-SPA
-│       └── src/ pages/ components/ charts/ calendar/ theme/ api/
+│   └── web/public/                  # Statische SPA, direkt von der API ausgeliefert
 ├── packages/shared/                 # Typen, Permission-Keys, zod-Schemas
 └── docs: CONCEPT.md, TECHNICAL.md
 ```
 
 ## 3. Deployment (Docker Compose)
 
-```yaml
-services:
-  web:
-    build: ./apps/web            # nginx mit statischem Build
-  api:
-    build: ./apps/api
-    env_file: .env
-    depends_on: { db: { condition: service_healthy } }
-    command: sh -c "npx prisma migrate deploy && node dist/main.js"
-    healthcheck: { test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"] }
-  worker:
-    build: ./apps/api
-    env_file: .env
-    depends_on: { db: { condition: service_healthy } }
-    command: node dist/worker.js
-  db:
-    image: postgres:16
-    environment:
-      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
-    secrets: [db_password]
-    volumes: [pgdata:/var/lib/postgresql/data]
-    healthcheck: { test: ["CMD-SHELL", "pg_isready -U budget"], interval: 5s, retries: 10 }
-secrets:
-  db_password: { file: ./secrets/db_password.txt }
-volumes: { pgdata: {}, uploads: {} }
-```
-
-- Nur `web` veröffentlicht einen Port (HTTP, TLS im vorgelagerten Proxy), `db` hängt in einem internen Netz.
+Die konkrete Konfiguration steht in `docker-compose.yml`. Der Service `api` liefert die statische SPA aus `apps/web/public` sowie die REST-API am selben Ursprung aus und veröffentlicht allein den App-Port. Ein Reverse-Proxy ist optional und wird nicht mitgeliefert. `db` hängt in einem internen Netz.
+- `worker` verwendet dasselbe API-Image, hat aber keinen veröffentlichten Port.
 - `uploads` (Belege) ist ein Volume, später S3-kompatibel austauschbar.
 - Migrationen laufen beim Start der API. Bei mehreren API-Instanzen vorher einen separaten Migrations-Job einsetzen.
-- `.env.example` enthält `DATABASE_URL`, `JWT_SECRET`, `APP_URL`, SMTP-Daten. Echte Werte nie ins Repository.
+- `.env.example` enthält `DATABASE_URL`, `JWT_SECRET`, `APP_URL`, SMTP-Daten und optional `TRUST_PROXY`. Echte Werte nie ins Repository.
 
 ## 4. Datenmodell
 

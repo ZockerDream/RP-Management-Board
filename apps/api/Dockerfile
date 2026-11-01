@@ -1,6 +1,6 @@
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package-lock.json ./
 RUN npm ci --omit=dev
 
 FROM node:22-bookworm-slim
@@ -16,10 +16,12 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY package.json ./
-COPY migrations ./migrations
-COPY src ./src
+COPY apps/api/package.json ./
+COPY apps/api/migrations ./migrations
+COPY apps/api/src ./src
+COPY apps/web/public ./public
 RUN mkdir -p /data/uploads /data/backups && chown -R node:node /data /app
+ENV STATIC_DIR=/app/public
 USER node
 EXPOSE 3000
 CMD ["node", "src/main.js"]
