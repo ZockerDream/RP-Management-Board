@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import PDFDocument from 'pdfkit';
 import { many, one, q, tx } from '../db.js';
 import { requireAuth, notFound, bad, forbidden } from '../authz.js';
 import { toCsv } from '../lib.js';
@@ -136,6 +137,78 @@ export default async function routes(app) {
       one(`SELECT COALESCE(sum(hours), 0) total_hours FROM work_entries WHERE ${where.join(' AND ')}`, params),
     ]);
     return { items, total_hours: total.total_hours };
+  });
+
+  async function monthlyReport(userId, month, weeklyHours) {
+    const [year, monthNumber] = month.split('-').map(Number);
+    const from = `${month}-01`;
+    const to = new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
+    const items = await many(
+      `SELECT e.work_date, e.hours, e.note, e.started_at, e.ended_at, e.break_minutes, p.name project_name
+       FROM work_entries e LEFT JOIN work_projects p ON p.id=e.project_id
+         AND (p.owner_user_id=e.user_id OR p.team_id IN (SELECT team_id FROM team_members WHERE user_id=e.user_id))
+       WHERE e.user_id=$1 AND e.work_date >= $2 AND e.work_date <= $3
+       ORDER BY e.work_date, e.started_at NULLS LAST, e.created_at`,
+      [userId, from, to],
+    );
+    const daily = new Map();
+    for (const item of items) daily.set(item.work_date, (daily.get(item.work_date) || 0) + Number(item.hours));
+    let weekdays = 0;
+    for (let d = new Date(`${from}T00:00:00Z`); d <= new Date(`${to}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)) {
+      if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) weekdays++;
+    }
+    const totalHours = items.reduce((sum, item) => sum + Number(item.hours), 0);
+    const targetHours = weekdays * Number(weeklyHours) / 5;
+    return {
+      month, items, daily: [...daily].map(([work_date, hours]) => ({ work_date, hours })),
+      total_hours: totalHours, target_hours: targetHours, overtime_balance: totalHours - targetHours,
+      weekly_target: Number(weeklyHours), weekdays,
+    };
+  }
+
+  const monthFilter = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/) });
+  app.get('/work-hours/monthly', requireAuth, async (req) => {
+    const { month } = monthFilter.parse(req.query);
+    return monthlyReport(req.user.id, month, req.user.weekly_work_hours);
+  });
+
+  app.get('/work-hours/monthly.pdf', requireAuth, async (req, reply) => {
+    const { month } = monthFilter.parse(req.query);
+    const report = await monthlyReport(req.user.id, month, req.user.weekly_work_hours);
+    const doc = new PDFDocument({ size: 'A4', margin: 48 });
+    reply.type('application/pdf').header('content-disposition', `attachment; filename="stundenzettel-${month}.pdf"`);
+    doc.fontSize(20).text(`Stundenzettel ${month}`, { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(11).text(`Wochen-Soll: ${report.weekly_target.toFixed(2)} Std.`);
+    doc.text(`Arbeitszeit: ${report.total_hours.toFixed(2)} Std.`);
+    doc.text(`Monats-Soll: ${report.target_hours.toFixed(2)} Std.`);
+    doc.text(`Saldo: ${report.overtime_balance >= 0 ? '+' : ''}${report.overtime_balance.toFixed(2)} Std.`);
+    doc.moveDown();
+    const drawHeader = () => {
+      const y = doc.y;
+      doc.font('Helvetica-Bold');
+      doc.text('Datum', 48, y, { width: 90, lineBreak: false });
+      doc.text('Projekt', 138, y, { width: 180, lineBreak: false });
+      doc.text('Zeitraum', 318, y, { width: 100, lineBreak: false });
+      doc.text('Std.', 418, y, { width: 80, align: 'right', lineBreak: false });
+      doc.y = y + 20;
+      doc.font('Helvetica');
+    };
+    drawHeader();
+    for (const item of report.items) {
+      if (doc.y > 750) {
+        doc.addPage();
+        drawHeader();
+      }
+      const y = doc.y;
+      doc.text(String(item.work_date).split('-').reverse().join('.'), 48, y, { width: 90, lineBreak: false });
+      doc.text(item.project_name || '-', 138, y, { width: 180, lineBreak: false, ellipsis: true });
+      doc.text(`${item.started_at || '-'}-${item.ended_at || '-'}`, 318, y, { width: 100, lineBreak: false });
+      doc.text(Number(item.hours).toFixed(2), 418, y, { width: 80, align: 'right', lineBreak: false });
+      doc.y = y + 18;
+    }
+    doc.end();
+    return reply.send(doc);
   });
 
   app.get('/work-hours/export.csv', requireAuth, async (req, reply) => {

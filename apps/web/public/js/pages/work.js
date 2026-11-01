@@ -13,6 +13,11 @@ const localDate = (date) => date.toLocaleDateString('sv-SE');
 function range(mode, value) {
   const selected = asDate(value);
   if (mode === 'day') return [value, value];
+  if (mode === 'month') {
+    const start = new Date(selected.getFullYear(), selected.getMonth(), 1);
+    const end = new Date(selected.getFullYear(), selected.getMonth() + 1, 0);
+    return [localDate(start), localDate(end)];
+  }
   const start = new Date(selected);
   start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
   const end = new Date(start);
@@ -46,16 +51,22 @@ export async function render(view) {
   let timer = null;
   const teams = can('team:read') ? (await api.get('/teams')).filter((team) => team.role !== 'viewer') : [];
   const today = todayStr();
-  view.innerHTML = `<div class="page-head"><div><h1>Stundenerfassung</h1><p>Arbeitszeit, Pausen und Projekte unabhängig vom Gehalt erfassen</p></div>
-    <div class="actions"><button class="btn ghost" id="work-export">CSV-Export</button><button class="btn ghost" id="project-new">Projekt anlegen</button><button class="btn" id="work-new">Manuell erfassen</button></div></div>
+  view.innerHTML = `<div class="page-head"><div><h1>Stundenzettel</h1><p>Ein- und ausstempeln, Pausen erfassen und Arbeitszeiten im Überblick behalten</p></div>
+    <div class="actions"><button class="btn ghost" id="work-export">CSV-Export</button><button class="btn ghost" id="work-pdf">Monats-PDF</button><button class="btn ghost" id="project-new">Projekt anlegen</button><button class="btn" id="work-new">Manuell erfassen</button></div></div>
     <div class="card"><div class="card-head"><h2>Zeiterfassung</h2><span id="timer-state" class="tag">Inaktiv</span></div>
       <div class="toolbar" style="gap:8px;flex-wrap:wrap"><select id="timer-project"><option value="">Ohne Projekt</option></select>
       <input id="timer-note" maxlength="500" placeholder="Notiz (optional)" style="flex:1;min-width:180px">
-      <b id="timer-clock" class="value">00:00:00</b><button class="btn" id="timer-start">Start</button>
-      <button class="btn ghost" id="timer-pause" hidden>Pause</button><button class="btn ghost" id="timer-stop" hidden>Beenden</button></div>
+      <b id="timer-clock" class="value">00:00:00</b><button class="btn" id="timer-start">Einstempeln</button>
+      <button class="btn ghost" id="timer-pause" hidden>Pause</button><button class="btn ghost" id="timer-stop" hidden>Ausstempeln</button></div>
       <small id="timer-hint" class="muted"></small></div>
+    <div class="grid cols-4" id="work-kpis">
+      <div class="card kpi"><span class="label">Arbeitsstunden</span><span class="value" id="work-kpi-hours">–</span></div>
+      <div class="card kpi"><span class="label">Einträge im Zeitraum</span><span class="value" id="work-kpi-entries">–</span></div>
+      <div class="card kpi"><span class="label" id="work-kpi-target-label">Aktive Projekte</span><span class="value" id="work-kpi-target">–</span></div>
+      <div class="card kpi" id="work-kpi-overtime" hidden><span class="label">Überstunden-Saldo</span><span class="value" id="work-kpi-overtime-value">–</span></div>
+    </div>
     <div class="card"><div class="card-head"><h2>Auswertung</h2><b id="work-total" class="up"></b></div>
-      <div class="toolbar" style="gap:8px;flex-wrap:wrap"><select id="work-mode"><option value="week">Woche</option><option value="day">Tag</option></select>
+      <div class="toolbar" style="gap:8px;flex-wrap:wrap"><select id="work-mode"><option value="week">Woche</option><option value="day">Tag</option><option value="month">Monat</option></select>
       <input id="work-date" type="date" value="${today}"><span id="work-range" class="muted"></span></div><div id="work-list"></div></div>
     <div class="card"><div class="card-head"><h2>Projekte / Kunden</h2></div><div id="project-list"></div></div>`;
 
@@ -85,6 +96,7 @@ export async function render(view) {
   async function loadProjects() {
     projects = await api.get('/work-projects');
     updateProjectOptions();
+    if ($('#work-mode').value !== 'month') $('#work-kpi-target').textContent = projects.filter((project) => project.active).length;
     $('#project-list').innerHTML = projects.length ? projects.map((p) => `<div class="list-item"><div class="grow"><b>${esc(p.name)}</b><small>${p.team_name ? `Team: ${esc(p.team_name)}` : 'Privat'} · ${p.active ? 'Aktiv' : 'Archiviert'}</small></div>
       <button class="btn ghost sm" data-project-toggle="${p.id}">${p.active ? 'Archivieren' : 'Aktivieren'}</button>${p.owner_user_id ? ` <button class="btn ghost sm" data-project-delete="${p.id}">Löschen</button>` : ''}</div>`).join('') : empty('Noch keine Projekte angelegt.');
   }
@@ -93,16 +105,29 @@ export async function render(view) {
     drawTimer();
   }
   async function load() {
-    const [from, to] = range($('#work-mode').value, $('#work-date').value);
+    const mode = $('#work-mode').value;
+    const [from, to] = range(mode, $('#work-date').value);
     $('#work-range').textContent = `${dateText(from)} – ${dateText(to)}`;
-    const params = new URLSearchParams({ from, to });
-    const result = await api.get(`/work-hours?${params}`);
+    const result = mode === 'month'
+      ? await api.get(`/work-hours/monthly?${new URLSearchParams({ month: $('#work-date').value.slice(0, 7) })}`)
+      : await api.get(`/work-hours?${new URLSearchParams({ from, to })}`);
     entries = result.items;
-    $('#work-total').textContent = `Gesamt: ${hoursText(result.total_hours)}`;
-    $('#work-list').innerHTML = entries.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Datum</th><th>Projekt / Kunde</th><th>Zeitraum</th><th>Pause</th><th>Arbeitszeit</th><th>Notiz</th><th></th></tr></thead><tbody>${entries.map((item) => `<tr>
+    $('#work-total').textContent = mode === 'month'
+      ? `Saldo: ${result.overtime_balance >= 0 ? '+' : ''}${hoursText(result.overtime_balance)}`
+      : `Gesamt: ${hoursText(result.total_hours)}`;
+    $('#work-kpi-hours').textContent = hoursText(result.total_hours);
+    $('#work-kpi-entries').textContent = entries.length;
+    $('#work-kpi-overtime').hidden = mode !== 'month';
+    $('#work-kpi-target-label').textContent = mode === 'month' ? 'Monats-Soll' : 'Aktive Projekte';
+    $('#work-kpi-target').textContent = mode === 'month' ? hoursText(result.target_hours) : projects.filter((project) => project.active).length;
+    $('#work-kpi-overtime-value').textContent = mode === 'month' ? `${result.overtime_balance >= 0 ? '+' : ''}${hoursText(result.overtime_balance)}` : '–';
+    const entriesTable = entries.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Datum</th><th>Projekt / Kunde</th><th>Zeitraum</th><th>Pause</th><th>Arbeitszeit</th><th>Notiz</th><th></th></tr></thead><tbody>${entries.map((item) => `<tr>
       <td>${dateText(item.work_date)}</td><td>${esc(item.project_name || '–')}</td><td>${timeText(item.started_at)} – ${timeText(item.ended_at)}</td>
       <td>${item.break_minutes || 0} Min.</td><td><b>${hoursText(item.hours)}</b></td><td>${esc(item.note || '–')}</td>
       <td style="white-space:nowrap"><button class="btn ghost sm" data-edit="${item.id}">Bearbeiten</button> <button class="btn ghost sm" data-del="${item.id}">Löschen</button></td></tr>`).join('')}</tbody></table></div>` : empty('Keine Arbeitszeit im gewählten Zeitraum erfasst.');
+    $('#work-list').innerHTML = mode === 'month'
+      ? `<h3>Tagessummen</h3>${result.daily.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Datum</th><th>Arbeitszeit</th></tr></thead><tbody>${result.daily.map((day) => `<tr><td>${dateText(day.work_date)}</td><td><b>${hoursText(day.hours)}</b></td></tr>`).join('')}</tbody></table></div>` : empty('Keine Arbeitszeit im Monat erfasst.')}<h3 style="margin-top:20px">Einzelne Einträge</h3>${entriesTable}`
+      : entriesTable;
   }
   async function projectForm() {
     return openForm({
@@ -129,6 +154,8 @@ export async function render(view) {
       } else if (target.id === 'work-export') {
         const [from, to] = range($('#work-mode').value, $('#work-date').value);
         await api.download(`/work-hours/export.csv?${new URLSearchParams({ from, to })}`, 'arbeitszeiten.csv');
+      } else if (target.id === 'work-pdf') {
+        await api.download(`/work-hours/monthly.pdf?${new URLSearchParams({ month: $('#work-date').value.slice(0, 7) })}`, `stundenzettel-${$('#work-date').value.slice(0, 7)}.pdf`);
       } else if (target.id === 'timer-start') {
         await api.post('/work-hours/timer/start', { project_id: $('#timer-project').value || null, note: $('#timer-note').value });
         await loadTimer();

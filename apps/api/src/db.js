@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
+import { encrypt } from './security.js';
 
 // numeric/date als Strings belassen (Geld nie als float, Datum ohne Zeitzonen-Shift)
 pg.types.setTypeParser(1700, (v) => v);
@@ -58,6 +59,25 @@ export async function migrate(log = console) {
       try {
         await c.query(fs.readFileSync(path.join(dir, f), 'utf8'));
         await c.query('INSERT INTO schema_migrations(name) VALUES ($1)', [f]);
+        await c.query('COMMIT');
+      } catch (e) {
+        await c.query('ROLLBACK');
+        throw e;
+      }
+    }
+    const pinColumns = await c.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema=current_schema() AND table_name='properties' AND column_name IN ('door_pin','door_pin_enc')`,
+    );
+    const columns = new Set(pinColumns.rows.map((row) => row.column_name));
+    if (columns.has('door_pin') && columns.has('door_pin_enc')) {
+      await c.query('BEGIN');
+      try {
+        const legacyPins = await c.query('SELECT id, door_pin FROM properties WHERE door_pin_enc IS NULL AND door_pin <> \'\'');
+        for (const property of legacyPins.rows) {
+          await c.query('UPDATE properties SET door_pin_enc=$2 WHERE id=$1', [property.id, encrypt(property.door_pin)]);
+        }
+        await c.query('ALTER TABLE properties DROP COLUMN door_pin');
         await c.query('COMMIT');
       } catch (e) {
         await c.query('ROLLBACK');

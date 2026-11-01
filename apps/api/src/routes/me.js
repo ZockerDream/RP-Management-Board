@@ -13,6 +13,7 @@ import { audit } from '../audit.js';
 
 const publicUser = (u) => ({
   id: u.id, email: u.email, name: u.name, locale: u.locale, currency: u.currency, timezone: u.timezone, week_start: u.week_start,
+  weekly_work_hours: u.weekly_work_hours,
   theme: u.theme, accent: u.accent, gravatar_enabled: u.gravatar_enabled, totp_enabled: u.totp_enabled,
   has_ical: !!u.ical_token, last_login_at: u.last_login_at,
 });
@@ -30,6 +31,7 @@ export default async function routes(app) {
       currency: z.string().length(3).optional(),
       timezone: z.string().max(60).optional(),
       week_start: z.number().int().min(0).max(1).optional(),
+      weekly_work_hours: z.number().min(1).max(168).multipleOf(0.25).optional(),
       theme: z.enum(['system', 'light', 'dark']).optional(),
       accent: z.enum(['indigo', 'emerald', 'ocean', 'rose', 'amber', 'mono']).optional(),
       gravatar_enabled: z.boolean().optional(),

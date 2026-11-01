@@ -1,7 +1,7 @@
 import { api } from '../api.js';
-import { $, esc, eur, fdate, fdatetime, empty, openForm, confirmBox, toast, parseAmount, todayStr } from '../ui.js';
+import { $, esc, eur, fdate, fdatetime, empty, openForm, confirmBox, toast, parseAmount, todayStr, showSecret } from '../ui.js';
 import { loadBudgets } from './common.js';
-import { can } from '../app.js';
+import { can, state } from '../app.js';
 
 const STATUS = { available: ['ok', 'Verfügbar'], out: ['warn', 'Ausgegeben'], overdue: ['bad', 'Überfällig'], lost: ['bad', 'Verloren'] };
 const VSTATUS = { available: 'Verfügbar', in_use: 'Im Einsatz', workshop: 'Werkstatt', retired: 'Ausgemustert' };
@@ -59,11 +59,12 @@ async function formVehicle(o) {
       { name: 'plate', label: 'Kennzeichen', value: o?.plate, required: true },
       { name: 'make_model', label: 'Marke / Modell', value: o?.make_model, required: true },
       { name: 'status', label: 'Status', type: 'select', options: Object.entries(VSTATUS).map(([v, l]) => ({ v, l })), value: o?.status || 'available' },
+      { name: 'registered_owner', label: 'Fahrzeughalter / Besitzer', value: o?.registered_owner, full: true },
       { name: 'service_due', label: 'Service fällig', type: 'date', value: o?.service_due?.slice(0, 10) },
       { name: 'odometer_km', label: 'Kilometerstand', type: 'number', min: 0, value: o?.odometer_km },
       { name: 'service_interval_km', label: 'Service-Intervall (km)', type: 'number', min: 1, value: o?.service_interval_km },
       { name: 'service_due_km', label: 'Service fällig bei (km)', type: 'number', min: 0, value: o?.service_due_km },
-      { name: 'insurance_from', label: 'Versicherung ab', type: 'date', value: o?.insurance_from?.slice(0, 10) },
+      { name: 'first_aid_kit_expires_on', label: 'Verbandskasten gültig bis', type: 'date', value: o?.first_aid_kit_expires_on?.slice(0, 10) },
       { name: 'note', label: 'Notiz', type: 'textarea', value: o?.note, full: true },
       ...ownership,
       ...costFields(o, budgets),
@@ -74,7 +75,7 @@ async function formVehicle(o) {
       const serviceDueKm = v.service_due_km === ''
         ? (odometerKm !== null && serviceIntervalKm !== null ? odometerKm + serviceIntervalKm : null)
         : Number(v.service_due_km);
-      return save('vehicles', o, { plate: v.plate.trim(), make_model: v.make_model.trim(), status: v.status, service_due: v.service_due || null, odometer_km: odometerKm, service_interval_km: serviceIntervalKm, service_due_km: serviceDueKm, insurance_from: v.insurance_from || null, note: v.note, ...ownershipBody(v), ...costBody(v) });
+      return save('vehicles', o, { plate: v.plate.trim(), make_model: v.make_model.trim(), status: v.status, registered_owner: v.registered_owner.trim(), service_due: v.service_due || null, odometer_km: odometerKm, service_interval_km: serviceIntervalKm, service_due_km: serviceDueKm, first_aid_kit_expires_on: v.first_aid_kit_expires_on || null, note: v.note, ...ownershipBody(v), ...costBody(v) });
     },
   });
 }
@@ -85,7 +86,7 @@ async function formKey(o, props, vehicles) {
     title: o ? 'Schlüssel bearbeiten' : 'Neuer Schlüssel', wide: true, fields: [
       { name: 'code', label: 'Schlüssel-Nr.', value: o?.code, required: true },
       { name: 'label', label: 'Bezeichnung', value: o?.label, required: true },
-      { name: 'kind', label: 'Art', value: o?.kind || 'Haustür' },
+      { name: 'kind', label: 'Art (frei definierbar)', value: o?.kind || 'Haustür', placeholder: 'z. B. Haustür, Briefkasten, eigener Schlüsseltyp' },
       { name: 'copies', label: 'Anzahl Kopien', type: 'number', min: 1, value: o?.copies || 1 },
       { name: 'property_id', label: 'Haus', type: 'select', options: [{ v: '', l: '–' }, ...props.map((p) => ({ v: p.id, l: p.name }))], value: o?.property_id || '' },
       { name: 'vehicle_id', label: 'Fahrzeug', type: 'select', options: [{ v: '', l: '–' }, ...vehicles.map((p) => ({ v: p.id, l: `${p.make_model} (${p.plate})` }))], value: o?.vehicle_id || '' },
@@ -117,6 +118,9 @@ const actions = (id, perm) => `${can(`${perm}:update`) ? `<button class="btn gho
 
 export async function render(view, params) {
   const D = {};
+  let keyFilter = null;
+  let scannerActive = false;
+  let cameraStream = null;
   const tabs = [['overview', 'Übersicht'], ['keys', 'Schlüssel'], ['properties', 'Häuser'], ['vehicles', 'Fahrzeuge'], ['people', 'Personen'], ['costs', 'Kosten'], ['log', 'Protokoll']]
     .filter(([k]) => can({ keys: 'key:read', properties: 'property:read', vehicles: 'vehicle:read', people: 'person:read' }[k] || 'key:read') || k === 'overview');
   const initial = tabs.some(([k]) => k === params?.get('tab')) ? params.get('tab') : tabs[0][0];
@@ -129,6 +133,15 @@ export async function render(view, params) {
     const [props, vehicles, people, keys] = await Promise.all([api.get('/properties').catch(() => []), api.get('/vehicles').catch(() => []), api.get('/people').catch(() => []), api.get('/keys').catch(() => [])]);
     Object.assign(D, { props, vehicles, people, keys });
   };
+  const keyInventory = (field, assetId, type) => {
+    const assigned = D.keys.filter((key) => key[field] === assetId);
+    const total = assigned.reduce((sum, key) => sum + Number(key.copies), 0);
+    const issued = assigned.reduce((sum, key) => sum + Number(key.issued), 0);
+    const lost = assigned.reduce((sum, key) => sum + Number(key.lost), 0);
+    const value = `${total} gesamt · ${issued} ausgegeben · ${lost} verloren`;
+    return can('key:read') ? `<button class="link" data-manage-keys="${type}:${assetId}">${value}</button>` : value;
+  };
+  const pinEye = (id) => `<button class="btn ghost sm pin-eye" data-reveal-pin="${id}" aria-label="Tür-PIN einblenden" title="Tür-PIN einblenden"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z"/><circle cx="12" cy="12" r="2.5"/></svg></button>`;
 
   const R = {
     async overview(el) {
@@ -141,19 +154,26 @@ export async function render(view, params) {
     },
     async keys(el) {
       await fetchAll();
-      el.innerHTML = `<div class="card">${D.keys.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Nr.</th><th>Bezeichnung</th><th>Objekt</th><th>Kopien</th><th>Inhaber</th><th>Status</th><th></th></tr></thead><tbody>${D.keys.map((k) => `<tr>
-        <td>${esc(k.code)}</td><td><b>${esc(k.label)}</b><br><small class="muted">${esc(k.kind)}</small></td><td>${esc(k.property_name || (k.vehicle_name ? `${k.vehicle_name} (${k.vehicle_plate})` : '–'))}</td><td>${k.issued}/${k.copies}</td>
+      const selectedKey = params?.get('key');
+      if (!keyFilter && selectedKey) {
+        const selected = D.keys.find((key) => key.id === selectedKey);
+        if (selected) keyFilter = { type: selected.property_id ? 'house' : 'vehicle', id: selected.property_id || selected.vehicle_id };
+      }
+      const keys = keyFilter ? D.keys.filter((k) => k[keyFilter.type === 'house' ? 'property_id' : 'vehicle_id'] === keyFilter.id) : D.keys;
+      const filterLabel = keyFilter ? D.props.find((p) => p.id === keyFilter.id)?.name || D.vehicles.find((v) => v.id === keyFilter.id)?.make_model : '';
+      el.innerHTML = `<div class="card"><div class="card-head"><b>${keyFilter ? `Schlüssel für ${esc(filterLabel)}` : 'Schlüsselbestand und Ausgaben'}</b><div class="row">${keyFilter ? '<button class="btn ghost sm" data-clear-key-filter>Alle Schlüssel</button>' : ''}<button class="btn ghost sm" id="scan-keys">QR-Code scannen</button></div></div>${keys.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Nr.</th><th>Bezeichnung</th><th>Objekt</th><th>Bestand / ausgegeben / verloren</th><th>Inhaber</th><th>Status</th><th></th></tr></thead><tbody>${keys.map((k) => `<tr>
+        <td>${esc(k.code)}</td><td><b>${esc(k.label)}</b><br><small class="muted">${esc(k.kind)}</small></td><td>${esc(k.property_name || (k.vehicle_name ? `${k.vehicle_name} (${k.vehicle_plate})` : '–'))}</td><td>${k.copies} / ${k.issued} / ${k.lost}</td>
         <td>${k.holders.map((h) => `<div>${esc(h.person || '–')} <small class="muted">#${h.copy_no}${h.due_at ? ` bis ${fdate(h.due_at)}` : ''}${h.lost ? ' · verloren' : ''}</small> ${can('key:assign') ? `<button class="link" data-ret="${h.id}">zurück</button>${h.lost ? '' : ` <button class="link" data-lost="${h.id}">verloren</button>`}` : ''}</div>`).join('') || '<span class="muted">–</span>'}</td>
         <td><span class="tag ${STATUS[k.status][0]}">${STATUS[k.status][1]}</span></td>
-        <td style="white-space:nowrap">${can('key:assign') && k.issued + k.lost < k.copies ? `<button class="btn sm" data-assign="${k.id}">Ausgeben</button> ` : ''}${actions(k.id, 'key')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Schlüssel.')}</div>`;
+        <td style="white-space:nowrap"><button class="btn ghost sm" data-qr="${k.id}">QR</button> ${can('key:assign') && k.issued + k.lost < k.copies ? `<button class="btn sm" data-assign="${k.id}">Ausgeben</button> ` : ''}${actions(k.id, 'key')}</td></tr>`).join('')}</tbody></table></div>` : empty(keyFilter ? 'Für dieses Objekt sind noch keine Schlüssel angelegt.' : 'Noch keine Schlüssel.')}</div>`;
     },
     async properties(el) {
       await fetchAll();
-      el.innerHTML = `<div class="card">${D.props.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Art</th><th>Adresse</th><th>Verantwortlich</th><th>Wartung</th><th>Kosten</th><th></th></tr></thead><tbody>${D.props.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td>${PTYPE[p.type]}</td><td>${esc(p.address)}</td><td>${esc(D.people.find((x) => x.id === p.responsible_person_id)?.name || '–')}</td><td>${fdate(p.maintenance_due)}</td><td>${p.cost_amount ? `${eur(p.cost_amount)} ${INTERVAL[p.cost_interval].toLowerCase()}` : '–'}</td><td style="white-space:nowrap">${actions(p.id, 'property')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Häuser.')}</div>`;
+      el.innerHTML = `<div class="card">${D.props.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Art</th><th>Adresse</th><th>Verantwortlich</th><th>Wartung</th><th>Schlüssel-Inventur</th><th>Tür-PIN</th><th>Kosten</th><th></th></tr></thead><tbody>${D.props.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td>${PTYPE[p.type]}</td><td>${esc(p.address)}</td><td>${esc(D.people.find((x) => x.id === p.responsible_person_id)?.name || '–')}</td><td>${fdate(p.maintenance_due)}</td><td>${keyInventory('property_id', p.id, 'house')}</td><td>${pinEye(p.id)}${can('property:update') ? ` <button class="btn ghost sm" data-set-pin="${p.id}">PIN ändern</button>` : ''}</td><td>${p.cost_amount ? `${eur(p.cost_amount)} ${INTERVAL[p.cost_interval].toLowerCase()}` : '–'}</td><td style="white-space:nowrap">${actions(p.id, 'property')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Häuser.')}</div>`;
     },
     async vehicles(el) {
       await fetchAll();
-      el.innerHTML = `<div class="card">${D.vehicles.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Kennzeichen</th><th>Modell</th><th>Status</th><th>Service</th><th>Versicherung ab</th><th>Kosten</th><th></th></tr></thead><tbody>${D.vehicles.map((v) => `<tr><td><b>${esc(v.plate)}</b></td><td>${esc(v.make_model)}</td><td>${VSTATUS[v.status]}</td><td>${fdate(v.service_due)}${v.service_due_km != null ? `<br><small class="muted">bei ${Number(v.service_due_km).toLocaleString('de-DE')} km</small>` : ''}</td><td>${fdate(v.insurance_from)}</td><td>${v.cost_amount ? `${eur(v.cost_amount)} ${INTERVAL[v.cost_interval].toLowerCase()}` : '–'}</td><td style="white-space:nowrap">${actions(v.id, 'vehicle')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Fahrzeuge.')}</div>`;
+      el.innerHTML = `<div class="card">${D.vehicles.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Kennzeichen</th><th>Modell</th><th>Besitzer</th><th>Status</th><th>Service</th><th>Verbandskasten</th><th>Schlüssel-Inventur</th><th>Kosten</th><th></th></tr></thead><tbody>${D.vehicles.map((v) => `<tr><td><b>${esc(v.plate)}</b></td><td>${esc(v.make_model)}</td><td>${esc(v.registered_owner || '–')}</td><td>${VSTATUS[v.status]}</td><td>${fdate(v.service_due)}${v.service_due_km != null ? `<br><small class="muted">bei ${Number(v.service_due_km).toLocaleString('de-DE')} km</small>` : ''}</td><td>${fdate(v.first_aid_kit_expires_on)}</td><td>${keyInventory('vehicle_id', v.id, 'vehicle')}</td><td>${v.cost_amount ? `${eur(v.cost_amount)} ${INTERVAL[v.cost_interval].toLowerCase()}` : '–'}</td><td style="white-space:nowrap">${actions(v.id, 'vehicle')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Fahrzeuge.')}</div>`;
     },
     async people(el) {
       await fetchAll();
@@ -190,6 +210,82 @@ export async function render(view, params) {
     });
   }
 
+  async function pinAccess(propertyId, reveal) {
+    const fields = [
+      ...(reveal ? [] : [{ name: 'pin', label: 'Neuer Tür-PIN (leer = entfernen)', type: 'password', autocomplete: 'off' }]),
+      { name: 'password', label: 'Aktuelles Passwort', type: 'password', required: true, autocomplete: 'current-password' },
+      ...(state.me?.totp_enabled ? [{ name: 'code', label: '2FA-Code', required: true, autocomplete: 'one-time-code' }] : []),
+    ];
+    return openForm({
+      title: reveal ? 'Tür-PIN anzeigen' : 'Tür-PIN ändern',
+      submit: reveal ? 'PIN anzeigen' : 'PIN speichern',
+      fields,
+      onSubmit: async (v) => {
+        const credentials = { password: v.password, ...(v.code ? { code: v.code.trim() } : {}) };
+        if (!reveal) return api.post(`/properties/${propertyId}/pin`, { pin: v.pin, ...credentials });
+        const result = await api.post(`/properties/${propertyId}/pin/reveal`, credentials);
+        await showSecret('Tür-PIN', 'PIN wird nur nach Passwortbestätigung angezeigt:', result.pin);
+      },
+    });
+  }
+  async function showKeyQr(keyId) {
+    const { image } = await api.get(`/keys/${keyId}/qr`);
+    return openForm({
+      title: 'Schlüssel-QR-Code',
+      submit: 'Schließen',
+      fields: [{ type: 'html', html: `<p class="muted">Scannen öffnet diesen Schlüssel in der Bestandsverwaltung.</p><img class="key-qr" src="${esc(image)}" alt="QR-Code für den Schlüssel">` }],
+      onSubmit: async () => true,
+    });
+  }
+  async function scanKeyQr() {
+    if (!window.BarcodeDetector || !navigator.mediaDevices?.getUserMedia) {
+      return toast('QR-Scan wird von diesem Browser nicht unterstützt. Nutze die Kamera-App zum Scannen.', true);
+    }
+    const modal = document.createElement('div');
+    modal.className = 'modal open';
+    modal.innerHTML = `<div class="card"><div class="card-head"><h2>Schlüssel-QR-Code scannen</h2></div><video class="key-scan-video" playsinline muted></video><p class="muted">Halte den QR-Code vor die Kamera.</p><div class="modal-foot"><button class="btn ghost" data-close>Abbrechen</button></div></div>`;
+    $('#modals').append(modal);
+    const close = () => {
+      scannerActive = false;
+      cameraStream?.getTracks().forEach((track) => track.stop());
+      cameraStream = null;
+      modal.remove();
+    };
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal || event.target.closest('[data-close]')) close();
+    });
+    scannerActive = true;
+    try {
+      cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+      const video = $('video', modal);
+      video.srcObject = cameraStream;
+      await video.play();
+      const detector = new BarcodeDetector({ formats: ['qr_code'] });
+      while (scannerActive && view.isConnected) {
+        const [result] = await detector.detect(video);
+        if (result) {
+          const scanned = new URL(result.rawValue, location.origin);
+          const [route, query = ''] = scanned.hash.split('?');
+          const values = new URLSearchParams(query);
+          if (scanned.origin !== location.origin || route !== '#/assets' || values.get('tab') !== 'keys' || !/^[0-9a-f-]{36}$/i.test(values.get('key') || '')) {
+            toast('Der QR-Code verweist nicht auf einen gültigen Schlüssel in dieser App.', true);
+            close();
+            return;
+          } else {
+            close();
+            location.hash = scanned.hash;
+            return;
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      close();
+    } catch (error) {
+      close();
+      toast(`Kamera konnte nicht gestartet werden: ${error.message}`, true);
+    }
+  }
+
   view.addEventListener('tabchange', () => show());
   view.addEventListener('click', async (e) => {
     const g = (s) => e.target.closest(s);
@@ -208,6 +304,15 @@ export async function render(view, params) {
       } else if (g('[data-assign]')) changed = await assign(D.keys.find((x) => x.id === id.assign));
       else if (g('[data-ret]')) { await api.post(`/assignments/${g('[data-ret]').dataset.ret}/return`); changed = true; }
       else if (g('[data-lost]') && (await confirmBox('Schlüssel verloren', 'Als verloren melden? Die Kopie bleibt bis zur Klärung blockiert.', 'Melden'))) { await api.post(`/assignments/${g('[data-lost]').dataset.lost}/lost`); changed = true; }
+      else if (g('[data-manage-keys]')) {
+        const [type, assetId] = g('[data-manage-keys]').dataset.manageKeys.split(':');
+        keyFilter = { type, id: assetId };
+        $('.tabs [data-tab="keys"]', view)?.click();
+      } else if (g('[data-clear-key-filter]')) { keyFilter = null; show('keys'); }
+      else if (g('[data-reveal-pin]')) await pinAccess(g('[data-reveal-pin]').dataset.revealPin, true);
+      else if (g('[data-set-pin]')) { await pinAccess(g('[data-set-pin]').dataset.setPin, false); show('properties'); }
+      else if (g('[data-qr]')) await showKeyQr(g('[data-qr]').dataset.qr);
+      else if (g('#scan-keys')) await scanKeyQr();
       if (changed) show();
     } catch (x) { toast(x.message, true); }
   });
