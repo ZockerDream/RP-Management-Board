@@ -7,14 +7,14 @@ const STATUS = { available: ['ok', 'Verfügbar'], out: ['warn', 'Ausgegeben'], o
 const VSTATUS = { available: 'Verfügbar', in_use: 'Im Einsatz', workshop: 'Werkstatt', retired: 'Ausgemustert' };
 const PTYPE = { home: 'Wohnung/Haus', office: 'Büro', storage: 'Lager', holiday: 'Ferienobjekt' };
 const PKIND = { employee: 'Mitarbeiter', external: 'Extern', family: 'Familie' };
-const INTERVAL = { weekly: 'Wöchentlich', monthly: 'Monatlich', quarterly: 'Vierteljährlich', yearly: 'Jährlich', once: 'Einmalig' };
+const INTERVAL = { daily: 'Täglich', weekly: 'Wöchentlich', monthly: 'Monatlich', quarterly: 'Vierteljährlich', yearly: 'Jährlich', once: 'Einmalig' };
 const EVENT = { issued: 'Ausgegeben', returned: 'Zurückgegeben', lost: 'Als verloren gemeldet' };
 const ASSET_TYPE = { house: 'Haus', vehicle: 'Fahrzeug', key: 'Schlüssel' };
 
-const costFields = (o, budgets) => [
+const costFields = (o, budgets, daily = false) => [
   { type: 'html', html: '<div class="cost-block"><b>Laufende Kosten (optional)</b><p class="muted">Werden automatisch als Buchung bzw. Dauerauftrag im gewählten Budget geführt.</p></div>' },
   { name: 'cost_amount', label: 'Betrag', value: o?.cost_amount ? String(o.cost_amount).replace('.', ',') : '' },
-  { name: 'cost_interval', label: 'Intervall', type: 'select', options: Object.entries(INTERVAL).map(([v, l]) => ({ v, l })), value: o?.cost_interval || 'monthly' },
+  { name: 'cost_interval', label: 'Intervall', type: 'select', options: Object.entries(INTERVAL).filter(([v]) => daily || v !== 'daily').map(([v, l]) => ({ v, l })), value: o?.cost_interval || 'monthly' },
   { name: 'cost_budget_id', label: 'Budget', type: 'select', options: [{ v: '', l: '– Keines –' }, ...budgets.map((b) => ({ v: b.id, l: b.name }))], value: o?.cost_budget_id || '' },
   { name: 'cost_category_id', label: 'Kategorie', type: 'select', options: [{ v: '', l: '– Keine –' }, ...budgets.flatMap((b) => b.categories.map((c) => ({ v: c.id, l: `${b.name} › ${c.name}` })))], value: o?.cost_category_id || '' },
   { name: 'cost_tracking', label: 'Kosten im Budget verbuchen', type: 'checkbox', value: o ? o.cost_tracking !== false : true },
@@ -67,7 +67,7 @@ async function formVehicle(o) {
       { name: 'first_aid_kit_expires_on', label: 'Verbandskasten gültig bis', type: 'date', value: o?.first_aid_kit_expires_on?.slice(0, 10) },
       { name: 'note', label: 'Notiz', type: 'textarea', value: o?.note, full: true },
       ...ownership,
-      ...costFields(o, budgets),
+      ...costFields(o, budgets, true),
     ],
     onSubmit: (v) => {
       const odometerKm = v.odometer_km === '' ? null : Number(v.odometer_km);

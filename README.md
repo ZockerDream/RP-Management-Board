@@ -55,7 +55,7 @@ Ohne Proxy direkt `http://<server-ip>:8080` öffnen. Bei HTTP sind Cookies nicht
 | `LOG_LEVEL` | Log-Level |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth für Kontakte und Kalender; Redirect-URI `APP_URL/api/integrations/google/callback`, Scopes `contacts.readonly` und `calendar.readonly` |
 | `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` | Microsoft OAuth für Kontakte und Kalender; Redirect-URI `APP_URL/api/integrations/microsoft/callback`, API-Berechtigungen `Contacts.Read`, `Calendars.Read`, `User.Read` sowie `offline_access` |
-| `GITHUB_ISSUES_TOKEN`, `GITHUB_ISSUES_REPOSITORY` | Fehlerberichte als GitHub Issues; Token benötigt Issues-Schreibzugriff im Zielrepository |
+| `GITHUB_ISSUES_TOKEN`, `GITHUB_ISSUES_REPOSITORY` | Optionaler GitHub-Abgleich interner Fehler-Tickets; Token benötigt Issues-Schreibzugriff im Zielrepository |
 | `IMPRINT_*` | Angaben für die öffentliche Impressumsseite |
 
 Alle weiteren Einstellungen (Passwortregeln, Branding, Wartungsmodus) pflegt der Admin unter *Verwaltung → Einstellungen*.

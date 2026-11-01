@@ -194,7 +194,10 @@ export async function route() {
 async function loadBell() {
   try {
     const n = await api.get('/notifications');
-    $('#bell-n').textContent = n.unread ? `(${n.unread})` : '';
+    const count = $('#bell-n');
+    count.textContent = n.unread || '';
+    count.hidden = !n.unread;
+    $('#bell').setAttribute('aria-label', n.unread ? `Benachrichtigungen, ${n.unread} ungelesen` : 'Benachrichtigungen');
   } catch { /* ignorieren */ }
 }
 

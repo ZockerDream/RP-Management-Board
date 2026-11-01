@@ -35,7 +35,7 @@ async function assertVisible(req, table, recordId) {
 
 const costFields = {
   cost_amount: money.nullish(),
-  cost_interval: z.enum(['once', 'weekly', 'monthly', 'quarterly', 'yearly']).nullish(),
+  cost_interval: z.enum(['once', 'daily', 'weekly', 'monthly', 'quarterly', 'yearly']).nullish(),
   cost_budget_id: id.nullish(),
   cost_category_id: id.nullish(),
   cost_tracking: z.boolean().optional(),
@@ -47,7 +47,7 @@ const KINDS = {
     schema: z.object({
       name: z.string().min(1).max(100), type: z.enum(['home', 'office', 'storage', 'holiday']).default('home'), address: str(300).default(''), ...ownerFields,
       responsible_person_id: id.nullish(), maintenance_due: date.nullish(), maintenance_note: str(500).default(''), note: str(2000).default(''), ...costFields,
-    }),
+    }).refine((v) => v.cost_interval !== 'daily', 'Tägliche Kosten sind nur für Fahrzeuge verfügbar'),
     cols: ['name', 'type', 'address', 'responsible_person_id', 'maintenance_due', 'maintenance_note', 'note'],
   },
   vehicles: {
@@ -63,12 +63,13 @@ const KINDS = {
     schema: z.object({
       code: z.string().min(1).max(30), label: z.string().min(1).max(100), kind: str(40).default('Haustür'), property_id: id.nullish(), vehicle_id: id.nullish(), ...ownerFields,
       copies: z.number().int().min(1).max(99).default(1), note: str(2000).default(''), ...costFields,
-    }).refine((v) => v.property_id || v.vehicle_id, 'Haus oder Fahrzeug erforderlich'),
+    }).refine((v) => v.property_id || v.vehicle_id, 'Haus oder Fahrzeug erforderlich')
+      .refine((v) => v.cost_interval !== 'daily', 'Tägliche Kosten sind nur für Fahrzeuge verfügbar'),
     cols: ['code', 'label', 'kind', 'property_id', 'vehicle_id', 'copies', 'note'],
   },
 };
 const COST_COLS = ['cost_amount', 'cost_interval', 'cost_budget_id', 'cost_category_id', 'cost_tracking'];
-const PER = { weekly: ['weekly', 1], monthly: ['monthly', 1], quarterly: ['monthly', 3], yearly: ['yearly', 1] };
+const PER = { daily: ['daily', 1], weekly: ['weekly', 1], monthly: ['monthly', 1], quarterly: ['monthly', 3], yearly: ['yearly', 1] };
 
 // Kosten eines Objekts mit Budget synchronisieren (§7.1): einmalig = Buchung, sonst Dauerauftrag
 async function syncCost(c, table, kind, before, after, userId) {
@@ -331,7 +332,7 @@ export default async function routes(app) {
     for (const [t, col, type] of parts) {
       items.push(...(await many(`SELECT '${type}' type, x.id, x.${col} name, x.cost_amount amount, x.cost_interval interval, x.cost_tracking tracking, b.name budget_name FROM ${t} x LEFT JOIN budgets b ON b.id=x.cost_budget_id WHERE ${ownerSql('x')} AND x.cost_amount IS NOT NULL`, [req.user.id])));
     }
-    const factor = { once: 0, weekly: 52, monthly: 12, quarterly: 4, yearly: 1 };
+    const factor = { once: 0, daily: 365, weekly: 52, monthly: 12, quarterly: 4, yearly: 1 };
     for (const i of items) i.yearly = (Number(i.amount) * factor[i.interval]).toFixed(2);
     return { items, yearly_total: items.reduce((s, i) => s + Number(i.yearly), 0).toFixed(2) };
   });

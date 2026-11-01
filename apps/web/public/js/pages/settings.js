@@ -58,7 +58,7 @@ export async function render(view) {
         const f = e.target.elements;
         try { await api.put('/me/notification-prefs', KINDS.map(([k]) => ({ kind: k, in_app: f[`${k}.in_app`].checked, email: f[`${k}.email`].checked }))); toast('Gespeichert'); } catch (x) { toast(x.message, true); }
       });
-      $('#n-read', el)?.addEventListener('click', async () => { await api.post('/notifications/read'); $('#bell-n').textContent = ''; P.notif(el); });
+      $('#n-read', el)?.addEventListener('click', async () => { await api.post('/notifications/read'); $('#bell-n').textContent = ''; $('#bell-n').hidden = true; $('#bell').setAttribute('aria-label', 'Benachrichtigungen'); P.notif(el); });
     },
     async sessions(el) {
       const s = await api.get('/me/sessions');
