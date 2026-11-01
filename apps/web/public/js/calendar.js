@@ -1,5 +1,6 @@
 import { api } from './api.js';
 import { toast } from './ui.js';
+import { occursOn } from './recurrence.js';
 const $ = (s, r = document) => r.querySelector(s);
 const pad = n => String(n).padStart(2, '0');
 const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -26,24 +27,7 @@ const today = new Date(); today.setHours(0, 0, 0, 0);
 let events = [];
 const st = { view: 'month', cursor: new Date(today), hidden: new Set(['holiday'].filter(() => false)), editing: null };
 
-const occursOn = (e, d) => {
-  const s = parse(e.date);
-  if (d < s) return false;
-  const interval = e.repeat_interval || 1;
-  const days = Math.round((d - s) / 86400000);
-  switch (e.repeat) {
-    case 'daily':
-    case 'custom': return days % interval === 0;
-    case 'weekly': return d.getDay() === s.getDay() && Math.floor(days / 7) % interval === 0;
-    case 'monthly': {
-      const months = (d.getFullYear() - s.getFullYear()) * 12 + d.getMonth() - s.getMonth();
-      return d.getDate() === s.getDate() && months % interval === 0;
-    }
-    case 'yearly': return d.getDate() === s.getDate() && d.getMonth() === s.getMonth() && (d.getFullYear() - s.getFullYear()) % interval === 0;
-    default: return ymd(d) === e.date;
-  }
-};
-const on = d => events.filter(e => !st.hidden.has(e.type) && occursOn(e, d))
+const on = d => events.filter(e => !st.hidden.has(e.type) && occursOn(e.date, e.repeat, e.repeat_interval, ymd(d)))
   .sort((a, b) => (b.allDay ? 1 : 0) - (a.allDay ? 1 : 0) || (a.start || '').localeCompare(b.start || ''));
 
 const eur = n => (n > 0 ? '+' : '−') + Math.abs(n).toLocaleString('de-DE', { minimumFractionDigits: n % 1 ? 2 : 0 }) + ' €';
@@ -124,6 +108,13 @@ function render() {
 }
 
 const setTimes = hide => ['#ev-times-a', '#ev-times-b'].forEach(s => { $(s).hidden = hide; });
+const repeatUnits = { daily: 'Tage', weekly: 'Wochen', monthly: 'Monate', yearly: 'Jahre', custom: 'Tage' };
+function updateRepeatInterval() {
+  const frequency = $('#ev-repeat').value;
+  const wrap = $('#ev-repeat-interval-wrap');
+  wrap.hidden = frequency === 'none';
+  wrap.firstChild.textContent = `Alle … ${repeatUnits[frequency] || 'Einheiten'}`;
+}
 
 function openEvent(id, date, day) {
   const e = id ? events.find(x => x.id === id) : null;
@@ -140,7 +131,7 @@ function openEvent(id, date, day) {
   f('end').value = e?.end || '10:00';
   f('repeat').value = e?.repeat || 'none';
   f('repeat-interval').value = e?.repeat_interval || 1;
-  $('#ev-repeat-interval-wrap').hidden = f('repeat').value !== 'custom';
+  updateRepeatInterval();
   f('remind').value = e?.remind || 'none';
   f('amount').value = e?.amount ?? '';
   f('note').value = e?.note || '';
@@ -157,7 +148,7 @@ async function save() {
   const allDay = f('allday').checked;
   const amountRaw = f('amount').value.trim().replace(',', '.');
   const repeat = f('repeat').value;
-  const data = { title: f('title').value.trim(), type: f('type').value, team_id: f('type').value === 'team' ? f('team').value || null : null, date: f('date').value, allDay, start: allDay ? null : f('start').value, end: allDay ? null : f('end').value, repeat, repeat_interval: repeat === 'custom' ? Number(f('repeat-interval').value) : 1, remind: f('remind').value, amount: amountRaw === '' ? null : amountRaw, note: f('note').value.trim() };
+  const data = { title: f('title').value.trim(), type: f('type').value, team_id: f('type').value === 'team' ? f('team').value || null : null, date: f('date').value, allDay, start: allDay ? null : f('start').value, end: allDay ? null : f('end').value, repeat, repeat_interval: repeat === 'none' ? 1 : Number(f('repeat-interval').value), remind: f('remind').value, amount: amountRaw === '' ? null : amountRaw, note: f('note').value.trim() };
   if (!allDay && data.end <= data.start) return f('end').focus();
   try {
     if (st.editing) await api.put('/calendar/events/' + encodeURIComponent(st.editing.id), data); else await api.post('/calendar/events', data);
@@ -193,7 +184,7 @@ document.addEventListener('click', e => {
 document.addEventListener('change', e => {
   if (e.target.dataset.filter) { e.target.checked ? st.hidden.delete(e.target.dataset.filter) : st.hidden.add(e.target.dataset.filter); render(); }
   if (e.target.id === 'ev-type') $('#ev-team-wrap').hidden = e.target.value !== 'team';
-  if (e.target.id === 'ev-repeat') $('#ev-repeat-interval-wrap').hidden = e.target.value !== 'custom';
+  if (e.target.id === 'ev-repeat') updateRepeatInterval();
   if (e.target.id === 'ev-allday') setTimes(e.target.checked);
 });
 

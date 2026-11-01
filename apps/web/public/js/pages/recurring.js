@@ -4,6 +4,12 @@ import { loadBudgets } from './common.js';
 import { can } from '../app.js';
 
 const FREQ = { daily: 'Täglich', weekly: 'Wöchentlich', monthly: 'Monatlich', yearly: 'Jährlich', custom: 'Benutzerdefiniert (Tage)' };
+const INTERVAL_UNITS = { daily: 'Tage', weekly: 'Wochen', monthly: 'Monate', yearly: 'Jahre', custom: 'Tage' };
+const frequencyLabel = (rule) => rule.frequency === 'custom'
+  ? (rule.interval === 1 ? 'jeden Tag' : `alle ${rule.interval} Tage`)
+  : rule.interval > 1
+    ? `alle ${rule.interval} ${INTERVAL_UNITS[rule.frequency]}`
+    : FREQ[rule.frequency];
 
 async function form(r) {
   const budgets = await loadBudgets();
@@ -45,7 +51,7 @@ async function form(r) {
   frequencySel?.addEventListener('change', () => {
     const intervalField = $('#f-interval')?.closest('label');
     const label = intervalField?.firstChild;
-    if (label) label.textContent = frequencySel.value === 'custom' ? 'Abstand in Tagen' : 'Alle … Einheiten';
+    if (label) label.textContent = frequencySel.value === 'custom' ? 'Abstand in Tagen' : `Alle … ${INTERVAL_UNITS[frequencySel.value]}`;
   });
   frequencySel?.dispatchEvent(new Event('change'));
   if (r) sel.disabled = true;
@@ -77,7 +83,7 @@ export async function render(view) {
       <button class="btn sm" data-accept-share="${r.id}" data-share-currency="${esc(r.currency)}">Annehmen</button> <button class="btn ghost sm" data-decline-share="${r.id}">Ablehnen</button></div>`).join('')}</div>` : '';
     $('#r-body').innerHTML = rules.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Budget</th><th>Rhythmus</th><th>Nächste Buchung</th><th style="text-align:right">Betrag</th><th>Status</th><th></th></tr></thead><tbody>${rules.map((r) => `<tr>
       <td><b>${esc(r.name)}</b>${r.income_kind === 'salary' ? ' <span class="tag">Gehalt</span>' : ''}<br><small class="muted">${esc(r.category_name || '–')}</small></td><td>${esc(r.budget_name)}</td>
-      <td>${r.frequency === 'custom' ? (r.interval === 1 ? 'jeden Tag' : `alle ${r.interval} Tage`) : `${r.interval > 1 ? `alle ${r.interval} · ` : ''}${FREQ[r.frequency]}`}</td><td>${r.active ? fdate(r.next_run) : '–'}</td>
+      <td>${frequencyLabel(r)}</td><td>${r.active ? fdate(r.next_run) : '–'}</td>
       <td style="text-align:right" class="${r.type === 'expense' ? 'down' : 'up'}"><b>${r.type === 'expense' ? '−' : '+'}${eur(r.amount)}</b></td>
       <td><span class="tag ${r.active ? 'ok' : 'warn'}">${r.active ? 'Aktiv' : 'Pausiert'}</span>${r.source === 'asset' ? ' <span class="tag">Objekt</span>' : ''}${r.recipient_status ? `<br><small class="muted">${r.is_share_recipient ? `Geteilt von ${esc(r.creator_name || 'Nutzer')}` : `Geteilt mit ${esc(r.recipient_name || 'Nutzer')}`}: ${r.recipient_status === 'accepted' ? 'angenommen' : r.recipient_status === 'pending' ? 'ausstehend' : r.recipient_status === 'declined' ? 'abgelehnt' : 'beendet'}</small>` : ''}</td>
       <td style="white-space:nowrap">${!r.is_share_recipient && can('recurring:update') ? `<button class="btn ghost sm" data-edit="${r.id}">Bearbeiten</button> <button class="btn ghost sm" data-toggle="${r.id}">${r.active ? 'Pausieren' : 'Aktivieren'}</button>${r.recipient_status === 'pending' || r.recipient_status === 'accepted' ? ` <button class="btn ghost sm" data-revoke-share="${r.id}">Teilen beenden</button>` : ''}` : ''}${!r.is_share_recipient && can('recurring:delete') ? ` <button class="btn ghost sm" data-del="${r.id}">Löschen</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : empty('Keine Daueraufträge.');

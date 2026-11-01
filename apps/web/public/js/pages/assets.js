@@ -8,6 +8,7 @@ const VSTATUS = { available: 'Verfügbar', in_use: 'Im Einsatz', workshop: 'Werk
 const PTYPE = { home: 'Wohnung/Haus', office: 'Büro', storage: 'Lager', holiday: 'Ferienobjekt' };
 const PKIND = { employee: 'Mitarbeiter', external: 'Extern', family: 'Familie' };
 const INTERVAL = { once: 'Einmalig', daily: 'Täglich', weekly: 'Wöchentlich', monthly: 'Monatlich', yearly: 'Jährlich', custom: 'Benutzerdefiniert (Tage)' };
+const INTERVAL_UNITS = { daily: 'Tage', weekly: 'Wochen', monthly: 'Monate', yearly: 'Jahre', custom: 'Tage' };
 const EVENT = { issued: 'Ausgegeben', returned: 'Zurückgegeben', lost: 'Als verloren gemeldet' };
 const ASSET_TYPE = { house: 'Haus', vehicle: 'Fahrzeug', key: 'Schlüssel' };
 
@@ -15,7 +16,7 @@ const costFields = (o, budgets) => [
   { type: 'html', html: '<div class="cost-block"><b>Laufende Kosten (optional)</b><p class="muted">Werden automatisch als Buchung bzw. Dauerauftrag im gewählten Budget geführt.</p></div>' },
   { name: 'cost_amount', label: 'Betrag', value: o?.cost_amount ? String(o.cost_amount).replace('.', ',') : '' },
   { name: 'cost_interval', label: 'Intervall', type: 'select', options: Object.entries(INTERVAL).map(([v, l]) => ({ v, l })), value: o?.cost_interval || 'monthly' },
-  { name: 'cost_interval_count', label: 'Alle … Tage', type: 'number', min: 1, max: 3650, value: o?.cost_interval_count || 1, help: 'Benutzerdefinierte Intervalle in Tagen; frühere Vierteljahreskosten in Monaten.' },
+  { name: 'cost_interval_count', label: 'Alle … Einheiten', type: 'number', min: 1, max: 3650, value: o?.cost_interval_count || 1 },
   { name: 'cost_budget_id', label: 'Budget', type: 'select', options: [{ v: '', l: '– Keines –' }, ...budgets.map((b) => ({ v: b.id, l: b.name }))], value: o?.cost_budget_id || '' },
   { name: 'cost_category_id', label: 'Kategorie', type: 'select', options: [{ v: '', l: '– Keine –' }, ...budgets.flatMap((b) => b.categories.map((c) => ({ v: c.id, l: `${b.name} › ${c.name}` })))], value: o?.cost_category_id || '' },
   { name: 'cost_tracking', label: 'Kosten im Budget verbuchen', type: 'checkbox', value: o ? o.cost_tracking !== false : true },
@@ -33,8 +34,8 @@ const costForm = (options) => {
   let selectedInterval = interval?.value;
   const update = () => {
     if (count) {
-      count.hidden = interval.value !== 'custom' && !(interval.value === 'monthly' && Number(countInput.value) > 1);
-      count.firstChild.textContent = interval.value === 'custom' ? 'Abstand in Tagen' : 'Abstand in Monaten';
+      count.hidden = interval.value === 'once' || (interval.value !== 'custom' && Number(countInput.value) <= 1);
+      count.firstChild.textContent = `Alle … ${INTERVAL_UNITS[interval.value] || 'Einheiten'}`;
     }
   };
   interval?.addEventListener('change', () => {
@@ -47,8 +48,8 @@ const costForm = (options) => {
 };
 const costIntervalText = (interval, count) => interval === 'custom'
   ? `alle ${count || 1} Tage`
-  : interval === 'monthly' && Number(count) > 1
-    ? `alle ${count} Monate`
+  : Number(count) > 1
+    ? `alle ${count} ${INTERVAL_UNITS[interval] || 'Einheiten'}`
     : INTERVAL[interval] || '–';
 const save = (path, o, body) => (o ? api.patch(`/${path}/${o.id}`, body) : api.post(`/${path}`, body));
 async function ownershipFields(o) {

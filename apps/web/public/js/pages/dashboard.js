@@ -3,6 +3,7 @@ import { $, esc, eur, eur0, fdate, empty, budgetTag, MONTH_NAMES, monthStart, mo
 import { areaChart, donut, gauge } from '../charts.js';
 import { txForm, loadBudgets } from './common.js';
 import { can, state } from '../app.js';
+import { occursOn } from '../recurrence.js';
 
 export async function render(view) {
   view.classList.add('dashboard-view');
@@ -43,16 +44,7 @@ export async function render(view) {
       day.setDate(day.getDate() + offset);
       const key = dateKey(day);
       events.forEach((event) => {
-        const start = event.date.slice(0, 10);
-        if (key < start) return;
-        const origin = new Date(`${start}T00:00:00`);
-        const interval = event.repeat_interval || 1;
-        const days = Math.round((day - origin) / 86400000);
-        const repeats = event.repeat === 'daily' || event.repeat === 'custom' ? days % interval === 0
-          : event.repeat === 'weekly' ? day.getDay() === origin.getDay() && Math.floor(days / 7) % interval === 0
-            : event.repeat === 'monthly' ? day.getDate() === origin.getDate() && ((day.getFullYear() - origin.getFullYear()) * 12 + day.getMonth() - origin.getMonth()) % interval === 0
-              : event.repeat === 'yearly' ? day.getDate() === origin.getDate() && day.getMonth() === origin.getMonth() && (day.getFullYear() - origin.getFullYear()) % interval === 0
-                : key === start;
+        const repeats = occursOn(event.date.slice(0, 10), event.repeat, event.repeat_interval, key);
         if (repeats && event.type !== 'holiday') upcoming.push({ ...event, occurrence: key });
       });
     }

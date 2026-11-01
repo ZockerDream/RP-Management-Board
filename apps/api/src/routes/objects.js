@@ -69,7 +69,7 @@ const KINDS = {
   },
 };
 const COST_COLS = ['cost_amount', 'cost_interval', 'cost_interval_count', 'cost_budget_id', 'cost_category_id', 'cost_tracking'];
-const PER = { daily: ['daily', 1], weekly: ['weekly', 1], monthly: ['monthly', 1], yearly: ['yearly', 1], custom: ['custom', null] };
+const PER = { daily: 'daily', weekly: 'weekly', monthly: 'monthly', yearly: 'yearly', custom: 'custom' };
 
 // Kosten eines Objekts mit Budget synchronisieren (§7.1): einmalig = Buchung, sonst Dauerauftrag
 async function syncCost(c, table, kind, before, after, userId) {
@@ -84,14 +84,29 @@ async function syncCost(c, table, kind, before, after, userId) {
   const label = KINDS[kind].label(after);
   const type = KINDS[kind].asset;
   if (after.cost_interval === 'once') {
-    await c.query(
-      `INSERT INTO transactions(budget_id, category_id, created_by, type, amount, booked_at, title, source, asset_type, asset_id) VALUES ($1,$2,$3,'expense',$4,$5,$6,'asset',$7,$8)`,
-      [after.cost_budget_id, after.cost_category_id || null, userId, after.cost_amount, today(), `Kosten: ${label}`, type, after.id],
+    const existing = await c.query(
+      `SELECT id FROM transactions
+       WHERE source='asset' AND recurring_id IS NULL AND asset_type=$1 AND asset_id=$2
+       ORDER BY created_at, id LIMIT 1 FOR UPDATE`,
+      [type, after.id],
     );
+    if (existing.rows.length) {
+      const current = existing.rows[0];
+      await c.query(
+        `UPDATE transactions SET budget_id=$2, category_id=$3, created_by=$4, amount=$5, title=$6
+         WHERE id=$1`,
+        [current.id, after.cost_budget_id, after.cost_category_id || null, userId, after.cost_amount, `Kosten: ${label}`],
+      );
+    } else {
+      await c.query(
+        `INSERT INTO transactions(budget_id, category_id, created_by, type, amount, booked_at, title, source, asset_type, asset_id) VALUES ($1,$2,$3,'expense',$4,$5,$6,'asset',$7,$8)`,
+        [after.cost_budget_id, after.cost_category_id || null, userId, after.cost_amount, today(), `Kosten: ${label}`, type, after.id],
+      );
+    }
     return;
   }
-  const [freq, standardInterval] = PER[after.cost_interval];
-  const interval = standardInterval ?? after.cost_interval_count ?? 1;
+  const freq = PER[after.cost_interval];
+  const interval = after.cost_interval_count || 1;
   const r = (
     await c.query(
       `INSERT INTO recurring_rules(name,budget_id,category_id,created_by,type,amount,frequency,interval,start_date,next_run,source,asset_type,asset_id)

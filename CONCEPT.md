@@ -57,7 +57,7 @@ Zwei strikt getrennte Arten: `solo` (gehört einem User) und `shared` (gehört e
 Gesamtliste mit Suche und Filtern (Budget, Kategorie, Zeitraum). Spalten: Datum, Beschreibung, Budget, Kategorie, Quelle (manuell, Dauerauftrag, Objekt), Beleg, Betrag. Neue Buchung: Typ (Ausgabe, Einnahme, Einzahlung in ein Sparziel), Betrag, Budget, Kategorie, Datum, Tags, Notiz, Beleg, optional als Dauerauftrag wiederholen. Export als CSV.
 
 ### 4.4 Daueraufträge
-Wiederkehrende Buchungen mit täglichem, wöchentlichem, monatlichem, jährlichem oder benutzerdefiniertem Tagesintervall, Start/Ende und nächster Ausführung; pausierbar. Ein Scheduler erzeugt die Buchungen automatisch. Ein persönlicher Dauerauftrag kann nach Annahme durch einen Team-Nutzer mit dem vollen Betrag auch in dessen persönlichem Budget verbucht werden; beide Konten müssen dieselbe Währung verwenden.
+Wiederkehrende Buchungen mit täglichem, wöchentlichem, monatlichem, jährlichem oder benutzerdefiniertem Tagesintervall. Für jeden Rhythmus kann ein Abstand von mehreren Tagen, Wochen, Monaten oder Jahren festgelegt werden; Start/Ende und nächste Ausführung werden angezeigt, Aufträge sind pausierbar. Ein Scheduler erzeugt die Buchungen automatisch. Ein persönlicher Dauerauftrag kann nach Annahme durch einen Team-Nutzer mit dem vollen Betrag auch in dessen persönlichem Budget verbucht werden; beide Konten müssen dieselbe Währung verwenden.
 
 ### 4.5 Sparziele
 Zielbetrag, Zieldatum, Fortschrittsanzeige, monatlicher Beitrag; solo oder für ein Team. Einzahlungen sind Buchungen vom Typ `deposit`.
@@ -78,7 +78,7 @@ Eine Seite mit den Tabs Übersicht, Schlüssel, Häuser, Fahrzeuge, Personen, Ko
 4. **Schlüssel** – gehört zu einem Haus oder Fahrzeug, hat eine frei eingebbare Art und eine verwaltbare Anzahl Exemplare. Inventur zeigt Gesamtbestand, Ausgaben und Verluste; QR-Codes öffnen den Schlüssel in der Verwaltung. Ausgabe und Rückgabe mit Datum, Person, Quittierung und optionaler Rückgabefrist. Status: ausgegeben, im Safe, überfällig, verloren, gesperrt.
 5. **Übersicht** – KPIs, „Wer hat welche Schlüssel?“, Diagramm Schlüssel nach Status, Handlungsbedarf (fälliger Service, überfällige oder verlorene Schlüssel), letzte Vorgänge.
 6. **Protokoll** – lückenlose Historie je Schlüssel.
-7. **Optionaler Preis & Budget-Tracking** – Haus, Fahrzeug und Schlüssel haben ein optionales Preisfeld: Betrag, Intervall (einmalig, monatlich, vierteljährlich, jährlich), Budget, Kategorie, Schalter „im Tracking“. Ohne Preis wird der Posten nur verwaltet. Mit Preis erzeugt das System bei „einmalig“ genau eine Buchung, sonst einen Dauerauftrag im gewählten Budget; Preisänderungen aktualisieren den Dauerauftrag. Der Tab „Kosten“ zeigt alle Posten mit Preis, Intervall, Budget, Kategorie, Tracking-Schalter, die laufenden Monatskosten, einmalige Kosten und die Anzahl Posten ohne Preis.
+7. **Optionaler Preis & Budget-Tracking** – Haus, Fahrzeug und Schlüssel haben ein optionales Preisfeld: Betrag, Intervall (einmalig, täglich, wöchentlich, monatlich, jährlich oder benutzerdefinierte Tage), Abstand, Budget, Kategorie, Schalter „im Tracking“. Ohne Preis wird der Posten nur verwaltet. Mit Preis erzeugt das System bei „einmalig“ genau eine Buchung, sonst einen Dauerauftrag im gewählten Budget; Preisänderungen aktualisieren den Dauerauftrag. Der Tab „Kosten“ zeigt alle Posten mit Preis, Intervall, Budget, Kategorie, Tracking-Schalter, die laufenden Monatskosten, einmalige Kosten und die Anzahl Posten ohne Preis.
 
 ## 6. Kalender
 
@@ -86,7 +86,7 @@ Ansichten Monat, Woche, Tag und Agenda (30 Tage), Navigation vor/zurück/heute, 
 
 - **Automatische Termine** (aus anderen Modulen abgeleitet, nur lesbar): Daueraufträge und Zahlungen, Service der Fahrzeuge, Rückgabefristen von Schlüsseln, Wartungen von Häusern, Feiertage.
 - Ablauf-Erinnerungen weisen rechtzeitig auf Fahrzeug-Service, Verbandskasten und Schlüsselrückgaben hin; sie erscheinen im Kalender und als Benachrichtigung.
-- **Eigene Termine**: Kalender-Typ Team oder Privat, ganztägig oder mit Beginn/Ende, Wiederholung (wöchentlich, monatlich, jährlich), Erinnerung (1/3/7/14 Tage vorher), optionaler Betrag, Notiz; Bearbeiten und Löschen.
+- **Eigene Termine**: Kalender-Typ Team oder Privat, ganztägig oder mit Beginn/Ende, Wiederholung (täglich, wöchentlich, monatlich, jährlich oder benutzerdefinierte Tage) mit einstellbarem Abstand, Erinnerung (1/3/7/14 Tage vorher), optionaler Betrag, Notiz; Bearbeiten und Löschen. Monats- und Jahresserien fallen in kürzeren Zeiträumen auf den letzten gültigen Tag, zum Beispiel vom 31. auf den Monatsletzten.
 - **Seitenleiste**: Filter je Kalender-Typ (Zahlungen, Fahrzeuge, Schlüssel, Häuser, Team, Privat, Feiertage), „Als Nächstes“, Zahlungssaldo des Monats (Einnahmen, Ausgaben, Saldo).
 - **iCal-Abo** zum Einbinden in externe Kalender.
 

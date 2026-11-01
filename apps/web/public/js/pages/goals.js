@@ -4,6 +4,7 @@ import { loadBudgets, txForm } from './common.js';
 import { can } from '../app.js';
 
 const INSTALLMENT_FREQ = { daily: 'Tag', weekly: 'Woche', monthly: 'Monat', yearly: 'Jahr', custom: 'Tage (benutzerdefiniert)' };
+const INSTALLMENT_UNITS = { daily: 'Tage', weekly: 'Wochen', monthly: 'Monate', yearly: 'Jahre', custom: 'Tage' };
 
 async function form(g) {
   const budgets = await loadBudgets();
@@ -26,7 +27,9 @@ async function form(g) {
   const frequency = $('#f-installment_frequency');
   const intervalLabel = $('#f-installment_interval')?.closest('label');
   const updateIntervalLabel = () => {
-    if (intervalLabel) intervalLabel.firstChild.textContent = frequency.value === 'custom' ? 'Abstand in Tagen' : 'Alle … Einheiten';
+    if (intervalLabel) intervalLabel.firstChild.textContent = frequency.value === 'custom'
+      ? 'Abstand in Tagen'
+      : `Alle … ${INSTALLMENT_UNITS[frequency.value]}`;
   };
   frequency.addEventListener('change', updateIntervalLabel);
   updateIntervalLabel();

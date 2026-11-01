@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node src/main.js",
     "worker": "node src/worker.js",
-    "test": "node --test test/"
+    "test": "node --test"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",
