@@ -19,7 +19,7 @@ export const PERMISSION_CATALOG = [
   { resource: 'role', label: 'Rollen', actions: R },
   { resource: 'group', label: 'Gruppen', actions: R },
   { resource: 'team', label: 'Teams', actions: R },
-  { resource: 'budget', label: 'Budgets', actions: [...R, 'export'] },
+  { resource: 'budget', label: 'Konten', actions: [...R, 'export'] },
   { resource: 'transaction', label: 'Transaktionen', actions: [...R, 'export'] },
   { resource: 'recurring', label: 'Daueraufträge', actions: R },
   { resource: 'goal', label: 'Sparziele', actions: R },
@@ -144,17 +144,17 @@ export function adminOnly(...perms) {
   };
 }
 
-// Zugriff auf ein Budget: owner (solo) | owner/editor/viewer (Team)
+// Zugriff auf ein Konto: owner (solo) | owner/editor/viewer (Team)
 export async function budgetAccess(userId, budgetId, write = false) {
   const b = await one(
     `SELECT b.*, tm.team_role FROM budgets b LEFT JOIN team_members tm ON tm.team_id=b.team_id AND tm.user_id=$2 WHERE b.id=$1`,
     [budgetId, userId],
   );
-  if (!b) throw notFound('Budget nicht gefunden');
+  if (!b) throw notFound('Konto nicht gefunden');
   const role = b.type === 'solo' ? (b.owner_user_id === userId ? 'owner' : null) : b.team_role;
-  if (!role) throw notFound('Budget nicht gefunden');
-  if (write && role === 'viewer') throw forbidden('Nur Leserechte auf diesem Budget');
-  if (write && b.archived) throw bad('Budget ist archiviert');
+  if (!role) throw notFound('Konto nicht gefunden');
+  if (write && role === 'viewer') throw forbidden('Nur Leserechte auf diesem Konto');
+  if (write && b.archived) throw bad('Konto ist archiviert');
   return { budget: b, role };
 }
 

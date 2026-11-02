@@ -7,7 +7,7 @@ const TYPES = [{ v: 'expense', l: 'Ausgabe' }, { v: 'income', l: 'Einnahme' }, {
 
 export async function txForm(tx, defaults = {}) {
   const [budgets, goals] = await Promise.all([loadBudgets(), api.get('/goals').catch(() => [])]);
-  if (!budgets.length) { toast('Bitte zuerst ein Budget anlegen', true); return false; }
+  if (!budgets.length) { toast('Bitte zuerst ein Konto anlegen', true); return false; }
   const bid = tx?.budget_id || defaults.budget_id || budgets[0].id;
   const catOpts = (id) => [{ v: '', l: '– Keine –' }, ...(budgets.find((b) => b.id === id)?.categories || []).map((c) => ({ v: c.id, l: c.name }))];
   const fields = [
@@ -15,7 +15,7 @@ export async function txForm(tx, defaults = {}) {
     { name: 'type', label: 'Art', type: 'select', options: TYPES, value: tx?.type || defaults.type || 'expense' },
     { name: 'income_kind', label: 'Einnahmeart', type: 'select', options: [{ v: 'other', l: 'Sonstige Einnahme' }, { v: 'salary', l: 'Gehalt' }], value: tx?.income_kind || defaults.income_kind || 'other' },
     { name: 'amount', label: 'Betrag', value: tx?.amount ? String(tx.amount).replace('.', ',') : '', required: true, placeholder: '0,00' },
-    { name: 'budget_id', label: 'Budget', type: 'select', options: budgets.map((b) => ({ v: b.id, l: b.name })), value: bid },
+    { name: 'budget_id', label: 'Konto', type: 'select', options: budgets.map((b) => ({ v: b.id, l: b.name })), value: bid },
     { name: 'category_id', label: 'Kategorie', type: 'select', options: catOpts(bid), value: tx?.category_id || '' },
     { name: 'booked_at', label: 'Datum', type: 'date', value: tx?.booked_at?.slice(0, 10) || todayStr(), required: true },
     { name: 'goal_id', label: 'Sparziel (bei Einzahlung)', type: 'select', options: [{ v: '', l: '– Keines –' }, ...goals.map((g) => ({ v: g.id, l: g.name }))], value: tx?.goal_id || defaults.goal_id || '' },

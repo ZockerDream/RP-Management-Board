@@ -9,12 +9,12 @@ export async function render(view) {
   const LIMIT = 50;
   const cats = [...new Map(budgets.flatMap((b) => b.categories).map((c) => [c.name, c])).values()];
 
-  view.innerHTML = `<div class="page-head"><div><h1>Transaktionen</h1><p>Alle Buchungen deiner Budgets</p></div>
+  view.innerHTML = `<div class="page-head"><div><h1>Transaktionen</h1><p>Alle Buchungen deiner Konten</p></div>
     <div class="actions">${can('transaction:export') ? '<button class="btn ghost" id="t-csv">CSV-Export</button>' : ''}${can('transaction:create') ? '<button class="btn" id="t-new">Neue Buchung</button>' : ''}</div></div>
     <div class="card"><div class="toolbar" style="flex-wrap:wrap;gap:8px">
       <div class="seg" id="t-scope"><button data-s="all" class="on">Alle</button><button data-s="solo">Solo</button><button data-s="shared">Team</button></div>
       <input id="t-q" placeholder="Suchen…" style="width:180px">
-      <select id="t-budget"><option value="">Alle Budgets</option>${opts(budgets, '')}</select>
+      <select id="t-budget"><option value="">Alle Konten</option>${opts(budgets, '')}</select>
       <select id="t-type"><option value="">Alle Arten</option><option value="expense">Ausgaben</option><option value="income">Einnahmen</option><option value="deposit">Einzahlungen</option></select>
       <select id="t-income-kind"><option value="">Alle Einnahmen</option><option value="salary">Gehalt</option><option value="other">Sonstige Einnahmen</option></select>
       <input type="date" id="t-from" title="Von" style="width:150px"><input type="date" id="t-to" title="Bis" style="width:150px">
@@ -24,7 +24,7 @@ export async function render(view) {
   async function load() {
     const r = await api.get(`/transactions?${qs()}`);
     $('#t-sum').innerHTML = `<span class="muted">${r.total} Buchungen</span><span class="up">Einnahmen ${eur(r.income)}</span><span class="up">davon Gehalt ${eur(r.salary_income)}</span><span class="down">Ausgaben ${eur(r.expense)}</span>`;
-    $('#t-table').innerHTML = r.items.length ? `<table class="table"><thead><tr><th>Datum</th><th>Titel</th><th>Kategorie</th><th>Budget</th><th>Von</th><th style="text-align:right">Betrag</th><th></th></tr></thead><tbody>${r.items.map((t) => `<tr>
+    $('#t-table').innerHTML = r.items.length ? `<table class="table"><thead><tr><th>Datum</th><th>Titel</th><th>Kategorie</th><th>Konto</th><th>Von</th><th style="text-align:right">Betrag</th><th></th></tr></thead><tbody>${r.items.map((t) => `<tr>
       <td>${fdate(t.booked_at)}</td>      <td><b>${esc(t.title || '–')}</b>${t.income_kind === 'salary' ? ' <span class="tag">Gehalt</span>' : ''}${t.attachments ? ' 📎' : ''}${t.tags?.length ? `<br><small class="muted">${t.tags.map((g) => '#' + esc(g)).join(' ')}</small>` : ''}</td>
       <td>${esc(t.category_name || '–')}</td><td>${budgetTag(t.budget_type, t.budget_name)}</td><td>${esc(t.created_by_name || '–')}</td>
       <td style="text-align:right" class="${t.type === 'expense' ? 'down' : 'up'}"><b>${t.type === 'expense' ? '−' : '+'}${eur(t.amount)}</b></td>

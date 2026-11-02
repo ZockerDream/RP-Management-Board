@@ -93,7 +93,7 @@ function showAuth(html) {
 }
 
 async function loginScreen(cfg) {
-  showAuth(card('Willkommen zurück', 'Melde dich an, um deine Budgets und Finanzen zu verwalten.',
+  showAuth(card('Willkommen zurück', 'Melde dich an, um deine Konten und Finanzen zu verwalten.',
     authForm('login', inp('email', 'E-Mail', 'email', 'username') + inp('password', 'Passwort', 'password', 'current-password'), 'Anmelden',
       `<p class="auth-lead" style="margin-top:14px"><a href="#/forgot">Passwort vergessen?</a>${cfg?.registration ? ' · <a href="#/register">Registrieren</a>' : ''}</p>`)));
   bind('login', async (v) => {

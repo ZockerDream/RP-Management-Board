@@ -71,19 +71,26 @@ const KINDS = {
 const COST_COLS = ['cost_amount', 'cost_interval', 'cost_interval_count', 'cost_budget_id', 'cost_category_id', 'cost_tracking'];
 const PER = { daily: 'daily', weekly: 'weekly', monthly: 'monthly', yearly: 'yearly', custom: 'custom' };
 
-// Kosten eines Objekts mit Budget synchronisieren (§7.1): einmalig = Buchung, sonst Dauerauftrag
+// Kosten eines Objekts mit Konto synchronisieren (§7.1): einmalig = Buchung, sonst Dauerauftrag
 async function syncCost(c, table, kind, before, after, userId) {
   const changed = !before || COST_COLS.some((k) => String(before[k] ?? '') !== String(after[k] ?? ''));
   if (!changed) return;
-  if (before?.cost_recurring_id) {
-    await c.query('UPDATE recurring_rules SET active=false WHERE id=$1', [before.cost_recurring_id]);
-    await c.query('UPDATE recurring_rules SET end_date=$2 WHERE id=$1', [before.cost_recurring_id, today()]);
+  const recurring = before?.cost_recurring_id
+    ? (await c.query('SELECT id FROM recurring_rules WHERE id=$1 FOR UPDATE', [before.cost_recurring_id])).rows[0]
+    : null;
+  const removeRecurring = async () => {
+    if (!recurring) return;
+    await c.query('DELETE FROM recurring_rules WHERE id=$1', [recurring.id]);
     await c.query(`UPDATE ${table} SET cost_recurring_id=NULL WHERE id=$1`, [after.id]);
+  };
+  if (!after.cost_amount || !after.cost_budget_id || after.cost_tracking === false) {
+    await removeRecurring();
+    return;
   }
-  if (!after.cost_amount || !after.cost_budget_id || after.cost_tracking === false) return;
   const label = KINDS[kind].label(after);
   const type = KINDS[kind].asset;
   if (after.cost_interval === 'once') {
+    await removeRecurring();
     const existing = await c.query(
       `SELECT id FROM transactions
        WHERE source='asset' AND recurring_id IS NULL AND asset_type=$1 AND asset_id=$2
@@ -107,6 +114,15 @@ async function syncCost(c, table, kind, before, after, userId) {
   }
   const freq = PER[after.cost_interval];
   const interval = after.cost_interval_count || 1;
+  if (recurring) {
+    await c.query(
+      `UPDATE recurring_rules
+       SET name=$2,budget_id=$3,category_id=$4,created_by=$5,type='expense',amount=$6,frequency=$7,interval=$8
+       WHERE id=$1`,
+      [recurring.id, `Kosten: ${label}`, after.cost_budget_id, after.cost_category_id || null, userId, after.cost_amount, freq, interval],
+    );
+    return;
+  }
   const r = (
     await c.query(
       `INSERT INTO recurring_rules(name,budget_id,category_id,created_by,type,amount,frequency,interval,start_date,next_run,source,asset_type,asset_id)
@@ -119,9 +135,9 @@ async function syncCost(c, table, kind, before, after, userId) {
 
 async function checkCostBudget(req, b) {
   if (!b.cost_amount) return;
-  if (!b.cost_interval || !b.cost_budget_id) throw bad('Kosten benötigen Intervall und Budget');
+  if (!b.cost_interval || !b.cost_budget_id) throw bad('Kosten benötigen Intervall und Konto');
   const { budget } = await budgetAccess(req.user.id, b.cost_budget_id, true);
-  if (b.cost_category_id && !(await one('SELECT 1 FROM categories WHERE id=$1 AND budget_id=$2', [b.cost_category_id, budget.id]))) throw bad('Kategorie gehört nicht zum Budget');
+  if (b.cost_category_id && !(await one('SELECT 1 FROM categories WHERE id=$1 AND budget_id=$2', [b.cost_category_id, budget.id]))) throw bad('Kategorie gehört nicht zum Konto');
 }
 
 const keyStatusSql = `

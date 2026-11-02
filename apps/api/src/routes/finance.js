@@ -33,7 +33,7 @@ async function decorate(b, role, teamName) {
 }
 
 export default async function routes(app) {
-  // ---- Budgets
+  // ---- Konten
   app.get('/budgets', authz('budget:read'), async (req) => {
     const rows = await many(
       `SELECT b.*, t.name team_name, CASE WHEN b.type='solo' THEN 'owner' ELSE tm.team_role END role
@@ -55,7 +55,7 @@ export default async function routes(app) {
     } else {
       const max = req.user.max_budgets ?? Math.max(...req.userRoles.map((r) => r.max_budgets ?? 1e9), 0);
       const n = (await one("SELECT count(*)::int n FROM budgets WHERE owner_user_id=$1 AND NOT archived", [req.user.id])).n;
-      if (n >= (max || 1e9)) throw bad(`Budget-Limit erreicht (${max})`, 'limit');
+      if (n >= (max || 1e9)) throw bad(`Kontolimit erreicht (${max})`, 'limit');
     }
     const id_ = await tx(async (c) => {
       const r = (
@@ -82,8 +82,8 @@ export default async function routes(app) {
 
   app.delete('/budgets/:id', authz('budget:delete'), async (req) => {
     const { role } = await budgetAccess(req.user.id, req.params.id, true);
-    if (role !== 'owner') throw forbidden('Nur der Eigentümer kann ein Budget löschen');
-    // Objektkosten, die dieses Budget nutzen, zurücksetzen (sonst verletzt SET NULL den Kosten-Check)
+    if (role !== 'owner') throw forbidden('Nur der Eigentümer kann ein Konto löschen');
+    // Objektkosten, die dieses Konto nutzen, zurücksetzen (sonst verletzt SET NULL den Kosten-Check)
     for (const t of ['properties', 'vehicles', 'keys']) {
       await q(`UPDATE ${t} SET cost_amount=NULL, cost_interval=NULL, cost_category_id=NULL, cost_recurring_id=NULL WHERE cost_budget_id=$1`, [req.params.id]);
     }
@@ -171,8 +171,8 @@ export default async function routes(app) {
   });
 
   async function checkRefs(b, budget) {
-    if (b.category_id && !(await one('SELECT 1 FROM categories WHERE id=$1 AND budget_id=$2', [b.category_id, budget.id]))) throw bad('Kategorie gehört nicht zum Budget');
-    if (b.goal_id && !(await one('SELECT 1 FROM goals WHERE id=$1 AND budget_id=$2', [b.goal_id, budget.id]))) throw bad('Sparziel gehört nicht zum Budget');
+    if (b.category_id && !(await one('SELECT 1 FROM categories WHERE id=$1 AND budget_id=$2', [b.category_id, budget.id]))) throw bad('Kategorie gehört nicht zum Konto');
+    if (b.goal_id && !(await one('SELECT 1 FROM goals WHERE id=$1 AND budget_id=$2', [b.goal_id, budget.id]))) throw bad('Sparziel gehört nicht zum Konto');
   }
 
   app.post('/transactions', authz('transaction:create'), async (req) => {
@@ -197,6 +197,7 @@ export default async function routes(app) {
   app.patch('/transactions/:id', authz('transaction:update'), async (req) => {
     const t = await one('SELECT * FROM transactions WHERE id=$1', [req.params.id]);
     if (!t) throw notFound();
+    if (t.source === 'payroll') throw bad('Automatische Gehaltsbuchungen können nicht geändert werden');
     const { budget } = await budgetAccess(req.user.id, t.budget_id, true);
     const b = txBody.omit({ budget_id: true }).partial().parse(req.body);
     await checkRefs(b, budget);
@@ -209,8 +210,9 @@ export default async function routes(app) {
   });
 
   app.delete('/transactions/:id', authz('transaction:delete'), async (req) => {
-    const t = await one('SELECT budget_id FROM transactions WHERE id=$1', [req.params.id]);
+    const t = await one('SELECT budget_id,source FROM transactions WHERE id=$1', [req.params.id]);
     if (!t) throw notFound();
+    if (t.source === 'payroll') throw bad('Automatische Gehaltsbuchungen können nicht gelöscht werden');
     await budgetAccess(req.user.id, t.budget_id, true);
     await q('DELETE FROM transactions WHERE id=$1', [req.params.id]);
     await audit(req, 'transaction.deleted', 'transaction', req.params.id);
@@ -235,6 +237,17 @@ export default async function routes(app) {
     frequency: z.enum(['daily', 'weekly', 'monthly', 'yearly', 'custom']), interval: z.number().int().min(1).max(3650).default(1), income_kind: z.enum(['other', 'salary']).default('other'),
     start_date: date, end_date: date.nullish(), active: z.boolean().default(true),
   });
+  const assetTables = { house: 'properties', vehicle: 'vehicles', key: 'keys' };
+  async function assertAssetRecurringAccess(req, rule, write = false) {
+    const table = assetTables[rule.asset_type];
+    if (!table || !rule.asset_id) throw notFound();
+    const asset = await one(`SELECT owner_user_id,team_id FROM ${table} WHERE id=$1`, [rule.asset_id]);
+    if (!asset) throw notFound();
+    if (asset.owner_user_id === req.user.id) return table;
+    const member = asset.team_id && await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [asset.team_id, req.user.id]);
+    if (!member || (write && member.team_role === 'viewer')) throw notFound();
+    return table;
+  }
   app.get('/recurring/share-candidates', authz('recurring:create'), async (req) => many(
     `SELECT DISTINCT u.id, u.name FROM team_members mine
      JOIN team_members peer ON peer.team_id=mine.team_id AND peer.user_id<>mine.user_id
@@ -266,7 +279,7 @@ export default async function routes(app) {
     const { budget } = await budgetAccess(req.user.id, b.budget_id, true);
     await checkRefs(b, budget);
     if (b.recipient_user_id) {
-      if (budget.type !== 'solo' || budget.owner_user_id !== req.user.id) throw bad('Geteilte Daueraufträge benötigen dein persönliches Budget');
+      if (budget.type !== 'solo' || budget.owner_user_id !== req.user.id) throw bad('Geteilte Daueraufträge benötigen dein persönliches Konto');
       const peer = await one(
         `SELECT u.name FROM team_members mine JOIN team_members peer ON peer.team_id=mine.team_id
          JOIN users u ON u.id=peer.user_id
@@ -280,7 +293,7 @@ export default async function routes(app) {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$9,$11,$12,$13,$14) RETURNING id`,
       [b.name, b.budget_id, b.category_id || null, req.user.id, b.type, b.amount, b.frequency, b.interval, b.start_date, b.end_date || null, b.active, b.type === 'income' ? b.income_kind : 'other', b.recipient_user_id || null, b.recipient_user_id ? 'pending' : null],
     );
-    if (b.recipient_user_id) await notify(b.recipient_user_id, 'recurring_share', 'Dauerauftrag zur Bestätigung', `${req.user.name} möchte „${b.name}“ auch in deinem persönlichen Budget buchen.`, `recurring-share:${rule.id}`);
+    if (b.recipient_user_id) await notify(b.recipient_user_id, 'recurring_share', 'Dauerauftrag zur Bestätigung', `${req.user.name} möchte „${b.name}“ auch in deinem persönlichen Konto buchen.`, `recurring-share:${rule.id}`);
     return rule;
   });
   app.post('/recurring/:id/accept', authz('recurring:read'), async (req) => {
@@ -288,9 +301,9 @@ export default async function routes(app) {
     const rule = await one('SELECT * FROM recurring_rules WHERE id=$1 AND recipient_user_id=$2 AND recipient_status=\'pending\'', [req.params.id, req.user.id]);
     if (!rule) throw notFound();
     const { budget } = await budgetAccess(req.user.id, budget_id, true);
-    if (budget.type !== 'solo' || budget.owner_user_id !== req.user.id) throw bad('Wähle ein persönliches Budget');
+    if (budget.type !== 'solo' || budget.owner_user_id !== req.user.id) throw bad('Wähle ein persönliches Konto');
     const sourceBudget = await one('SELECT currency FROM budgets WHERE id=$1', [rule.budget_id]);
-    if (sourceBudget.currency !== budget.currency) throw bad('Beide persönlichen Budgets müssen dieselbe Währung verwenden');
+    if (sourceBudget.currency !== budget.currency) throw bad('Beide persönlichen Konten müssen dieselbe Währung verwenden');
     const accepted = await tx(async (client) => {
       const result = await client.query(
         `UPDATE recurring_rules SET recipient_budget_id=$2, recipient_status='accepted'
@@ -308,7 +321,7 @@ export default async function routes(app) {
       return result.rows[0];
     });
     await budgetWatch(budget.id, req.log);
-    await notify(rule.created_by, 'recurring_share', 'Dauerauftrag angenommen', `${req.user.name} hat „${rule.name}“ für das persönliche Budget bestätigt.`, `recurring-accepted:${rule.id}`);
+    await notify(rule.created_by, 'recurring_share', 'Dauerauftrag angenommen', `${req.user.name} hat „${rule.name}“ für das persönliche Konto bestätigt.`, `recurring-accepted:${rule.id}`);
     return accepted;
   });
   app.post('/recurring/:id/decline', authz('recurring:read'), async (req) => {
@@ -331,9 +344,12 @@ export default async function routes(app) {
   });
   app.patch('/recurring/:id', authz('recurring:update'), async (req) => {
     const r = await one('SELECT * FROM recurring_rules WHERE id=$1', [req.params.id]);
-    if (!r || r.source === 'asset') throw notFound();
-    await budgetAccess(req.user.id, r.budget_id, true);
+    if (!r) throw notFound();
+    const assetTable = r.source === 'asset' ? await assertAssetRecurringAccess(req, r, true) : null;
     const b = recBody.omit({ budget_id: true }).partial().parse(req.body);
+    if (assetTable && b.type && b.type !== 'expense') throw bad('Objektkosten müssen Ausgaben sein');
+    const { budget } = await budgetAccess(req.user.id, r.budget_id, true);
+    await checkRefs(b, budget);
     const sharedTermsChanged = r.recipient_user_id && ['pending', 'accepted'].includes(r.recipient_status)
       && ['type', 'amount', 'frequency', 'interval', 'start_date', 'end_date'].some((key) => {
         if (!(key in b)) return false;
@@ -344,7 +360,15 @@ export default async function routes(app) {
     const patch = { ...b };
     if (patch.type && patch.type !== 'income') patch.income_kind = 'other';
     const keys = Object.keys(patch);
-    if (keys.length) await q(`UPDATE recurring_rules SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1`, [r.id, ...keys.map((k) => patch[k] ?? null)]);
+    if (keys.length) await tx(async (client) => {
+      await client.query(`UPDATE recurring_rules SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1`, [r.id, ...keys.map((k) => patch[k] ?? null)]);
+      if (assetTable) {
+        await client.query(
+          `UPDATE ${assetTable} SET cost_amount=$2,cost_category_id=$3,cost_interval=$4,cost_interval_count=$5,cost_tracking=true WHERE id=$1`,
+          [r.asset_id, patch.amount ?? r.amount, patch.category_id === undefined ? r.category_id : patch.category_id, patch.frequency ?? r.frequency, patch.interval ?? r.interval],
+        );
+      }
+    });
     if (sharedTermsChanged) {
       await q('UPDATE recurring_rules SET recipient_status=\'pending\', recipient_budget_id=NULL WHERE id=$1', [r.id]);
       await notify(r.recipient_user_id, 'recurring_share', 'Dauerauftrag erneut bestätigen', `Die Bedingungen von „${r.name}“ wurden geändert. Bitte bestätige den Auftrag erneut.`, `recurring-share-update:${r.id}:${Date.now()}`);
@@ -353,9 +377,15 @@ export default async function routes(app) {
   });
   app.delete('/recurring/:id', authz('recurring:delete'), async (req) => {
     const r = await one('SELECT * FROM recurring_rules WHERE id=$1', [req.params.id]);
-    if (!r || r.source === 'asset') throw notFound();
+    if (!r) throw notFound();
+    const assetTable = r.source === 'asset' ? await assertAssetRecurringAccess(req, r, true) : null;
     await budgetAccess(req.user.id, r.budget_id, true);
-    await q('DELETE FROM recurring_rules WHERE id=$1', [r.id]);
+    await tx(async (client) => {
+      if (assetTable) {
+        await client.query(`UPDATE ${assetTable} SET cost_tracking=false,cost_recurring_id=NULL WHERE id=$1`, [r.asset_id]);
+      }
+      await client.query('DELETE FROM recurring_rules WHERE id=$1', [r.id]);
+    });
     return { ok: true };
   });
 

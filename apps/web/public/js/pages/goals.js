@@ -8,11 +8,11 @@ const INSTALLMENT_UNITS = { daily: 'Tage', weekly: 'Wochen', monthly: 'Monate', 
 
 async function form(g) {
   const budgets = await loadBudgets();
-  if (!budgets.length) { toast('Bitte zuerst ein Budget anlegen', true); return false; }
+  if (!budgets.length) { toast('Bitte zuerst ein Konto anlegen', true); return false; }
   const dialog = openForm({
     title: g ? 'Sparziel bearbeiten' : 'Neues Sparziel', fields: [
       { name: 'name', label: 'Name', value: g?.name, required: true, full: true },
-      { name: 'budget_id', label: 'Budget', type: 'select', options: budgets.map((b) => ({ v: b.id, l: b.name })), value: g?.budget_id },
+      { name: 'budget_id', label: 'Konto', type: 'select', options: budgets.map((b) => ({ v: b.id, l: b.name })), value: g?.budget_id },
       { name: 'target_amount', label: 'Zielbetrag', value: g ? String(g.target_amount).replace('.', ',') : '', required: true },
       { name: 'target_date', label: 'Zieldatum (optional)', type: 'date', value: g?.target_date?.slice(0, 10) },
       { name: 'installment_amount', label: 'Rate (optional)', value: g?.installment_amount ? String(g.installment_amount).replace('.', ',') : '' },

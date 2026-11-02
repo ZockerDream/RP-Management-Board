@@ -2,12 +2,12 @@ import { $, esc } from '../ui.js';
 
 const sections = [
   {
-    title: 'Budgets und Kategorien',
-    text: 'Lege Budgets mit Tages-, Wochen-, Monats- oder Jahreszeitraum an. Ein benutzerdefinierter Zeitraum wird über Start- und Enddatum festgelegt. Kategorien helfen dabei, Ausgaben innerhalb eines Budgets aufzuteilen.',
+    title: 'Konten und Kategorien',
+    text: 'Lege Konten mit Tages-, Wochen-, Monats- oder Jahreszeitraum an. Ein benutzerdefinierter Zeitraum wird über Start- und Enddatum festgelegt. Kategorien helfen dabei, Ausgaben innerhalb eines Kontos aufzuteilen.',
   },
   {
     title: 'Daueraufträge und Zeitintervalle',
-    text: 'Daueraufträge buchen wiederkehrende Einnahmen oder Ausgaben automatisch. Wähle täglich, wöchentlich, monatlich oder jährlich und stelle bei Bedarf die Anzahl der Einheiten ein. „Benutzerdefiniert“ verwendet einen selbst gewählten Abstand in Tagen. Ein Enddatum ist optional. Du kannst einen Auftrag zusätzlich mit einem Nutzer aus deinem Team teilen. Nach dessen Zustimmung wird der volle Betrag auch in dessen persönlichem Budget verbucht; beide Konten müssen dieselbe Währung verwenden.',
+    text: 'Daueraufträge buchen wiederkehrende Einnahmen oder Ausgaben automatisch. Wähle täglich, wöchentlich, monatlich oder jährlich und stelle bei Bedarf die Anzahl der Einheiten ein. „Benutzerdefiniert“ verwendet einen selbst gewählten Abstand in Tagen. Ein Enddatum ist optional. Du kannst einen Auftrag zusätzlich mit einem Nutzer aus deinem Team teilen. Nach dessen Zustimmung wird der volle Betrag auch in dessen persönlichem Konto verbucht; beide Konten müssen dieselbe Währung verwenden.',
   },
   {
     title: 'Stundenzettel',

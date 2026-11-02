@@ -1,9 +1,111 @@
-import { one, many, q } from './db.js';
+import { one, many, q, tx } from './db.js';
 import { config } from './config.js';
 import { nthOccurrence, today, ymd, notify, budgetWatch, addInterval } from './lib.js';
 import { sendMail } from './mail.js';
 import { runBackup, pruneBackups } from './backup.js';
 import { getSetting } from './settings.js';
+import { calculateDailyPayroll } from './payroll.js';
+
+function localDate(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: config.tz, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function previousDate(date) {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() - 1);
+  return ymd(value);
+}
+
+function mondayOf(date) {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() - ((value.getUTCDay() + 6) % 7));
+  return ymd(value);
+}
+
+function nextDate(date) {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + 1);
+  return ymd(value);
+}
+
+export async function payrollRun(log) {
+  const yesterday = previousDate(localDate());
+  const users = await many(
+    `SELECT u.id, u.weekly_work_hours, u.hourly_rate, u.overtime_surcharge_percent,
+            u.payroll_budget_id, u.payroll_start_date, b.currency
+     FROM users u JOIN budgets b ON b.id=u.payroll_budget_id
+     WHERE u.status='active' AND u.deleted_at IS NULL AND u.payroll_start_date <= $1
+       AND b.type='solo' AND b.owner_user_id=u.id AND b.archived=false
+     ORDER BY u.id`,
+    [yesterday],
+  );
+  let processed = 0;
+  for (const user of users) {
+    const firstDate = String(user.payroll_start_date).slice(0, 10);
+    const hoursFrom = mondayOf(firstDate);
+    const workDays = await many(
+      `SELECT work_date, sum(hours) hours FROM work_entries
+       WHERE user_id=$1 AND work_date BETWEEN $2 AND $3
+       GROUP BY work_date ORDER BY work_date`,
+      [user.id, hoursFrom, yesterday],
+    );
+    const hoursByDate = new Map(workDays.map((row) => [String(row.work_date).slice(0, 10), Number(row.hours)]));
+    const paidDays = new Set((await many(
+      'SELECT payroll_date FROM payroll_payments WHERE user_id=$1 AND payroll_date BETWEEN $2 AND $3',
+      [user.id, firstDate, yesterday],
+    )).map((row) => String(row.payroll_date).slice(0, 10)));
+    let weekHours = 0;
+    let currentWeek = null;
+    for (let date = hoursFrom; date <= yesterday; date = nextDate(date)) {
+      const week = mondayOf(date);
+      if (week !== currentWeek) {
+        weekHours = 0;
+        currentWeek = week;
+      }
+      const todayHours = hoursByDate.get(date) || 0;
+      if (date >= firstDate && !paidDays.has(date)) {
+        const payment = calculateDailyPayroll({
+          date,
+          weeklyTarget: Number(user.weekly_work_hours),
+          hourlyRate: Number(user.hourly_rate),
+          surchargePercent: Number(user.overtime_surcharge_percent),
+          previousWeekHours: weekHours,
+          todayHours,
+        });
+        await tx(async (client) => {
+          const reservation = await client.query(
+            `INSERT INTO payroll_payments(user_id,payroll_date,budget_id,base_amount,overtime_hours,overtime_pay)
+             VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (user_id,payroll_date) DO NOTHING RETURNING id`,
+            [user.id, date, user.payroll_budget_id, payment.base_amount, payment.overtime_hours, payment.overtime_pay],
+          );
+          if (!reservation.rowCount) return;
+          if (Number(payment.total_amount) > 0) {
+            const transaction = await client.query(
+              `INSERT INTO transactions(budget_id,created_by,type,amount,booked_at,title,note,source,income_kind)
+               VALUES ($1,$2,'income',$3,$4,$5,$6,'payroll','salary') RETURNING id`,
+              [
+                user.payroll_budget_id, user.id, payment.total_amount, date,
+                `Basisgehalt${Number(payment.overtime_pay) > 0 ? ' und Überstundenvergütung' : ''}`,
+                Number(payment.overtime_pay) > 0
+                  ? `${payment.base_amount} ${user.currency} Basisgehalt; ${payment.overtime_pay} ${user.currency} Überstundenvergütung für ${payment.overtime_hours} Stunden (Stundenlohn plus ${user.overtime_surcharge_percent} %)`
+                  : `${payment.base_amount} ${user.currency} tägliches Basisgehalt`,
+              ],
+            );
+            await client.query('UPDATE payroll_payments SET transaction_id=$2 WHERE id=$1', [reservation.rows[0].id, transaction.rows[0].id]);
+          }
+        });
+        processed++;
+      }
+      weekHours += todayHours;
+    }
+  }
+  log.info(`Gehaltsbuchungen für ${yesterday}: ${processed}`);
+  return `${processed} tägliche Gehaltsbuchungen`;
+}
 
 export async function recurringRun(log) {
   const t = today();
@@ -149,6 +251,7 @@ export async function retention() {
 }
 
 export const JOBS = {
+  'payroll.run': { cron: '45 3 * * *', fn: payrollRun },
   'recurring.run': { cron: '*/15 * * * *', fn: recurringRun },
   reminders: { cron: '0 7 * * *', fn: reminders },
   'reports.run': { cron: '0 6 * * *', fn: reportsRun },
@@ -175,4 +278,3 @@ export async function runJob(name, log) {
     );
   }
 }
-void ymd;

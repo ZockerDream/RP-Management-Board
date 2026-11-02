@@ -13,7 +13,8 @@ import { audit } from '../audit.js';
 
 const publicUser = (u) => ({
   id: u.id, email: u.email, name: u.name, locale: u.locale, currency: u.currency, timezone: u.timezone, week_start: u.week_start,
-  weekly_work_hours: u.weekly_work_hours,
+  weekly_work_hours: u.weekly_work_hours, hourly_rate: u.hourly_rate, overtime_surcharge_percent: u.overtime_surcharge_percent,
+  payroll_budget_id: u.payroll_budget_id,
   theme: u.theme, accent: u.accent, gravatar_enabled: u.gravatar_enabled, totp_enabled: u.totp_enabled,
   has_ical: !!u.ical_token, last_login_at: u.last_login_at,
 });
@@ -32,13 +33,36 @@ export default async function routes(app) {
       timezone: z.string().max(60).optional(),
       week_start: z.number().int().min(0).max(1).optional(),
       weekly_work_hours: z.number().min(1).max(168).multipleOf(0.25).optional(),
+      hourly_rate: z.number().min(0).max(99999999.99).multipleOf(0.01).optional(),
+      overtime_surcharge_percent: z.number().min(0).max(1000).multipleOf(0.01).optional(),
+      payroll_budget_id: z.string().uuid().nullish(),
       theme: z.enum(['system', 'light', 'dark']).optional(),
       accent: z.enum(['indigo', 'emerald', 'ocean', 'rose', 'amber', 'mono']).optional(),
       gravatar_enabled: z.boolean().optional(),
     }).parse(req.body);
-    const keys = Object.keys(b);
+    if (b.payroll_budget_id) {
+      const budget = await one(
+        "SELECT id FROM budgets WHERE id=$1 AND owner_user_id=$2 AND type='solo' AND archived=false AND currency=$3",
+        [b.payroll_budget_id, req.user.id, b.currency || req.user.currency],
+      );
+      if (!budget) throw bad('Wähle ein aktives eigenes Konto mit derselben Währung für die Gehaltsbuchung');
+    } else if (!('payroll_budget_id' in b) && req.user.payroll_budget_id && b.currency && b.currency !== req.user.currency) {
+      const currentBudget = await one('SELECT currency FROM budgets WHERE id=$1', [req.user.payroll_budget_id]);
+      if (currentBudget && currentBudget.currency !== b.currency) {
+        throw bad('Wähle zuerst ein Gehaltskonto in der neuen Währung aus');
+      }
+    }
+    const updates = { ...b };
+    if ('payroll_budget_id' in b && b.payroll_budget_id !== req.user.payroll_budget_id) {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: config.tz, year: 'numeric', month: '2-digit', day: '2-digit',
+      }).formatToParts(new Date());
+      const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+      updates.payroll_start_date = b.payroll_budget_id ? `${values.year}-${values.month}-${values.day}` : null;
+    }
+    const keys = Object.keys(updates);
     if (keys.length) {
-      await q(`UPDATE users SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(', ')}, updated_at=now() WHERE id=$1`, [req.user.id, ...keys.map((k) => b[k])]);
+      await q(`UPDATE users SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(', ')}, updated_at=now() WHERE id=$1`, [req.user.id, ...keys.map((k) => updates[k])]);
     }
     return publicUser(await one('SELECT * FROM users WHERE id=$1', [req.user.id]));
   });

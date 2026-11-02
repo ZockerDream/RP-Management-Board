@@ -20,7 +20,7 @@ export async function seed(log) {
   await tx(async (c) => {
     for (const p of ALL_PERMISSIONS) await c.query('INSERT INTO permissions(key) VALUES ($1) ON CONFLICT DO NOTHING', [p]);
     await syncRole(c, 'Admin', 'Voller Zugriff auf alle Funktionen', ALL_PERMISSIONS, false);
-    await syncRole(c, 'User', 'Standardrolle: eigene Budgets, Teams, Kalender, Objekte', USER_ROLE_PERMISSIONS, true);
+    await syncRole(c, 'User', 'Standardrolle: eigene Konten, Teams, Kalender, Objekte', USER_ROLE_PERMISSIONS, true);
   });
 
   const { email, password, name } = config.admin;

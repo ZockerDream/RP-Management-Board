@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { $, esc, empty, openForm, confirmBox, toast, todayStr } from '../ui.js';
-import { can } from '../app.js';
+import { can, state } from '../app.js';
 
 const hoursText = (hours) => `${Number(hours).toLocaleString('de-DE', { maximumFractionDigits: 2 })} Std.`;
 const dateText = (date) => String(date).slice(0, 10).split('-').reverse().join('.');
@@ -26,11 +26,14 @@ function range(mode, value) {
 }
 
 async function entryForm(entry, projects) {
+  const projectOptions = entry?.project_id && !projects.some((project) => project.id === entry.project_id)
+    ? [...projects, { id: entry.project_id, name: entry.project_name }]
+    : projects;
   return openForm({
     title: entry ? 'Stundeneintrag bearbeiten' : 'Stunden manuell erfassen',
     fields: [
       { name: 'work_date', label: 'Datum', type: 'date', value: entry?.work_date?.slice(0, 10) || todayStr(), required: true },
-      { name: 'project_id', label: 'Projekt / Kunde', type: 'select', options: [{ v: '', l: '– Ohne Projekt –' }, ...projects.map((p) => ({ v: p.id, l: `${p.name}${p.team_name ? ` · ${p.team_name}` : ''}` }))], value: entry?.project_id || '' },
+      { name: 'project_id', label: 'Projekt / Kunde', type: 'select', options: [{ v: '', l: '– Ohne Projekt –' }, ...projectOptions.map((p) => ({ v: p.id, l: `${p.name}${p.team_name ? ` · ${p.team_name}` : ''}` }))], value: entry?.project_id || '' },
       { name: 'hours', label: 'Arbeitsstunden', type: 'number', min: 0.01, max: 24, step: 0.01, value: entry?.hours || '', required: true },
       { name: 'started_at', label: 'Beginn (optional)', type: 'time', value: entry?.started_at?.slice(0, 5) || '' },
       { name: 'ended_at', label: 'Ende (optional)', type: 'time', value: entry?.ended_at?.slice(0, 5) || '' },
@@ -48,6 +51,7 @@ async function entryForm(entry, projects) {
 export async function render(view) {
   let entries = [];
   let projects = [];
+  const teamEntries = new Map();
   let timer = null;
   const teams = can('team:read') ? (await api.get('/teams')).filter((team) => team.role !== 'viewer') : [];
   const today = todayStr();
@@ -59,15 +63,17 @@ export async function render(view) {
       <b id="timer-clock" class="value">00:00:00</b><button class="btn" id="timer-start">Einstempeln</button>
       <button class="btn ghost" id="timer-pause" hidden>Pause</button><button class="btn ghost" id="timer-stop" hidden>Ausstempeln</button></div>
       <small id="timer-hint" class="muted"></small></div>
-    <div class="grid cols-4" id="work-kpis">
+    <div class="grid cols-5" id="work-kpis">
       <div class="card kpi"><span class="label">Arbeitsstunden</span><span class="value" id="work-kpi-hours">–</span></div>
       <div class="card kpi"><span class="label">Einträge im Zeitraum</span><span class="value" id="work-kpi-entries">–</span></div>
       <div class="card kpi"><span class="label" id="work-kpi-target-label">Aktive Projekte</span><span class="value" id="work-kpi-target">–</span></div>
       <div class="card kpi" id="work-kpi-overtime" hidden><span class="label">Überstunden-Saldo</span><span class="value" id="work-kpi-overtime-value">–</span></div>
+      <div class="card kpi" id="work-kpi-pay" hidden><span class="label">Vergütung</span><span class="value" id="work-kpi-pay-value">–</span></div>
     </div>
     <div class="card"><div class="card-head"><h2>Auswertung</h2><b id="work-total" class="up"></b></div>
       <div class="toolbar" style="gap:8px;flex-wrap:wrap"><select id="work-mode"><option value="week">Woche</option><option value="day">Tag</option><option value="month">Monat</option></select>
       <input id="work-date" type="date" value="${today}"><span id="work-range" class="muted"></span></div><div id="work-list"></div></div>
+    ${teams.length ? `<div class="card"><div class="card-head"><h2>Team-Stundenzettel</h2><div class="toolbar"><select id="work-team">${teams.map((team) => `<option value="${team.id}">${esc(team.name)}</option>`).join('')}</select><input id="team-work-month" type="month" value="${today.slice(0, 7)}"></div></div><div id="team-work-report"></div></div>` : ''}
     <div class="card"><div class="card-head"><h2>Projekte / Kunden</h2></div><div id="project-list"></div></div>`;
 
   function updateProjectOptions() {
@@ -104,6 +110,13 @@ export async function render(view) {
     timer = await api.get('/work-hours/timer');
     drawTimer();
   }
+  const payText = (value, currency = state.me.currency || 'EUR') => new Intl.NumberFormat('de-DE', { style: 'currency', currency }).format(Number(value || 0));
+  function entriesTable(items) {
+    return items.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Datum</th><th>Projekt / Kunde</th><th>Zeitraum</th><th>Pause</th><th>Arbeitszeit</th><th>Notiz</th><th></th></tr></thead><tbody>${items.map((item) => `<tr>
+      <td>${dateText(item.work_date)}</td><td>${esc(item.project_name || '–')}</td><td>${timeText(item.started_at)} – ${timeText(item.ended_at)}</td>
+      <td>${item.break_minutes || 0} Min.</td><td><b>${hoursText(item.hours)}</b></td><td>${esc(item.note || '–')}</td>
+      <td style="white-space:nowrap"><button class="btn ghost sm" data-edit="${item.id}">Bearbeiten</button> <button class="btn ghost sm" data-del="${item.id}">Löschen</button></td></tr>`).join('')}</tbody></table></div>` : empty('Keine Arbeitszeit im gewählten Zeitraum erfasst.');
+  }
   async function load() {
     const mode = $('#work-mode').value;
     const [from, to] = range(mode, $('#work-date').value);
@@ -118,16 +131,53 @@ export async function render(view) {
     $('#work-kpi-hours').textContent = hoursText(result.total_hours);
     $('#work-kpi-entries').textContent = entries.length;
     $('#work-kpi-overtime').hidden = mode !== 'month';
+    $('#work-kpi-pay').hidden = mode !== 'month';
     $('#work-kpi-target-label').textContent = mode === 'month' ? 'Monats-Soll' : 'Aktive Projekte';
     $('#work-kpi-target').textContent = mode === 'month' ? hoursText(result.target_hours) : projects.filter((project) => project.active).length;
     $('#work-kpi-overtime-value').textContent = mode === 'month' ? `${result.overtime_balance >= 0 ? '+' : ''}${hoursText(result.overtime_balance)}` : '–';
-    const entriesTable = entries.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Datum</th><th>Projekt / Kunde</th><th>Zeitraum</th><th>Pause</th><th>Arbeitszeit</th><th>Notiz</th><th></th></tr></thead><tbody>${entries.map((item) => `<tr>
-      <td>${dateText(item.work_date)}</td><td>${esc(item.project_name || '–')}</td><td>${timeText(item.started_at)} – ${timeText(item.ended_at)}</td>
-      <td>${item.break_minutes || 0} Min.</td><td><b>${hoursText(item.hours)}</b></td><td>${esc(item.note || '–')}</td>
-      <td style="white-space:nowrap"><button class="btn ghost sm" data-edit="${item.id}">Bearbeiten</button> <button class="btn ghost sm" data-del="${item.id}">Löschen</button></td></tr>`).join('')}</tbody></table></div>` : empty('Keine Arbeitszeit im gewählten Zeitraum erfasst.');
+    $('#work-kpi-pay-value').textContent = mode === 'month' ? payText(result.total_pay) : '–';
+    const generalEntries = entries.filter((item) => !item.project_id);
+    const projectEntries = entries.filter((item) => item.project_id);
+    const separatedEntries = `<h3>Allgemeine Arbeitszeiten</h3>${entriesTable(generalEntries)}<h3 style="margin-top:20px">Projektzeiten</h3>${entriesTable(projectEntries)}`;
     $('#work-list').innerHTML = mode === 'month'
-      ? `<h3>Tagessummen</h3>${result.daily.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Datum</th><th>Arbeitszeit</th></tr></thead><tbody>${result.daily.map((day) => `<tr><td>${dateText(day.work_date)}</td><td><b>${hoursText(day.hours)}</b></td></tr>`).join('')}</tbody></table></div>` : empty('Keine Arbeitszeit im Monat erfasst.')}<h3 style="margin-top:20px">Einzelne Einträge</h3>${entriesTable}`
-      : entriesTable;
+      ? `<h3>Monatsübersicht</h3>${result.daily.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Datum</th><th>Arbeitszeit</th></tr></thead><tbody>${result.daily.map((day) => `<tr><td>${dateText(day.work_date)}</td><td><b>${hoursText(day.hours)}</b></td></tr>`).join('')}</tbody></table></div>` : empty('Keine Arbeitszeit im Monat erfasst.')}
+        <p class="muted">Stundenlohn: ${payText(result.hourly_rate)} · Zuschlag: ${Number(result.overtime_surcharge_percent).toLocaleString('de-DE')} % · Überstunden: ${hoursText(result.overtime_hours)}</p>
+        <p><b>Basisgehalt: ${payText(result.base_pay)} · Überstundenvergütung: ${payText(result.overtime_pay)} · Gesamt: ${payText(result.total_pay)}</b></p>
+        ${separatedEntries}`
+      : separatedEntries;
+  }
+  async function loadTeamHours() {
+    if (!teams.length) return;
+    const report = await api.get(`/work-hours/team/monthly?${new URLSearchParams({ team_id: $('#work-team').value, month: $('#team-work-month').value })}`);
+    teamEntries.clear();
+    $('#team-work-report').innerHTML = report.members.length ? report.members.map((member) => {
+      const general = member.items.filter((item) => !item.project_id);
+      const project = member.items.filter((item) => item.project_id);
+      for (const item of member.items) teamEntries.set(item.id, item);
+      return `<div class="card"><div class="card-head"><div class="grow"><h3>${esc(member.name)}</h3>
+        <small>Gesamt ${hoursText(member.total_hours)} · Überstunden ${hoursText(member.overtime_hours)} · Vergütung ${payText(member.total_pay, member.currency)}</small></div>
+        <button class="btn ghost sm" data-team-settings="${member.user_id}">Mitarbeitereinstellungen</button></div>
+        <p class="muted">Soll ${hoursText(member.target_hours)} · Stundenlohn ${payText(member.hourly_rate, member.currency)} · Zuschlag ${Number(member.overtime_surcharge_percent).toLocaleString('de-DE')} %</p>
+        <h4>Allgemeine Arbeitszeiten</h4>${entriesTable(general)}<h4 style="margin-top:16px">Projektzeiten</h4>${entriesTable(project)}</div>`;
+    }).join('') : empty('Keine aktiven Teammitglieder gefunden.');
+  }
+  async function employeeSettingsForm(userId) {
+    const member = (await api.get(`/work-hours/team/monthly?${new URLSearchParams({ team_id: $('#work-team').value, month: $('#team-work-month').value })}`)).members.find((item) => item.user_id === userId);
+    if (!member) return toast('Mitarbeiter nicht gefunden.', true);
+    return openForm({
+      title: `Einstellungen: ${member.name}`,
+      fields: [
+        { type: 'html', html: '<small class="muted">Diese Einstellungen gelten für den Mitarbeiter global in allen Teams.</small>' },
+        { name: 'weekly_work_hours', label: 'Wöchentliche Sollzeit (Std.)', type: 'number', min: 1, max: 168, step: 0.25, value: member.weekly_target, required: true },
+        { name: 'hourly_rate', label: `Stundenlohn (${member.currency})`, type: 'number', min: 0, max: 99999999.99, step: 0.01, value: member.hourly_rate, required: true },
+        { name: 'overtime_surcharge_percent', label: 'Überstundenzuschlag (%)', type: 'number', min: 0, max: 1000, step: 0.01, value: member.overtime_surcharge_percent, required: true },
+      ],
+      onSubmit: async (values) => api.patch(`/work-hours/team/${$('#work-team').value}/members/${userId}/settings`, {
+        weekly_work_hours: Number(values.weekly_work_hours),
+        hourly_rate: Number(values.hourly_rate),
+        overtime_surcharge_percent: Number(values.overtime_surcharge_percent),
+      }),
+    });
   }
   async function projectForm() {
     return openForm({
@@ -142,6 +192,7 @@ export async function render(view) {
 
   view.addEventListener('change', (event) => {
     if (event.target.matches('#work-mode, #work-date')) load().catch((error) => toast(error.message, true));
+    if (event.target.matches('#work-team, #team-work-month')) loadTeamHours().catch((error) => toast(error.message, true));
   });
   view.addEventListener('click', async (event) => {
     const target = event.target.closest('button');
@@ -166,11 +217,19 @@ export async function render(view) {
         await api.post('/work-hours/timer/stop');
         await loadTimer();
         await load();
+        await loadTeamHours();
       } else if (target.dataset.edit) {
-        if (await entryForm(entries.find((item) => item.id === target.dataset.edit), projects)) await load();
+        const entry = entries.find((item) => item.id === target.dataset.edit) || teamEntries.get(target.dataset.edit);
+        if (entry && await entryForm(entry, projects)) {
+          await load();
+          await loadTeamHours();
+        }
       } else if (target.dataset.del && await confirmBox('Stundeneintrag löschen', 'Diesen Eintrag wirklich löschen?')) {
         await api.del(`/work-hours/${target.dataset.del}`);
         await load();
+        await loadTeamHours();
+      } else if (target.dataset.teamSettings) {
+        if (await employeeSettingsForm(target.dataset.teamSettings)) await loadTeamHours();
       } else if (target.dataset.projectToggle) {
         const project = projects.find((item) => item.id === target.dataset.projectToggle);
         await api.patch(`/work-projects/${project.id}`, { active: !project.active });
@@ -184,7 +243,7 @@ export async function render(view) {
       toast(error.message, true);
     }
   });
-  await Promise.all([loadProjects(), loadTimer(), load()]);
+  await Promise.all([loadProjects(), loadTimer(), load(), loadTeamHours()]);
   const tick = setInterval(() => {
     if (!view.isConnected) clearInterval(tick);
     else if (timer && !timer.paused_at) drawTimer();

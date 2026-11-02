@@ -33,7 +33,7 @@ export async function render(view) {
       { name: 'role_ids', label: 'Rollen', type: 'multi', options: D.roles.map((r) => ({ v: r.id, l: r.name })), value: u ? D.roles.filter((r) => u.roles.includes(r.name)).map((r) => r.id) : [] },
       ...(D.groups.length ? [{ name: 'group_ids', label: 'Gruppen', type: 'multi', options: D.groups.map((g) => ({ v: g.id, l: g.name })), value: u ? D.groups.filter((g) => u.groups.includes(g.name)).map((g) => g.id) : [] }] : []),
       { name: 'expires_at', label: 'Zugang läuft ab (optional)', type: 'date', value: u?.expires_at?.slice(0, 10) },
-      { name: 'max_budgets', label: 'Max. Budgets (optional)', type: 'number', min: 0, value: u?.max_budgets ?? '' },
+      { name: 'max_budgets', label: 'Max. Konten (optional)', type: 'number', min: 0, value: u?.max_budgets ?? '' },
     ];
     return openForm({
       title: u ? 'Benutzer bearbeiten' : 'Benutzer anlegen', fields,
@@ -61,7 +61,7 @@ export async function render(view) {
       { name: 'name', label: 'Name', value: r?.name, required: true },
       { name: 'data_scope', label: 'Datenumfang', type: 'select', options: [{ v: 'all', l: 'Alle Daten' }, { v: 'groups', l: 'Eigene Gruppen' }, { v: 'own', l: 'Nur eigene' }], value: r?.data_scope || 'all' },
       { name: 'description', label: 'Beschreibung', value: r?.description, full: true },
-      { name: 'max_budgets', label: 'Max. Budgets (optional)', type: 'number', min: 0, value: r?.max_budgets ?? '' },
+      { name: 'max_budgets', label: 'Max. Konten (optional)', type: 'number', min: 0, value: r?.max_budgets ?? '' },
       { name: 'is_default', label: 'Standardrolle für neue Benutzer', type: 'checkbox', value: r?.is_default },
       { type: 'html', html: matrix },
     ];
@@ -99,7 +99,7 @@ export async function render(view) {
       const o = await api.get('/admin/overview');
       const s = o.stats;
       el.innerHTML = `<div class="grid cols-4">${[['Benutzer', `${s.active_users} / ${s.users}`, 'aktiv / gesamt'], ['Mit 2FA', s.users_2fa, `von ${s.users}`], ['Logins (24 h)', s.logins_24h, `${s.failed_24h} fehlgeschlagen`], ['Aktive Sitzungen', s.sessions, '']].map(([l, v, d]) => `<div class="card kpi"><span class="label">${l}</span><span class="value">${v}</span><span class="delta muted">${d}</span></div>`).join('')}</div>
-      <div class="grid cols-4">${[['Teams', s.teams], ['Budgets', s.budgets], ['Buchungen', s.transactions]].map(([l, v]) => `<div class="card kpi"><span class="label">${l}</span><span class="value">${v}</span></div>`).join('')}</div>
+      <div class="grid cols-4">${[['Teams', s.teams], ['Konten', s.budgets], ['Buchungen', s.transactions]].map(([l, v]) => `<div class="card kpi"><span class="label">${l}</span><span class="value">${v}</span></div>`).join('')}</div>
       <div class="grid cols-21"><div class="card"><div class="card-head"><h2>Aktivität (14 Tage)</h2></div><div class="chart" id="ad-act"></div></div>
       <div class="card"><div class="card-head"><h2>Rollenverteilung</h2></div>${o.roles.map((r) => `<div class="list-item"><div class="grow">${esc(r.name)}</div><b>${r.n}</b></div>`).join('')}</div></div>
       <div class="card"><div class="card-head"><h2>Letzte Ereignisse</h2></div>${o.recent.length ? o.recent.map((r) => `<div class="list-item"><div class="grow"><b>${esc(r.action)}</b><small>${esc(r.user_name || 'System')} · ${esc(r.entity || '')}</small></div><small>${fdatetime(r.created_at)}</small></div>`).join('') : empty('Keine Ereignisse.')}</div>`;
@@ -139,7 +139,7 @@ export async function render(view) {
     },
     async teams(el) {
       const t = await api.get('/admin/teams');
-      el.innerHTML = `<div class="card">${t.length ? `<table class="table"><thead><tr><th>Team</th><th>Eigentümer</th><th>Mitglieder</th><th>Budgets</th><th>Status</th></tr></thead><tbody>${t.map((x) => `<tr><td><b>${esc(x.name)}</b></td><td>${esc(x.owner)}</td><td>${x.members}</td><td>${x.budgets}</td><td>${esc(x.status)}</td></tr>`).join('')}</tbody></table>` : empty('Keine Teams.')}</div>`;
+      el.innerHTML = `<div class="card">${t.length ? `<table class="table"><thead><tr><th>Team</th><th>Eigentümer</th><th>Mitglieder</th><th>Konten</th><th>Status</th></tr></thead><tbody>${t.map((x) => `<tr><td><b>${esc(x.name)}</b></td><td>${esc(x.owner)}</td><td>${x.members}</td><td>${x.budgets}</td><td>${esc(x.status)}</td></tr>`).join('')}</tbody></table>` : empty('Keine Teams.')}</div>`;
     },
     async settings(el) {
       const { values: v, env } = await api.get('/admin/settings');
@@ -176,7 +176,7 @@ export async function render(view) {
     },
     async integr(el) {
       const [w, k] = await Promise.all([api.get('/admin/webhooks'), can('apikey:read') ? api.get('/admin/api-keys') : []]);
-      el.innerHTML = `<div class="card"><div class="card-head"><h2>Webhooks</h2>${can('settings:update') ? '<button class="btn ghost sm" id="w-new">Webhook hinzufügen</button>' : ''}</div>${w.length ? w.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.url)}</b><small>${esc(x.events.join(', '))}</small></div>${can('settings:update') ? btn(`data-wdel="${x.id}"`, 'Löschen') : ''}</div>`).join('') : empty('Keine Webhooks. Sie melden Budget-Schwellen (80 %, überschritten).')}</div>
+      el.innerHTML = `      <div class="card"><div class="card-head"><h2>Webhooks</h2>${can('settings:update') ? '<button class="btn ghost sm" id="w-new">Webhook hinzufügen</button>' : ''}</div>${w.length ? w.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.url)}</b><small>${esc(x.events.join(', '))}</small></div>${can('settings:update') ? btn(`data-wdel="${x.id}"`, 'Löschen') : ''}</div>`).join('') : empty('Keine Webhooks. Sie melden Konto-Limits (80 %, überschritten).')}</div>
       <div class="card"><div class="card-head"><h2>API-Schlüssel aller Benutzer</h2></div>${k.length ? `<table class="table"><thead><tr><th>Name</th><th>Besitzer</th><th>Präfix</th><th>Scope</th><th>Zuletzt genutzt</th><th></th></tr></thead><tbody>${k.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.owner)}</td><td><code>${esc(x.prefix)}…</code></td><td>${esc(x.scope)}</td><td>${fdatetime(x.last_used_at)}</td><td>${can('apikey:delete') ? btn(`data-kdel="${x.id}"`, 'Widerrufen') : ''}</td></tr>`).join('')}</tbody></table>` : empty('Keine aktiven API-Schlüssel.')}</div>`;
     },
     async audit(el) {
@@ -217,7 +217,7 @@ export async function render(view) {
       else if (ds('bdl')) await api.download(`/admin/backups/${ds('bdl')}/download`, g('[data-bdl]').dataset.bn);
       else if (ds('bdel') && (await confirmBox('Backup löschen', 'Backup-Datei endgültig löschen?'))) { await api.del(`/admin/backups/${ds('bdel')}`); changed = true; }
       else if (g('#w-new')) changed = await openForm({
-        title: 'Webhook hinzufügen', fields: [{ name: 'url', label: 'URL (https://…)', type: 'url', required: true, full: true }, { name: 'events', label: 'Ereignisse', type: 'multi', options: [{ v: 'budget_80', l: 'Budget zu 80 % erreicht' }, { v: 'budget_exceeded', l: 'Budget überschritten' }], value: ['budget_80', 'budget_exceeded'] }],
+        title: 'Webhook hinzufügen', fields: [{ name: 'url', label: 'URL (https://…)', type: 'url', required: true, full: true }, { name: 'events', label: 'Ereignisse', type: 'multi', options: [{ v: 'budget_80', l: 'Kontolimit zu 80 % erreicht' }, { v: 'budget_exceeded', l: 'Kontolimit überschritten' }], value: ['budget_80', 'budget_exceeded'] }],
         onSubmit: async (v) => { const r = await api.post('/admin/webhooks', { url: v.url, events: v.events }); await showSecret('Webhook-Secret', 'Wird nur einmal angezeigt. Damit wird die Signatur (Header X-BM-Signature) geprüft:', r.secret); },
       });
       else if (ds('wdel') && (await confirmBox('Webhook löschen', 'Webhook entfernen?'))) { await api.del(`/admin/webhooks/${ds('wdel')}`); changed = true; }

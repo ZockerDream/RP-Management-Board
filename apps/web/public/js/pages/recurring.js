@@ -13,21 +13,21 @@ const frequencyLabel = (rule) => rule.frequency === 'custom'
 
 async function form(r) {
   const budgets = await loadBudgets();
-  if (!budgets.length) { toast('Bitte zuerst ein Budget anlegen', true); return false; }
+  if (!budgets.length) { toast('Bitte zuerst ein Konto anlegen', true); return false; }
   const candidates = r ? [] : await api.get('/recurring/share-candidates');
   const bid = r?.budget_id || budgets[0].id;
   const catOpts = (id) => [{ v: '', l: '– Keine –' }, ...(budgets.find((b) => b.id === id)?.categories || []).map((c) => ({ v: c.id, l: c.name }))];
   const p = openForm({
     title: r ? 'Dauerauftrag bearbeiten' : 'Neuer Dauerauftrag', fields: [
       { name: 'name', label: 'Name', value: r?.name, required: true, full: true },
-      { name: 'type', label: 'Art', type: 'select', options: [{ v: 'expense', l: 'Ausgabe' }, { v: 'income', l: 'Einnahme' }], value: r?.type || 'expense' },
+      { name: 'type', label: 'Art', type: 'select', options: r?.source === 'asset' ? [{ v: 'expense', l: 'Ausgabe' }] : [{ v: 'expense', l: 'Ausgabe' }, { v: 'income', l: 'Einnahme' }], value: r?.type || 'expense' },
       { name: 'income_kind', label: 'Einnahmeart', type: 'select', options: [{ v: 'other', l: 'Sonstige Einnahme' }, { v: 'salary', l: 'Gehalt' }], value: r?.income_kind || 'other' },
       { name: 'amount', label: 'Betrag', value: r ? String(r.amount).replace('.', ',') : '', required: true },
-      { name: 'budget_id', label: 'Budget', type: 'select', options: budgets.map((b) => ({ v: b.id, l: b.name })), value: bid },
+      { name: 'budget_id', label: 'Konto', type: 'select', options: budgets.map((b) => ({ v: b.id, l: b.name })), value: bid },
       { name: 'category_id', label: 'Kategorie', type: 'select', options: catOpts(bid), value: r?.category_id || '' },
       ...(!r ? [
-        { name: 'recipient_user_id', label: 'Zusätzlich im persönlichen Budget buchen', type: 'select', options: [{ v: '', l: '– Nicht teilen –' }, ...candidates.map((u) => ({ v: u.id, l: u.name }))], value: '' },
-        ...(candidates.length ? [{ type: 'html', html: '<small class="muted">Der andere Nutzer muss zustimmen. Danach wird der volle Betrag in beiden persönlichen Budgets gebucht.</small>' }] : []),
+        { name: 'recipient_user_id', label: 'Zusätzlich im persönlichen Konto buchen', type: 'select', options: [{ v: '', l: '– Nicht teilen –' }, ...candidates.map((u) => ({ v: u.id, l: u.name }))], value: '' },
+        ...(candidates.length ? [{ type: 'html', html: '<small class="muted">Der andere Nutzer muss zustimmen. Danach wird der volle Betrag in beiden persönlichen Konten gebucht.</small>' }] : []),
       ] : []),
       { name: 'frequency', label: 'Rhythmus', type: 'select', options: Object.entries(FREQ).map(([v, l]) => ({ v, l })), value: r?.frequency || 'monthly' },
       { name: 'interval', label: 'Alle … Einheiten', type: 'number', min: 1, max: 3650, value: r?.interval || 1, help: 'Bei „Benutzerdefiniert“ wird der Abstand in Tagen angegeben.' },
@@ -60,7 +60,7 @@ async function form(r) {
     const available = recipientSel.value ? budgets.filter((budget) => budget.type === 'solo') : budgets;
     if (!available.length) {
       recipientSel.value = '';
-      toast('Für einen geteilten Dauerauftrag wird ein persönliches Budget benötigt.', true);
+      toast('Für einen geteilten Dauerauftrag wird ein persönliches Konto benötigt.', true);
       return;
     }
     const selected = available.some((budget) => budget.id === sel.value) ? sel.value : available[0]?.id;
@@ -78,10 +78,10 @@ export async function render(view) {
   async function load() {
     const [loadedRules, requests] = await Promise.all([api.get('/recurring'), api.get('/recurring/share-requests')]);
     rules = loadedRules;
-    $('#r-requests').innerHTML = requests.length ? `<div class="card"><div class="card-head"><h2>Geteilte Daueraufträge zur Bestätigung</h2></div><p class="muted">Bei Annahme wird der volle Betrag zusätzlich in deinem persönlichen Budget gebucht. Dafür muss die Währung mit der des Absenders übereinstimmen.</p>
+    $('#r-requests').innerHTML = requests.length ? `<div class="card"><div class="card-head"><h2>Geteilte Daueraufträge zur Bestätigung</h2></div><p class="muted">Bei Annahme wird der volle Betrag zusätzlich in deinem persönlichen Konto gebucht. Dafür muss die Währung mit der des Absenders übereinstimmen.</p>
       ${requests.map((r) => `<div class="list-item"><div class="grow"><b>${esc(r.name)}</b><small>${esc(r.sender_name)} · ${esc(r.budget_name)} · ${r.type === 'expense' ? 'Ausgabe' : 'Einnahme'} ${new Intl.NumberFormat('de-DE', { style: 'currency', currency: r.currency }).format(Number(r.amount))} · ${esc(r.frequency)}</small></div>
       <button class="btn sm" data-accept-share="${r.id}" data-share-currency="${esc(r.currency)}">Annehmen</button> <button class="btn ghost sm" data-decline-share="${r.id}">Ablehnen</button></div>`).join('')}</div>` : '';
-    $('#r-body').innerHTML = rules.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Budget</th><th>Rhythmus</th><th>Nächste Buchung</th><th style="text-align:right">Betrag</th><th>Status</th><th></th></tr></thead><tbody>${rules.map((r) => `<tr>
+    $('#r-body').innerHTML = rules.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Konto</th><th>Rhythmus</th><th>Nächste Buchung</th><th style="text-align:right">Betrag</th><th>Status</th><th></th></tr></thead><tbody>${rules.map((r) => `<tr>
       <td><b>${esc(r.name)}</b>${r.income_kind === 'salary' ? ' <span class="tag">Gehalt</span>' : ''}<br><small class="muted">${esc(r.category_name || '–')}</small></td><td>${esc(r.budget_name)}</td>
       <td>${frequencyLabel(r)}</td><td>${r.active ? fdate(r.next_run) : '–'}</td>
       <td style="text-align:right" class="${r.type === 'expense' ? 'down' : 'up'}"><b>${r.type === 'expense' ? '−' : '+'}${eur(r.amount)}</b></td>
@@ -96,22 +96,22 @@ export async function render(view) {
       else if (t('[data-accept-share]')) {
         const request = t('[data-accept-share]');
         const budgets = (await loadBudgets()).filter((b) => b.type === 'solo' && !b.archived && b.currency === request.dataset.shareCurrency);
-        if (!budgets.length) return toast('Du brauchst ein persönliches Budget mit derselben Währung, um diesen Dauerauftrag anzunehmen.', true);
+        if (!budgets.length) return toast('Du brauchst ein persönliches Konto mit derselben Währung, um diesen Dauerauftrag anzunehmen.', true);
         const selected = await openForm({
           title: 'Geteilten Dauerauftrag annehmen',
-          fields: [{ type: 'html', html: '<p class="muted">Der volle Betrag wird zusätzlich in deinem Budget verbucht.</p>' }, { name: 'budget_id', label: 'Dein persönliches Budget', type: 'select', options: budgets.map((b) => ({ v: b.id, l: b.name })), value: budgets[0].id, required: true }],
+          fields: [{ type: 'html', html: '<p class="muted">Der volle Betrag wird zusätzlich in deinem Konto verbucht.</p>' }, { name: 'budget_id', label: 'Dein persönliches Konto', type: 'select', options: budgets.map((b) => ({ v: b.id, l: b.name })), value: budgets[0].id, required: true }],
           onSubmit: async (v) => api.post(`/recurring/${request.dataset.acceptShare}/accept`, { budget_id: v.budget_id }),
         });
         if (selected) await load();
       }
       else if (t('[data-decline-share]')) {
         const button = t('[data-decline-share]');
-        if (await confirmBox('Dauerauftrag ablehnen', 'Der Auftrag wird nicht in deinem persönlichen Budget verbucht.', 'Ablehnen')) {
+        if (await confirmBox('Dauerauftrag ablehnen', 'Der Auftrag wird nicht in deinem persönlichen Konto verbucht.', 'Ablehnen')) {
           await api.post(`/recurring/${button.dataset.declineShare}/decline`);
           await load();
         }
       }
-      else if (t('[data-revoke-share]') && await confirmBox('Geteilten Dauerauftrag beenden', 'Künftige Buchungen werden nicht mehr in das Budget des anderen Nutzers übernommen.', 'Beenden')) {
+      else if (t('[data-revoke-share]') && await confirmBox('Geteilten Dauerauftrag beenden', 'Künftige Buchungen werden nicht mehr in das Konto des anderen Nutzers übernommen.', 'Beenden')) {
         await api.post(`/recurring/${t('[data-revoke-share]').dataset.revokeShare}/revoke-share`);
         await load();
       }

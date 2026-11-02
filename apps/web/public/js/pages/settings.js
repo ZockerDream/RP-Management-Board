@@ -3,7 +3,7 @@ import { $, esc, fdatetime, empty, openForm, confirmBox, toast, showSecret, down
 import { state, can, reloadMe, applyTheme, renderAvatars } from '../app.js';
 
 const ACCENTS = [['indigo', 'Indigo'], ['emerald', 'Smaragd'], ['ocean', 'Ozean'], ['rose', 'Rose'], ['amber', 'Bernstein'], ['mono', 'Mono']];
-const KINDS = [['budget_80', 'Budget zu 80 % erreicht'], ['budget_exceeded', 'Budget überschritten'], ['calendar', 'Termin-Erinnerungen'], ['vehicle_service', 'Fahrzeug-Service fällig'], ['first_aid_kit', 'Verbandskasten läuft ab'], ['key_overdue', 'Schlüssel-Rückgabe fällig'], ['team_added', 'Team-Einladungen'], ['recurring_share', 'Geteilte Daueraufträge']];
+const KINDS = [['budget_80', 'Kontolimit zu 80 % erreicht'], ['budget_exceeded', 'Kontolimit überschritten'], ['calendar', 'Termin-Erinnerungen'], ['vehicle_service', 'Fahrzeug-Service fällig'], ['first_aid_kit', 'Verbandskasten läuft ab'], ['key_overdue', 'Schlüssel-Rückgabe fällig'], ['team_added', 'Team-Einladungen'], ['recurring_share', 'Geteilte Daueraufträge']];
 
 export async function render(view) {
   const TABS = [['profile', 'Profil'], ['security', 'Sicherheit'], ['appearance', 'Darstellung'], ['notif', 'Benachrichtigungen'], ['sessions', 'Sitzungen'], ['keys', can('apikey:read') ? 'API & Kalender' : 'Kalender'], ['data', 'Daten']];
@@ -14,18 +14,39 @@ export async function render(view) {
   const patchMe = async (b) => { await api.patch('/me', b); await reloadMe(); };
 
   const P = {
-    profile(el) {
+    async profile(el) {
+      const accounts = (await api.get('/budgets')).filter((budget) =>
+        budget.type === 'solo' && budget.owner_user_id === u().id && !budget.archived);
+      const accountOptions = (currency, selected) => `<option value="">Kein Konto ausgewählt</option>${accounts
+        .filter((budget) => budget.currency === currency)
+        .map((budget) => `<option value="${esc(budget.id)}" ${budget.id === selected ? 'selected' : ''}>${esc(budget.name)} (${esc(budget.currency)})</option>`).join('')}`;
       el.innerHTML = `<form class="card" id="p-form"><div class="card-head"><h2>Profil</h2></div><div class="row start" style="gap:16px;margin-bottom:16px"><span class="avatar xl" data-me></span><small class="muted">Avatar wird über Gravatar anhand deiner E-Mail geladen (abschaltbar unter Darstellung).</small></div>
         <div class="form"><label class="field">Name<input name="name" value="${esc(u().name)}" required></label><label class="field">E-Mail<input value="${esc(u().email)}" disabled></label>
         <label class="field">Währung<select name="currency">${['EUR', 'USD', 'CHF', 'GBP'].map((c) => `<option ${c === u().currency ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
         <label class="field">Wochenstart<select name="week_start"><option value="1" ${u().week_start === 1 ? 'selected' : ''}>Montag</option><option value="0" ${u().week_start === 0 ? 'selected' : ''}>Sonntag</option></select></label>
-        <label class="field">Wochen-Sollzeit (Std.)<input name="weekly_work_hours" type="number" min="1" max="168" step="0.25" value="${esc(u().weekly_work_hours ?? 40)}" required><small class="muted">Für den Monats-Saldo auf fünf Arbeitstage verteilt.</small></label></div>
+        <label class="field">Wochen-Sollzeit (Std.)<input name="weekly_work_hours" type="number" min="1" max="168" step="0.25" value="${esc(u().weekly_work_hours ?? 40)}" required><small class="muted">Wöchentliche Mindestarbeitszeit; für die Gehaltsbasis auf sieben Kalendertage verteilt.</small></label>
+        <label class="field">Stundenlohn (${esc(u().currency || 'EUR')})<input name="hourly_rate" type="number" min="0" max="99999999.99" step="0.01" value="${esc(u().hourly_rate ?? 0)}" required></label>
+        <label class="field">Überstundenzuschlag (%)<input name="overtime_surcharge_percent" type="number" min="0" max="1000" step="0.01" value="${esc(u().overtime_surcharge_percent ?? 0)}" required><small class="muted">Ab dem Wochen-Soll erhält jede weitere gestempelte Stunde Stundenlohn plus diesen Zuschlag.</small></label>
+        <label class="field">Konto für Gehaltsgutschrift<select name="payroll_budget_id">${accountOptions(u().currency || 'EUR', u().payroll_budget_id)}</select><small class="muted">Tägliche Basisgutschrift inklusive Wochenende; Auszahlung um 03:45 Uhr. Es werden nur eigene aktive Konten mit Profilwährung angezeigt.</small></label></div>
         <div class="modal-foot"><button class="btn">Speichern</button></div></form>`;
       renderAvatars();
+      $('select[name="currency"]', el).addEventListener('change', (event) => {
+        const select = $('select[name="payroll_budget_id"]', el);
+        const selected = accounts.some((budget) => budget.id === select.value && budget.currency === event.target.value) ? select.value : '';
+        select.innerHTML = accountOptions(event.target.value, selected);
+      });
       $('#p-form', el).addEventListener('submit', async (e) => {
         e.preventDefault();
         const f = new FormData(e.target);
-        try { await patchMe({ name: f.get('name').trim(), currency: f.get('currency'), week_start: Number(f.get('week_start')), weekly_work_hours: Number(f.get('weekly_work_hours')) }); toast('Profil gespeichert'); } catch (x) { toast(x.message, true); }
+        try {
+          await patchMe({
+            name: f.get('name').trim(), currency: f.get('currency'), week_start: Number(f.get('week_start')),
+            weekly_work_hours: Number(f.get('weekly_work_hours')), hourly_rate: Number(f.get('hourly_rate')),
+            overtime_surcharge_percent: Number(f.get('overtime_surcharge_percent')),
+            payroll_budget_id: f.get('payroll_budget_id') || null,
+          });
+          toast('Profil gespeichert');
+        } catch (x) { toast(x.message, true); }
       });
     },
     security(el) {

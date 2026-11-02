@@ -64,8 +64,8 @@ export async function render(view) {
         <div class="card"><div class="card-head"><h2>Ausgaben nach Kategorie</h2></div>${cats.length ? '<div class="chart" id="d-donut"></div>' : empty('Keine Ausgaben in diesem Zeitraum.')}</div>
       </div>
       <div class="grid cols-12">
-        <div class="card"><div class="card-head"><h2>Budget-Auslastung</h2></div>
-          ${shown.length ? `<div class="grid cols-3" style="margin:0;gap:8px">${shown.map((b, i) => `<div class="gauge"><div class="chart" data-g="${i}"></div><div class="g-label">${esc(b.name)}</div><small>${eur0(b.used)} / ${eur0(b.limit_amount)}</small></div>`).join('')}</div>` : empty('Noch keine Budgets.')}
+        <div class="card"><div class="card-head"><h2>Konto-Auslastung</h2></div>
+          ${shown.length ? `<div class="grid cols-3" style="margin:0;gap:8px">${shown.map((b, i) => `<div class="gauge"><div class="chart" data-g="${i}"></div><div class="g-label">${esc(b.name)}</div><small>${eur0(b.used)} / ${eur0(b.limit_amount)}</small></div>`).join('')}</div>` : empty('Noch keine Konten.')}
         </div>
         <div class="card"><div class="card-head"><h2>Letzte Buchungen</h2><a class="btn ghost sm" href="#/transactions">Alle anzeigen</a></div>
           ${txs.items.length ? txs.items.map((t) => `<div class="list-item"><div class="grow"><b>${esc(t.title || t.category_name || '–')}</b><small>${esc(t.category_name || '–')} · ${fdate(t.booked_at)}</small></div>${budgetTag(t.budget_type, t.budget_name)}<b class="${t.type === 'expense' ? 'down' : 'up'}">${t.type === 'expense' ? '−' : '+'}${eur(t.amount)}</b></div>`).join('') : empty('Noch keine Buchungen.')}

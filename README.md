@@ -1,6 +1,6 @@
 # Budget Manager
 
-Selbst gehostete Haushalts- und Teambudget-Verwaltung: Budgets, Transaktionen, Daueraufträge, Sparziele, Zeiterfassung, Berichte, Teams, Kalender, Google-/Outlook-Sync, Schlüssel-/Objektverwaltung, Rollen & Rechte, 2FA, verschlüsselte Backups. Konzept: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md).
+Selbst gehostete Verwaltung persönlicher und geteilter Konten: Buchungen, Daueraufträge, Sparziele, Zeiterfassung, Berichte, Teams, Kalender, Google-/Outlook-Sync, Schlüssel-/Objektverwaltung, Rollen & Rechte, 2FA und verschlüsselte Backups. Konzept: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md).
 
 ## Architektur
 
@@ -60,30 +60,27 @@ Ohne Proxy direkt `http://<server-ip>:8080` öffnen. Bei HTTP sind Cookies nicht
 
 Alle weiteren Einstellungen (Passwortregeln, Branding, Wartungsmodus) pflegt der Admin unter *Verwaltung → Einstellungen*.
 
-Google- und Microsoft-Verbindungen importieren Kontakte und Kalendertermine ausschließlich lesend. Verbindungen und importierte Daten können in *Einstellungen → API & Kalender* wieder getrennt bzw. gelöscht werden. Die Zeiterfassung bietet Timer mit Pausen, private oder teamweite Projekte, manuelle Einträge sowie Wochen-/Tagesübersicht und CSV-Export. Objekte, Schlüssel und Personen werden beim Anlegen privat gespeichert; Teamfreigabe kann pro Datensatz gewählt werden. Bereits vorhandene globale Objekte werden beim Update dem ersten Admin privat zugeordnet.
+Google- und Microsoft-Verbindungen importieren Kontakte und Kalendertermine ausschließlich lesend. Verbindungen und importierte Daten können in *Einstellungen → API & Kalender* wieder getrennt bzw. gelöscht werden. Die Zeiterfassung bietet Timer mit Pausen, private oder teamweite Projekte, manuelle Einträge sowie Wochen-/Tagesübersicht und CSV-Export. Mitarbeiter können in ihrem Profil ein eigenes Konto für die automatische Gehaltsgutschrift auswählen. Basisgehalt wird täglich einschließlich Wochenende um 03:45 Uhr gutgeschrieben; tatsächliche Stunden oberhalb des Wochen-Solls erhalten zusätzlich den individuellen Überstundenzuschlag. Objekte, Schlüssel und Personen werden beim Anlegen privat gespeichert; Teamfreigabe kann pro Datensatz gewählt werden. Bereits vorhandene globale Objekte werden beim Update dem ersten Admin privat zugeordnet.
 
 ## Betrieb
 
 ```bash
 docker compose logs -f api worker        # Logs
-docker compose pull && docker compose up -d --build   # Update (Migrationen laufen automatisch)
-docker compose down                      # Stoppen (Daten bleiben in Volumes)
+./scripts/update.sh                     # Branch aktualisieren, Images bauen, Services prüfen
+docker compose down                     # Stoppen (Daten bleiben in Volumes)
 ```
 
 Persistente Daten liegen in den Docker-Volumes `db_data`, `uploads`, `backups`.
 
 ### Bestehende Git-Installation aktualisieren
 
-Im Projektverzeichnis den aktuellen Stand des installierten Branches holen und die Images neu bauen:
+Im Projektverzeichnis genügt:
 
 ```bash
-git status                              # eigene Änderungen vorher sichern
-git pull --ff-only                      # aktualisiert den ausgecheckten Branch
-docker compose up -d --build            # baut und startet die aktualisierten Services
-docker compose ps                       # Status und Healthchecks prüfen
+./scripts/update.sh
 ```
 
-Falls lokale Änderungen vorhanden sind, diese vor `git pull` committen oder anderweitig sichern. Datenbankmigrationen laufen beim Start automatisch; die Docker-Volumes bleiben erhalten. Bei Problemen helfen `docker compose logs -f api worker`. Vor größeren Updates empfiehlt sich ein Backup.
+Das Skript aktualisiert den ausgecheckten Branch per Fast-Forward, baut die Images neu, startet die Services und wartet auf deren Healthchecks. Es bricht ab, wenn lokale Änderungen vorhanden sind. Datenbankmigrationen laufen beim API-Start automatisch; ein manueller Migrationsschritt ist nicht erforderlich und die Docker-Volumes bleiben erhalten. Bei Problemen helfen `docker compose logs -f api worker`. Vor größeren Updates empfiehlt sich ein Backup.
 
 ### Backup & Restore
 

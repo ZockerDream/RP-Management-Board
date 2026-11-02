@@ -97,7 +97,7 @@ export async function budgetWatch(budgetId, log) {
   const [from] = periodRange(b);
   for (const [level, kind] of [[100, 'budget_exceeded'], [80, 'budget_80']]) {
     if (pct < level) continue;
-    const title = level === 100 ? `Budget „${b.name}“ überschritten` : `Budget „${b.name}“ zu ${Math.floor(pct)} % ausgeschöpft`;
+    const title = level === 100 ? `Kontolimit „${b.name}“ überschritten` : `Kontolimit „${b.name}“ zu ${Math.floor(pct)} % ausgeschöpft`;
     for (const uid of await recipients(b)) await notify(uid, kind, title, `${used.toFixed(2)} von ${b.limit_amount} ${b.currency}`, `${kind}:${b.id}:${from}`);
     await fireWebhooks(kind, { budget_id: b.id, name: b.name, used, limit: b.limit_amount }, log);
     break;

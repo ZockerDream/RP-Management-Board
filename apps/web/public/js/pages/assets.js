@@ -13,13 +13,13 @@ const EVENT = { issued: 'Ausgegeben', returned: 'Zurückgegeben', lost: 'Als ver
 const ASSET_TYPE = { house: 'Haus', vehicle: 'Fahrzeug', key: 'Schlüssel' };
 
 const costFields = (o, budgets) => [
-  { type: 'html', html: '<div class="cost-block"><b>Laufende Kosten (optional)</b><p class="muted">Werden automatisch als Buchung bzw. Dauerauftrag im gewählten Budget geführt.</p></div>' },
+  { type: 'html', html: '<div class="cost-block"><b>Laufende Kosten (optional)</b><p class="muted">Werden automatisch als Buchung bzw. Dauerauftrag im gewählten Konto geführt.</p></div>' },
   { name: 'cost_amount', label: 'Betrag', value: o?.cost_amount ? String(o.cost_amount).replace('.', ',') : '' },
   { name: 'cost_interval', label: 'Intervall', type: 'select', options: Object.entries(INTERVAL).map(([v, l]) => ({ v, l })), value: o?.cost_interval || 'monthly' },
   { name: 'cost_interval_count', label: 'Alle … Einheiten', type: 'number', min: 1, max: 3650, value: o?.cost_interval_count || 1 },
-  { name: 'cost_budget_id', label: 'Budget', type: 'select', options: [{ v: '', l: '– Keines –' }, ...budgets.map((b) => ({ v: b.id, l: b.name }))], value: o?.cost_budget_id || '' },
+  { name: 'cost_budget_id', label: 'Konto', type: 'select', options: [{ v: '', l: '– Keines –' }, ...budgets.map((b) => ({ v: b.id, l: b.name }))], value: o?.cost_budget_id || '' },
   { name: 'cost_category_id', label: 'Kategorie', type: 'select', options: [{ v: '', l: '– Keine –' }, ...budgets.flatMap((b) => b.categories.map((c) => ({ v: c.id, l: `${b.name} › ${c.name}` })))], value: o?.cost_category_id || '' },
-  { name: 'cost_tracking', label: 'Kosten im Budget verbuchen', type: 'checkbox', value: o ? o.cost_tracking !== false : true },
+  { name: 'cost_tracking', label: 'Kosten im Konto verbuchen', type: 'checkbox', value: o ? o.cost_tracking !== false : true },
 ];
 const costBody = (v) => ({
   cost_amount: v.cost_amount ? parseAmount(v.cost_amount) : null, cost_interval: v.cost_amount ? v.cost_interval : null,
@@ -209,7 +209,7 @@ export async function render(view, params) {
     },
     async costs(el) {
       const c = await api.get('/assets/costs');
-      el.innerHTML = `<div class="card"><div class="card-head"><h2>Laufende Objektkosten</h2><b>${eur(c.yearly_total)} / Jahr</b></div>${c.items.length ? `<table class="table"><thead><tr><th>Objekt</th><th>Typ</th><th>Intervall</th><th>Budget</th><th style="text-align:right">Betrag</th><th style="text-align:right">pro Jahr</th></tr></thead><tbody>${c.items.map((i) => `<tr><td>${esc(i.name)}</td><td>${ASSET_TYPE[i.type]}</td><td>${costIntervalText(i.interval, i.interval_count)}</td><td>${esc(i.budget_name || '–')}${i.tracking ? '' : ' <span class="tag warn">nicht verbucht</span>'}</td><td style="text-align:right">${eur(i.amount)}</td><td style="text-align:right">${i.interval === 'once' ? '–' : eur(i.yearly)}</td></tr>`).join('')}</tbody></table>` : empty('Keine Kosten erfasst.')}</div>`;
+      el.innerHTML = `<div class="card"><div class="card-head"><h2>Laufende Objektkosten</h2><b>${eur(c.yearly_total)} / Jahr</b></div>${c.items.length ? `<table class="table"><thead><tr><th>Objekt</th><th>Typ</th><th>Intervall</th><th>Konto</th><th style="text-align:right">Betrag</th><th style="text-align:right">pro Jahr</th></tr></thead><tbody>${c.items.map((i) => `<tr><td>${esc(i.name)}</td><td>${ASSET_TYPE[i.type]}</td><td>${costIntervalText(i.interval, i.interval_count)}</td><td>${esc(i.budget_name || '–')}${i.tracking ? '' : ' <span class="tag warn">nicht verbucht</span>'}</td><td style="text-align:right">${eur(i.amount)}</td><td style="text-align:right">${i.interval === 'once' ? '–' : eur(i.yearly)}</td></tr>`).join('')}</tbody></table>` : empty('Keine Kosten erfasst.')}</div>`;
     },
     async log(el) {
       const l = await api.get('/assets/log');

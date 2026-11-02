@@ -18,12 +18,12 @@ async function budgetForm(b) {
     { name: 'period_end', label: 'Bis (nur Zeitraum)', type: 'date', value: b?.period_end?.slice(0, 10) },
   ];
   return openForm({
-    title: b ? 'Budget bearbeiten' : 'Neues Budget', fields,
+    title: b ? 'Konto bearbeiten' : 'Neues Konto', fields,
     onSubmit: async (v) => {
       const body = { name: v.name.trim(), limit_amount: parseAmount(v.limit_amount || '0'), period_type: v.period_type, period_start: v.period_type === 'custom' ? v.period_start || null : null, period_end: v.period_type === 'custom' ? v.period_end || null : null };
       if (b) await api.patch(`/budgets/${b.id}`, body);
       else await api.post('/budgets', { ...body, type: v.type, team_id: v.type === 'shared' ? v.team_id : null });
-      toast('Budget gespeichert');
+      toast('Konto gespeichert');
     },
   });
 }
@@ -44,9 +44,9 @@ async function catForm(b, c) {
 
 export async function render(view) {
   let scope = 'all', sel = null, budgets = [];
-  view.innerHTML = `<div class="page-head"><div><h1>Budgets</h1><p>Solo-Budgets und geteilte Team-Budgets getrennt verwalten</p></div>
+  view.innerHTML = `<div class="page-head"><div><h1>Konten</h1><p>Persönliche und geteilte Team-Konten getrennt verwalten</p></div>
     <div class="actions"><div class="seg" id="b-scope"><button data-s="all" class="on">Alle</button><button data-s="solo">Solo</button><button data-s="shared">Geteilt</button></div>
-    ${can('budget:create') ? '<button class="btn" id="b-new">Neues Budget</button>' : ''}</div></div><div id="b-body"></div>`;
+    ${can('budget:create') ? '<button class="btn" id="b-new">Neues Konto</button>' : ''}</div></div><div id="b-body"></div>`;
 
   async function load() {
     budgets = await loadBudgets();
@@ -54,11 +54,11 @@ export async function render(view) {
     if (!list.find((b) => b.id === sel)) sel = list[0]?.id;
     const cur = list.find((b) => b.id === sel);
     $('#b-body').innerHTML = (list.length ? `<div class="grid cols-3">${list.map((b) => `<div class="card stack" data-sel="${b.id}" style="cursor:pointer;${b.id === sel ? 'outline:2px solid var(--primary)' : ''}">
-      <div class="row"><b>${esc(b.name)}</b>${budgetTag(b.type, b.type === 'solo' ? 'Solo' : 'Geteilt')}</div>
+      <div class="row"><b>${esc(b.name)}</b>${budgetTag(b.type, b.type === 'solo' ? 'Persönlich' : 'Geteilt')}</div>
       <small class="muted">${periodLabel(b)}${b.team_name ? ` · Team „${esc(b.team_name)}“` : ''}</small>
       <div class="row"><b>${eur(b.used)}</b><span class="muted">von ${eur(b.limit_amount)}</span></div>${progress(b.pct)}
       <div class="chips">${b.categories.slice(0, 4).map((c) => `<span class="chip">${esc(c.name)}</span>`).join('')}</div>
-      <div class="row">${can('budget:update') ? `<button class="btn ghost sm" data-edit="${b.id}">Bearbeiten</button>` : ''}${can('budget:delete') && b.role === 'owner' ? `<button class="btn ghost sm" data-del="${b.id}">Löschen</button>` : ''}</div></div>`).join('')}</div>` : `<div class="card">${empty('Noch keine Budgets vorhanden.')}</div>`)
+      <div class="row">${can('budget:update') ? `<button class="btn ghost sm" data-edit="${b.id}">Bearbeiten</button>` : ''}${can('budget:delete') && b.role === 'owner' ? `<button class="btn ghost sm" data-del="${b.id}">Löschen</button>` : ''}</div></div>`).join('')}</div>` : `<div class="card">${empty('Noch keine Konten vorhanden.')}</div>`)
       + (cur ? `<div class="card"><div class="card-head"><h2>Kategorien · ${esc(cur.name)}</h2>${can('budget:update') ? '<button class="btn ghost sm" id="c-new">Kategorie hinzufügen</button>' : ''}</div>
       ${cur.categories.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Kategorie</th><th>Ausgegeben</th><th>Limit</th><th style="width:34%">Auslastung</th><th></th></tr></thead><tbody>${cur.categories.map((c) => {
         const pct = Number(c.limit_amount) > 0 ? (Number(c.used) / Number(c.limit_amount)) * 100 : 0;
@@ -75,7 +75,7 @@ export async function render(view) {
       if (t('#b-new')) { if (await budgetForm()) load(); return; }
       if (t('[data-edit]')) { if (await budgetForm(budgets.find((b) => b.id === t('[data-edit]').dataset.edit))) load(); return; }
       if (t('[data-del]')) {
-        if (await confirmBox('Budget löschen', 'Das Budget inklusive aller Buchungen wird unwiderruflich gelöscht.')) { await api.del(`/budgets/${t('[data-del]').dataset.del}`); toast('Gelöscht'); load(); }
+        if (await confirmBox('Konto löschen', 'Das Konto inklusive aller Buchungen wird unwiderruflich gelöscht.')) { await api.del(`/budgets/${t('[data-del]').dataset.del}`); toast('Gelöscht'); load(); }
         return;
       }
       if (t('#c-new')) { if (await catForm(cur)) load(); return; }

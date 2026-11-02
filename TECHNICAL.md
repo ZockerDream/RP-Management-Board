@@ -2,6 +2,8 @@
 
 Ergänzt [CONCEPT.md](CONCEPT.md). Der Stack ist ein Vorschlag, die offene Entscheidung steht in Abschnitt 14.
 
+Die Oberfläche verwendet den Begriff „Konto“. Die bestehenden API-Routen und Datenbanktabellen heißen aus Kompatibilitätsgründen weiterhin `/budgets`, `budgets` und `budget_id`.
+
 ## 1. Stack
 
 | Schicht | Wahl | Begründung |
@@ -57,6 +59,8 @@ Konventionen: UUID-Primärschlüssel, `created_at`/`updated_at` überall, Geld a
 ```
 users(id, email citext unique, password_hash, name, locale, currency, timezone,
       week_start, status[active|locked|invited|disabled], totp_secret_enc NULL,
+      weekly_work_hours, hourly_rate, overtime_surcharge_percent,
+      payroll_budget_id, payroll_start_date,
       totp_enabled, gravatar_enabled, theme, accent, theme_auto, last_login_at, deleted_at)
 recovery_codes(id, user_id, code_hash, used_at)
 sessions(id, user_id, refresh_hash, user_agent, ip, created_at, last_seen_at, revoked_at)
@@ -70,7 +74,7 @@ group_roles(group_id, role_id)
 invitations(id, email, role_id, team_id NULL, token_hash, invited_by, expires_at, accepted_at)
 ```
 
-### 4.2 Teams und Budgets
+### 4.2 Teams und Konten
 ```
 teams(id, name, owner_id, status[active|archived], created_at)
 team_members(team_id, user_id, team_role[owner|editor|viewer])
@@ -107,16 +111,16 @@ key_assignments(id, key_id, person_id, copy_no, issued_at, due_at NULL, returned
                 lost_at NULL, issued_by_user_id, receipt_signed bool)
   UNIQUE (key_id, copy_no) WHERE returned_at IS NULL AND lost_at IS NULL
 
-<cost> = cost_amount numeric(14,2) NULL, cost_interval[once|monthly|quarterly|yearly] NULL,
+<cost> = cost_amount numeric(14,2) NULL, cost_interval[once|daily|weekly|monthly|yearly|custom] NULL,
          cost_budget_id NULL, cost_category_id NULL, cost_tracking bool default true,
          cost_recurring_id NULL (vom System verwaltet)
   CHECK (cost_amount IS NULL OR (cost_interval IS NOT NULL AND cost_budget_id IS NOT NULL))
 ```
-Der Schlüsselstatus wird aus den Zuweisungen abgeleitet: ausgegeben (offene Zuweisung), überfällig (`due_at < now()`), verloren (`lost_at`), sonst im Safe. Schlüsselarten sind frei eingebbar; `copies` verwaltet die Exemplare je Haus oder Fahrzeug. QR-Codes verweisen auf eine Schlüssel-ID, die Bestandsansicht zeigt Gesamtbestand, Ausgaben und Verluste. `interval` ist bei täglichen, wöchentlichen, monatlichen und jährlichen Daueraufträgen der Abstand in jeweiligen Einheiten; bei `custom` ist es ein Abstand in Tagen. Objektkosten und Kalenderserien folgen derselben Intervalllogik. Monats- und Jahresserien bleiben am ursprünglichen Tag verankert und werden in kürzeren Monaten auf deren letzten Tag gesetzt. Ein manueller Dauerauftrag kann nach Zustimmung eines Team-Nutzers zusätzlich in dessen persönliches Budget buchen; dafür sind gleiche Währungen erforderlich. Die Annahme überträgt vorhandene Buchungen und aktiviert die Doppelbuchung für künftige Termine.
+Der Schlüsselstatus wird aus den Zuweisungen abgeleitet: ausgegeben (offene Zuweisung), überfällig (`due_at < now()`), verloren (`lost_at`), sonst im Safe. Schlüsselarten sind frei eingebbar; `copies` verwaltet die Exemplare je Haus oder Fahrzeug. QR-Codes verweisen auf eine Schlüssel-ID, die Bestandsansicht zeigt Gesamtbestand, Ausgaben und Verluste. `interval` ist bei täglichen, wöchentlichen, monatlichen und jährlichen Daueraufträgen der Abstand in jeweiligen Einheiten; bei `custom` ist es ein Abstand in Tagen. Objektkosten und Kalenderserien folgen derselben Intervalllogik. Änderungen an Objektkosten aktualisieren den verknüpften Dauerauftrag; nicht mehr verwendete Objektaufträge werden entfernt, historische Buchungen bleiben bestehen. Monats- und Jahresserien bleiben am ursprünglichen Tag verankert und werden in kürzeren Monaten auf deren letzten Tag gesetzt. Ein manueller Dauerauftrag kann nach Zustimmung eines Team-Nutzers zusätzlich in dessen persönlichem Konto buchen; dafür sind gleiche Währungen erforderlich. Die Annahme überträgt vorhandene Buchungen und aktiviert die Doppelbuchung für künftige Termine.
 
 Tür-PINs werden verschlüsselt gespeichert, nie über die regulären Objekt-Endpunkte ausgegeben und nur nach erneuter Passwort- sowie gegebenenfalls 2FA-Prüfung sichtbar. Anzeigen, Ändern und Entfernen werden im Audit-Log protokolliert. Die Migration überführt vorhandene Klartext-PINs und entfernt anschließend die Legacy-Spalte.
 
-`users.weekly_work_hours` konfiguriert das persönliche Wochen-Soll. Der Monatsbericht verteilt dieses auf Montag bis Freitag und liefert Tagessummen, Gesamtstunden, Soll und Saldo; der PDF-Endpunkt exportiert die Monatsübersicht.
+`work_entries(user_id, project_id NULL, work_date, hours, started_at NULL, ended_at NULL, break_minutes, note)` speichert allgemeine Arbeitszeiten (`project_id IS NULL`) und Projektzeiten getrennt. `work_timers` bietet einen projektunabhängigen Start-/Pause-/Stopp-Timer und erzeugt beim Stoppen einen Arbeitszeiteintrag. `users.weekly_work_hours`, `hourly_rate`, `overtime_surcharge_percent` und `payroll_budget_id` speichern globale Mitarbeitereinstellungen. Der Job `payroll.run` schreibt täglich um 03:45 Uhr in der konfigurierten Zeitzone Basisgehalt gut: Wochen-Soll × Stundenlohn wird centgenau auf sieben Kalendertage verteilt, unabhängig von Anwesenheit. Tatsächlich erfasste Stunden oberhalb des Montag-bis-Sonntag-Wochensolls werden zusätzlich mit Stundenlohn plus prozentualem Zuschlag vergütet. `payroll_payments` speichert pro Mitarbeiter und Tag den idempotenten Buchungsstatus und die Gehaltsbestandteile; bei Ausfällen holt der Job fehlende Tage nach. Der Monatsbericht zeigt tatsächlich gebuchte Beträge. Team-Owner und -Editoren dürfen Einträge von Teammitgliedern ändern/löschen und deren Arbeitszeiteinstellungen bearbeiten; der Monatsbericht weist diese Rechte serverseitig nach.
 
 ### 4.4 Kalender, Benachrichtigungen, System
 ```
@@ -170,14 +174,15 @@ Regeln: Cursor-Pagination (`?cursor=&limit=`), Filter per Query, einheitliches F
 
 ### 7.1 Kosten-Tracking für Objekte
 Beim Speichern von Haus, Fahrzeug oder Schlüssel in einer Transaktion:
-1. Kein `cost_amount` oder `cost_tracking = false`: bestehende `recurring_rule` deaktivieren, keine Buchung.
+1. Kein `cost_amount` oder `cost_tracking = false`: bestehende `recurring_rule` und Verknüpfung entfernen; historische Transaktionen bleiben erhalten.
 2. `cost_interval = once`: genau eine `transaction` (`source = asset`, `asset_type`, `asset_id`) anlegen. Bei Änderung die bestehende Buchung aktualisieren statt neu anlegen.
 3. Sonst: `recurring_rule` (`source = asset`) anlegen oder aktualisieren; `cost_recurring_id` verweist darauf. Der Scheduler bucht ab dem nächsten Fälligkeitstag.
-4. Änderungen am Budget oder an der Kategorie wirken nur auf künftige Buchungen.
+4. Änderungen am Konto oder an der Kategorie wirken nur auf künftige Buchungen. Nicht mehr getrackte Objektaufträge werden gelöscht; bereits gebuchte Transaktionen bleiben erhalten.
 
 ### 7.2 Scheduler (Service `worker`, pg-boss)
 | Job | Takt | Aufgabe |
 |---|---|---|
+| `payroll.run` | täglich 03:45 | Basisgehalt je Kalendertag und Zuschlag auf tatsächlich erfasste Überstunden buchen |
 | `recurring.run` | stündlich | Fällige `recurring_rules` buchen (`next_run <= now()`), `next_run` fortschreiben, alles in einer Transaktion mit `FOR UPDATE SKIP LOCKED` |
 | `reminders` | täglich | Erinnerungen aus Kalender, Schlüsselfristen, Service-Terminen und Budgetgrenzen als `notifications` und E-Mail |
 | `budget.watch` | nach jeder Buchung | Schwellen 80 % und 100 % prüfen, Benachrichtigung und Webhook `budget.exceeded` |
