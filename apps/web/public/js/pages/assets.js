@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, esc, eur, fdate, fdatetime, empty, openForm, confirmBox, toast, parseAmount, todayStr, showSecret } from '../ui.js';
+import { $, esc, eur, fdate, fdatetime, empty, debounce, openForm, confirmBox, toast, parseAmount, todayStr, showSecret } from '../ui.js';
 import { loadBudgets } from './common.js';
 import { can, state } from '../app.js';
 
@@ -144,16 +144,30 @@ async function formPerson(o) {
 
 const actions = (id, perm) => `${can(`${perm}:update`) ? `<button class="btn ghost sm" data-edit="${id}">Bearbeiten</button>` : ''}${can(`${perm}:delete`) ? ` <button class="btn ghost sm" data-del="${id}">Löschen</button>` : ''}`;
 
-export async function render(view, params) {
+const SECTIONS = {
+  vehicles: { title: 'Fahrzeuge', desc: 'Fuhrpark, Service und Kosten', tabs: [['vehicles', 'Fahrzeuge']] },
+  properties: { title: 'Häuser', desc: 'Häuser, Wohnungen und Wartung', tabs: [['properties', 'Häuser']] },
+  people: { title: 'Personen', desc: 'Mitarbeiter, Familie und Externe', tabs: [['people', 'Personen']] },
+  keys: { title: 'Schlüssel', desc: 'Schlüsselbestand und Ausgabe', tabs: [['keys', 'Schlüssel']] },
+  manage: { title: 'Verwaltung', desc: 'Übersicht, Kosten, Protokoll und Auditlog', tabs: [['overview', 'Übersicht'], ['costs', 'Kosten'], ['log', 'Protokoll'], ['audit', 'Auditlog']] },
+};
+const LEGACY_TAB = { overview: 'manage', costs: 'manage', log: 'manage', audit: 'manage' };
+
+export async function render(view, params, section) {
   const D = {};
-  let keyFilter = null;
+  const initialFilter = (params?.get('filter') || '').match(/^(house|vehicle):([0-9a-f-]{36})$/i);
+  let keyFilter = initialFilter ? { type: initialFilter[1], id: initialFilter[2] } : null;
   let scannerActive = false;
   let cameraStream = null;
-  const tabs = [['overview', 'Übersicht'], ['keys', 'Schlüssel'], ['properties', 'Häuser'], ['vehicles', 'Fahrzeuge'], ['people', 'Personen'], ['costs', 'Kosten'], ['log', 'Protokoll']]
-    .filter(([k]) => can({ keys: 'key:read', properties: 'property:read', vehicles: 'vehicle:read', people: 'person:read' }[k] || 'key:read') || k === 'overview');
-  const initial = tabs.some(([k]) => k === params?.get('tab')) ? params.get('tab') : tabs[0][0];
-  view.innerHTML = `<div class="page-head"><div><h1>Schlüssel &amp; Objekte</h1><p>Häuser, Fahrzeuge, Schlüsselausgabe und Personen</p></div><div class="actions" id="a-actions"></div></div>
-    <div><div class="tabs">${tabs.map(([k, l]) => `<button data-tab="${k}" class="${k === initial ? 'on' : ''}">${l}</button>`).join('')}</div>${tabs.map(([k]) => `<div class="tab-panel ${k === initial ? 'on' : ''}" data-panel="${k}"></div>`).join('')}</div>`;
+  const legacy = params?.get('tab');
+  if (!SECTIONS[section]) section = SECTIONS[legacy] ? legacy : LEGACY_TAB[legacy] || 'vehicles';
+  const meta = SECTIONS[section];
+  const perms = { keys: 'key:read', properties: 'property:read', vehicles: 'vehicle:read', people: 'person:read', audit: 'audit:read' };
+  const tabs = meta.tabs.filter(([k]) => can(perms[k] || 'key:read') || k === 'overview');
+  const initial = tabs.some(([k]) => k === legacy) ? legacy : tabs[0]?.[0];
+  view.innerHTML = `<div class="page-head"><div><h1>${meta.title}</h1><p>${meta.desc}</p></div><div class="actions" id="a-actions"></div></div>
+    <div><div class="tabs" ${tabs.length < 2 ? 'hidden' : ''}>${tabs.map(([k, l]) => `<button data-tab="${k}" class="${k === initial ? 'on' : ''}">${l}</button>`).join('')}</div>${tabs.map(([k]) => `<div class="tab-panel ${k === initial ? 'on' : ''}" data-panel="${k}"></div>`).join('')}</div>`;
+  if (!tabs.length) { view.innerHTML += `<div class="card"><p class="muted">Keine Berechtigung.</p></div>`; return; }
 
   const ADD = { keys: ['key:create', 'Neuer Schlüssel'], properties: ['property:create', 'Neues Haus'], vehicles: ['vehicle:create', 'Neues Fahrzeug'], people: ['person:create', 'Neue Person'] };
   const cur = () => $('.tabs .on', view).dataset.tab;
@@ -210,6 +224,12 @@ export async function render(view, params) {
     async costs(el) {
       const c = await api.get('/assets/costs');
       el.innerHTML = `<div class="card"><div class="card-head"><h2>Laufende Objektkosten</h2><b>${eur(c.yearly_total)} / Jahr</b></div>${c.items.length ? `<table class="table"><thead><tr><th>Objekt</th><th>Typ</th><th>Intervall</th><th>Konto</th><th style="text-align:right">Betrag</th><th style="text-align:right">pro Jahr</th></tr></thead><tbody>${c.items.map((i) => `<tr><td>${esc(i.name)}</td><td>${ASSET_TYPE[i.type]}</td><td>${costIntervalText(i.interval, i.interval_count)}</td><td>${esc(i.budget_name || '–')}${i.tracking ? '' : ' <span class="tag warn">nicht verbucht</span>'}</td><td style="text-align:right">${eur(i.amount)}</td><td style="text-align:right">${i.interval === 'once' ? '–' : eur(i.yearly)}</td></tr>`).join('')}</tbody></table>` : empty('Keine Kosten erfasst.')}</div>`;
+    },
+    async audit(el) {
+      const q = el._q || '';
+      const rows = await api.get(`/admin/audit?limit=200${q ? `&q=${encodeURIComponent(q)}` : ''}`);
+      el.innerHTML = `<div class="card"><div class="toolbar"><input id="a-q" placeholder="Suchen…" value="${esc(q)}" style="max-width:260px">${can('audit:export') ? '<button class="btn ghost sm" id="a-csv">CSV-Export</button>' : ''}</div>${rows.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Zeit</th><th>Benutzer</th><th>Aktion</th><th>Objekt</th><th>IP</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${fdatetime(r.created_at)}</td><td>${esc(r.user_name || 'System')}</td><td><code>${esc(r.action)}</code></td><td>${esc(r.entity || '')}</td><td>${esc(r.ip || '')}</td></tr>`).join('')}</tbody></table></div>` : empty('Keine Einträge.')}</div>`;
+      $('#a-q', el).addEventListener('input', debounce(async (e) => { el._q = e.target.value.trim(); await R.audit(el); const n = $('#a-q', el); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 400));
     },
     async log(el) {
       const l = await api.get('/assets/log');
@@ -295,7 +315,7 @@ export async function render(view, params) {
           const scanned = new URL(result.rawValue, location.origin);
           const [route, query = ''] = scanned.hash.split('?');
           const values = new URLSearchParams(query);
-          if (scanned.origin !== location.origin || route !== '#/assets' || values.get('tab') !== 'keys' || !/^[0-9a-f-]{36}$/i.test(values.get('key') || '')) {
+          if (scanned.origin !== location.origin || !['#/assets', '#/assets-keys'].includes(route) || values.get('tab') !== 'keys' || !/^[0-9a-f-]{36}$/i.test(values.get('key') || '')) {
             toast('Der QR-Code verweist nicht auf einen gültigen Schlüssel in dieser App.', true);
             close();
             return;
@@ -335,12 +355,14 @@ export async function render(view, params) {
       else if (g('[data-manage-keys]')) {
         const [type, assetId] = g('[data-manage-keys]').dataset.manageKeys.split(':');
         keyFilter = { type, id: assetId };
-        $('.tabs [data-tab="keys"]', view)?.click();
+        location.hash = `#/assets-keys?filter=${type}:${assetId}`;
+        return;
       } else if (g('[data-clear-key-filter]')) { keyFilter = null; show('keys'); }
       else if (g('[data-reveal-pin]')) await pinAccess(g('[data-reveal-pin]').dataset.revealPin, true);
       else if (g('[data-set-pin]')) { await pinAccess(g('[data-set-pin]').dataset.setPin, false); show('properties'); }
       else if (g('[data-qr]')) await showKeyQr(g('[data-qr]').dataset.qr);
       else if (g('#scan-keys')) await scanKeyQr();
+      else if (g('#a-csv')) await api.download('/admin/audit/export.csv', 'audit.csv');
       if (changed) show();
     } catch (x) { toast(x.message, true); }
   });

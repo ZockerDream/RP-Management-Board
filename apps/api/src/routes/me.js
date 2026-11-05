@@ -10,6 +10,7 @@ import {
 import { checkPassword } from './auth.js';
 import { getSetting } from '../settings.js';
 import { audit } from '../audit.js';
+import { payrollRun } from '../jobs.js';
 
 const publicUser = (u) => ({
   id: u.id, email: u.email, name: u.name, locale: u.locale, currency: u.currency, timezone: u.timezone, week_start: u.week_start,
@@ -64,6 +65,7 @@ export default async function routes(app) {
     if (keys.length) {
       await q(`UPDATE users SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(', ')}, updated_at=now() WHERE id=$1`, [req.user.id, ...keys.map((k) => updates[k])]);
     }
+    if (b.payroll_budget_id) payrollRun(req.log).catch((err) => req.log.error({ err }, 'Gehaltslauf fehlgeschlagen'));
     return publicUser(await one('SELECT * FROM users WHERE id=$1', [req.user.id]));
   });
 

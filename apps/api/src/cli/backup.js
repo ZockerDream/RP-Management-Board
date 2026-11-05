@@ -18,7 +18,14 @@ if (cmd === 'list') {
   const src = fs.existsSync(arg) ? arg : path.join(config.backupDir, arg);
   const tmp = path.join(os.tmpdir(), `restore-${Date.now()}.dump`);
   const file = decryptBackup(src, tmp);
-  const r = spawnSync('pg_restore', ['--clean', '--if-exists', '--no-owner', '--single-transaction', '--dbname', config.databaseUrl, file], { stdio: 'inherit' });
+  // Die Job-Warteschlange (pgboss) bleibt unangetastet: Ihre partitionierten Tabellen und das Schema
+  // lassen sich mit --clean nicht löschen, und --exclude-schema würde das Schema trotzdem droppen.
+  const toc = `${tmp}.toc`;
+  const list = spawnSync('pg_restore', ['--list', file], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  if (list.status !== 0) throw new Error(`pg_restore --list fehlgeschlagen: ${list.stderr}`);
+  fs.writeFileSync(toc, list.stdout.split('\n').filter((line) => !/\bpgboss\b/.test(line)).join('\n'));
+  const r = spawnSync('pg_restore', ['--clean', '--if-exists', '--no-owner', '--single-transaction', '--use-list', toc, '--dbname', config.databaseUrl, file], { stdio: 'inherit' });
+  fs.rmSync(toc, { force: true });
   fs.rmSync(tmp, { force: true });
   console.log(r.status === 0 ? 'Wiederherstellung abgeschlossen.' : `pg_restore beendet mit Code ${r.status}`);
   process.exitCode = r.status ?? 1;

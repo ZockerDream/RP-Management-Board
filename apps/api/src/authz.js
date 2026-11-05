@@ -67,7 +67,7 @@ export async function loadAccess(userId) {
   return v;
 }
 
-function ipAllowed(ip, list) {
+export function ipAllowed(ip, list) {
   const items = list.split(/[\s,]+/).filter(Boolean);
   if (!items.length) return true;
   return items.some((i) => i === ip || (i.endsWith('.*') && ip.startsWith(i.slice(0, -1))) || ip === `::ffff:${i}`);

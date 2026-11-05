@@ -1,6 +1,7 @@
 /* Card */
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; min-width: 0; }
-.card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 10px; }
+.card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 10px; }
+.card-head .row { flex-wrap: wrap; justify-content: flex-start; gap: 8px; }
 .card-head h2 { font-size: 14px; font-weight: 600; }
 .card-head small, .muted { color: var(--muted); }
 .card.flat { border-color: transparent; background: var(--surface-2); }
@@ -124,6 +125,8 @@ label.field > :is(input, select) { margin-top: 6px; color: var(--text); font-siz
 .list-item small { color: var(--muted); display: block; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { background: var(--surface-2); color: var(--muted); padding: 2px 10px; border-radius: 99px; font-size: 12px; }
+/* calendar.css definiert .chip für Kalendereinträge als Block; Chip-Listen bleiben einzeilig */
+.chips .chip { display: inline-block; width: auto; color: var(--muted); padding: 2px 10px; border-radius: 99px; }
 .note { background: var(--warn-soft); color: var(--warn); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13px; }
 .note.info { background: var(--surface-2); color: var(--muted); }
 .setting { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--border); }

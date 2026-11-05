@@ -176,9 +176,9 @@ export async function reminders(log) {
   const soon = addInterval(t, 'daily', 14);
   const kitSoon = addInterval(t, 'daily', 30);
   for (const v of await many(`SELECT id, plate, make_model, service_due, odometer_km, service_due_km, first_aid_kit_expires_on, owner_user_id, team_id
-    FROM vehicles WHERE (service_due IS NOT NULL AND service_due <= $2)
+    FROM vehicles WHERE (service_due IS NOT NULL AND service_due <= $1)
       OR (odometer_km IS NOT NULL AND service_due_km IS NOT NULL AND odometer_km >= service_due_km)
-      OR (first_aid_kit_expires_on IS NOT NULL AND first_aid_kit_expires_on <= $3)`, [t, soon, kitSoon])) {
+      OR (first_aid_kit_expires_on IS NOT NULL AND first_aid_kit_expires_on <= $2)`, [soon, kitSoon])) {
     const users = v.owner_user_id
       ? [v.owner_user_id]
       : (await many('SELECT user_id FROM team_members WHERE team_id=$1', [v.team_id])).map((member) => member.user_id);
@@ -200,7 +200,7 @@ export async function reminders(log) {
     }
   }
   for (const a of await many(`SELECT a.id, k.label, k.owner_user_id, k.team_id, a.due_at FROM key_assignments a JOIN keys k ON k.id=a.key_id
-    WHERE a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at IS NOT NULL AND a.due_at <= $2`, [t, soon])) {
+    WHERE a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at IS NOT NULL AND a.due_at <= $1`, [soon])) {
     const users = a.owner_user_id
       ? [a.owner_user_id]
       : (await many('SELECT user_id FROM team_members WHERE team_id=$1', [a.team_id])).map((member) => member.user_id);

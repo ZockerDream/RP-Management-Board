@@ -65,6 +65,8 @@ app.setErrorHandler((err, req, reply) => {
   }
   if (err instanceof HttpError) return reply.status(err.status).send({ error: err.code || 'error', message: err.message });
   if (err.statusCode && err.statusCode < 500) return reply.status(err.statusCode).send({ error: err.code || 'error', message: err.message });
+  // Von PostgreSQL abgelehnte Werte (keine gültige UUID, nicht existierendes Datum) sind Eingabefehler
+  if (['22P02', '22007', '22008'].includes(err.code)) return reply.status(400).send({ error: 'validation', message: 'Ungültige Eingabe' });
   req.log.error({ err }, 'Unbehandelter Fehler');
   return reply.status(500).send({ error: 'internal', message: 'Interner Fehler' });
 });
@@ -88,7 +90,7 @@ await waitForDb();
 await migrate(app.log);
 await seed(app.log);
 
-const modules = ['auth', 'me', 'finance', 'teams', 'objects', 'calendar', 'admin', 'attachments', 'work', 'integrations', 'public'];
+const modules = ['auth', 'me', 'finance', 'teams', 'objects', 'calendar', 'admin', 'attachments', 'work', 'integrations', 'spending', 'sport', 'public'];
 await app.register(
   async (api) => {
     for (const m of modules) await api.register((await import(`./routes/${m}.js`)).default);

@@ -3,8 +3,6 @@ import { $, esc, eur, empty, budgetTag, progress, openForm, confirmBox, toast, p
 import { loadBudgets } from './common.js';
 import { can } from '../app.js';
 
-const PERIODS = [{ v: 'daily', l: 'Täglich' }, { v: 'weekly', l: 'Wöchentlich' }, { v: 'monthly', l: 'Monatlich' }, { v: 'yearly', l: 'Jährlich' }, { v: 'custom', l: 'Benutzerdefiniert' }, { v: 'goal', l: 'Sparziel' }];
-const periodLabel = (b) => (b.period_type === 'custom' ? `${fdate(b.period_start)} – ${fdate(b.period_end)}` : PERIODS.find((p) => p.v === b.period_type)?.l);
 
 async function budgetForm(b) {
   const teams = !b && can('team:read') ? (await api.get('/teams')).filter((t) => t.role !== 'viewer') : [];
@@ -12,15 +10,11 @@ async function budgetForm(b) {
     { name: 'name', label: 'Name', value: b?.name, required: true, full: true },
     ...(b ? [] : [{ name: 'type', label: 'Typ', type: 'select', options: [{ v: 'solo', l: 'Solo' }, ...(teams.length ? [{ v: 'shared', l: 'Geteilt (Team)' }] : [])], value: 'solo' },
       { name: 'team_id', label: 'Team (bei geteilt)', type: 'select', options: teams.map((t) => ({ v: t.id, l: t.name })), value: teams[0]?.id }]),
-    { name: 'limit_amount', label: 'Limit', value: b ? String(b.limit_amount).replace('.', ',') : '', placeholder: '0,00' },
-    { name: 'period_type', label: 'Zeitraum', type: 'select', options: PERIODS, value: b?.period_type || 'monthly' },
-    { name: 'period_start', label: 'Von (nur Zeitraum)', type: 'date', value: b?.period_start?.slice(0, 10) },
-    { name: 'period_end', label: 'Bis (nur Zeitraum)', type: 'date', value: b?.period_end?.slice(0, 10) },
   ];
   return openForm({
     title: b ? 'Konto bearbeiten' : 'Neues Konto', fields,
     onSubmit: async (v) => {
-      const body = { name: v.name.trim(), limit_amount: parseAmount(v.limit_amount || '0'), period_type: v.period_type, period_start: v.period_type === 'custom' ? v.period_start || null : null, period_end: v.period_type === 'custom' ? v.period_end || null : null };
+      const body = { name: v.name.trim() };
       if (b) await api.patch(`/budgets/${b.id}`, body);
       else await api.post('/budgets', { ...body, type: v.type, team_id: v.type === 'shared' ? v.team_id : null });
       toast('Konto gespeichert');
@@ -55,8 +49,10 @@ export async function render(view) {
     const cur = list.find((b) => b.id === sel);
     $('#b-body').innerHTML = (list.length ? `<div class="grid cols-3">${list.map((b) => `<div class="card stack" data-sel="${b.id}" style="cursor:pointer;${b.id === sel ? 'outline:2px solid var(--primary)' : ''}">
       <div class="row"><b>${esc(b.name)}</b>${budgetTag(b.type, b.type === 'solo' ? 'Persönlich' : 'Geteilt')}</div>
-      <small class="muted">${periodLabel(b)}${b.team_name ? ` · Team „${esc(b.team_name)}“` : ''}</small>
-      <div class="row"><b>${eur(b.used)}</b><span class="muted">von ${eur(b.limit_amount)}</span></div>${progress(b.pct)}
+      <small class="muted">${b.team_name ? `Team „${esc(b.team_name)}“` : 'Persönliches Konto'}</small>
+      <div class="row"><b>${eur(b.balance)}</b><span class="muted">Kontostand</span></div>
+      <div class="row"><span class="muted">Einkommen</span><b style="color:var(--success,#16a34a)">${eur(b.income)}</b></div>
+      <div class="row"><span class="muted">Ausgaben</span><b>${eur(b.expenses)}</b></div>
       <div class="chips">${b.categories.slice(0, 4).map((c) => `<span class="chip">${esc(c.name)}</span>`).join('')}</div>
       <div class="row">${can('budget:update') ? `<button class="btn ghost sm" data-edit="${b.id}">Bearbeiten</button>` : ''}${can('budget:delete') && b.role === 'owner' ? `<button class="btn ghost sm" data-del="${b.id}">Löschen</button>` : ''}</div></div>`).join('')}</div>` : `<div class="card">${empty('Noch keine Konten vorhanden.')}</div>`)
       + (cur ? `<div class="card"><div class="card-head"><h2>Kategorien · ${esc(cur.name)}</h2>${can('budget:update') ? '<button class="btn ghost sm" id="c-new">Kategorie hinzufügen</button>' : ''}</div>

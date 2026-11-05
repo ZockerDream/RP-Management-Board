@@ -29,7 +29,12 @@ async function decorate(b, role, teamName) {
      FROM categories c WHERE c.budget_id=$1 ORDER BY c.name`,
     [b.id, ...periodRange(b)],
   );
-  return { ...b, role, team_name: teamName || null, used, pct: lim > 0 ? Math.round((Number(used) / lim) * 1000) / 10 : 0, categories: cats };
+  const totals = await one(
+    `SELECT COALESCE(sum(amount) FILTER (WHERE type='income'),0) income, COALESCE(sum(amount) FILTER (WHERE type='expense'),0) expenses
+     FROM transactions WHERE budget_id=$1 AND booked_at <= $2`,
+    [b.id, today()],
+  );
+  return { ...b, role, team_name: teamName || null, income: totals.income, expenses: totals.expenses, balance: (Number(totals.income) - Number(totals.expenses)).toFixed(2), used, pct: lim > 0 ? Math.round((Number(used) / lim) * 1000) / 10 : 0, categories: cats };
 }
 
 export default async function routes(app) {
@@ -444,7 +449,7 @@ export default async function routes(app) {
       [ids, from, to],
     );
     const saldo = await one(
-      `SELECT COALESCE(sum(CASE WHEN type='expense' THEN -amount ELSE amount END),0) s FROM transactions WHERE budget_id = ANY($1) AND booked_at <= $2`,
+      `SELECT COALESCE(sum(CASE type WHEN 'income' THEN amount WHEN 'expense' THEN -amount ELSE 0 END),0) s FROM transactions WHERE budget_id = ANY($1) AND booked_at <= $2`,
       [ids, today()],
     );
     return { from, to, income: k.income, expense: k.expense, deposit: k.deposit, balance: (Number(k.income) - Number(k.expense)).toFixed(2), saldo: saldo.s };
@@ -465,8 +470,8 @@ export default async function routes(app) {
       `SELECT to_char(m, 'YYYY-MM') AS month,
          COALESCE(sum(t.amount) FILTER (WHERE t.type='income'),0) income, COALESCE(sum(t.amount) FILTER (WHERE t.type='expense'),0) expense
        FROM generate_series(date_trunc('month', now()) - ($2 || ' months')::interval + interval '1 month', date_trunc('month', now()), interval '1 month') m
-       LEFT JOIN transactions t ON t.budget_id = ANY($1) AND date_trunc('month', t.booked_at) = m GROUP BY m ORDER BY m`,
-      [ids, String(f.months)],
+       LEFT JOIN transactions t ON t.budget_id = ANY($1) AND date_trunc('month', t.booked_at) = m AND ($3::date IS NULL OR t.booked_at <= $3) GROUP BY m ORDER BY m`,
+      [ids, String(f.months), f.to ?? null],
     );
   });
 

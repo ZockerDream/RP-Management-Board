@@ -66,7 +66,7 @@ export async function render(view) {
     <div class="grid cols-5" id="work-kpis">
       <div class="card kpi"><span class="label">Arbeitsstunden</span><span class="value" id="work-kpi-hours">–</span></div>
       <div class="card kpi"><span class="label">Einträge im Zeitraum</span><span class="value" id="work-kpi-entries">–</span></div>
-      <div class="card kpi"><span class="label" id="work-kpi-target-label">Aktive Projekte</span><span class="value" id="work-kpi-target">–</span></div>
+      <div class="card kpi"><span class="label">Wochen-Soll</span><span class="value" id="work-kpi-target">–</span></div>
       <div class="card kpi" id="work-kpi-overtime" hidden><span class="label">Überstunden-Saldo</span><span class="value" id="work-kpi-overtime-value">–</span></div>
       <div class="card kpi" id="work-kpi-pay" hidden><span class="label">Vergütung</span><span class="value" id="work-kpi-pay-value">–</span></div>
     </div>
@@ -102,9 +102,8 @@ export async function render(view) {
   async function loadProjects() {
     projects = await api.get('/work-projects');
     updateProjectOptions();
-    if ($('#work-mode').value !== 'month') $('#work-kpi-target').textContent = projects.filter((project) => project.active).length;
-    $('#project-list').innerHTML = projects.length ? projects.map((p) => `<div class="list-item"><div class="grow"><b>${esc(p.name)}</b><small>${p.team_name ? `Team: ${esc(p.team_name)}` : 'Privat'} · ${p.active ? 'Aktiv' : 'Archiviert'}</small></div>
-      <button class="btn ghost sm" data-project-toggle="${p.id}">${p.active ? 'Archivieren' : 'Aktivieren'}</button>${p.owner_user_id ? ` <button class="btn ghost sm" data-project-delete="${p.id}">Löschen</button>` : ''}</div>`).join('') : empty('Noch keine Projekte angelegt.');
+        $('#project-list').innerHTML = projects.length ? projects.map((p) => `<div class="list-item"><div class="grow"><b>${esc(p.name)}</b><small>${p.team_name ? `Team: ${esc(p.team_name)}` : 'Privat'} · ${p.active ? 'Aktiv' : 'Archiviert'}</small></div>
+      <button class="btn ghost sm" data-project-toggle="${p.id}">${p.active ? 'Archivieren' : 'Aktivieren'}</button> <button class="btn ghost sm" data-project-delete="${p.id}">Löschen</button></div>`).join('') : empty('Noch keine Projekte angelegt.');
   }
   async function loadTimer() {
     timer = await api.get('/work-hours/timer');
@@ -132,8 +131,7 @@ export async function render(view) {
     $('#work-kpi-entries').textContent = entries.length;
     $('#work-kpi-overtime').hidden = mode !== 'month';
     $('#work-kpi-pay').hidden = mode !== 'month';
-    $('#work-kpi-target-label').textContent = mode === 'month' ? 'Monats-Soll' : 'Aktive Projekte';
-    $('#work-kpi-target').textContent = mode === 'month' ? hoursText(result.target_hours) : projects.filter((project) => project.active).length;
+    $('#work-kpi-target').textContent = hoursText(state.me.weekly_work_hours ?? 40);
     $('#work-kpi-overtime-value').textContent = mode === 'month' ? `${result.overtime_balance >= 0 ? '+' : ''}${hoursText(result.overtime_balance)}` : '–';
     $('#work-kpi-pay-value').textContent = mode === 'month' ? payText(result.total_pay) : '–';
     const generalEntries = entries.filter((item) => !item.project_id);
@@ -157,7 +155,7 @@ export async function render(view) {
       return `<div class="card"><div class="card-head"><div class="grow"><h3>${esc(member.name)}</h3>
         <small>Gesamt ${hoursText(member.total_hours)} · Überstunden ${hoursText(member.overtime_hours)} · Vergütung ${payText(member.total_pay, member.currency)}</small></div>
         <button class="btn ghost sm" data-team-settings="${member.user_id}">Mitarbeitereinstellungen</button></div>
-        <p class="muted">Soll ${hoursText(member.target_hours)} · Stundenlohn ${payText(member.hourly_rate, member.currency)} · Zuschlag ${Number(member.overtime_surcharge_percent).toLocaleString('de-DE')} %</p>
+        <p class="muted">Wochen-Soll ${hoursText(member.weekly_target)} · Stundenlohn ${payText(member.hourly_rate, member.currency)} · Zuschlag ${Number(member.overtime_surcharge_percent).toLocaleString('de-DE')} %</p>
         <h4>Allgemeine Arbeitszeiten</h4>${entriesTable(general)}<h4 style="margin-top:16px">Projektzeiten</h4>${entriesTable(project)}</div>`;
     }).join('') : empty('Keine aktiven Teammitglieder gefunden.');
   }
