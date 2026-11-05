@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { one, many, q, tx } from '../db.js';
 import { config } from '../config.js';
-import { adminOnly, bad, notFound, forbidden, invalidatePermCache, PERMISSION_CATALOG } from '../authz.js';
+import { adminOnly, bad, notFound, forbidden, invalidatePermCache, ipAllowed, PERMISSION_CATALOG } from '../authz.js';
 import { hashPassword, encrypt, randomToken } from '../security.js';
 import { allSettings, setSettings, jobStatus, DEFAULTS } from '../settings.js';
 import { createInvitation } from './teams.js';
@@ -96,7 +96,7 @@ export default async function routes(app) {
     const u = await one('SELECT * FROM users WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
     if (!u) throw notFound();
     const b = userBody.partial().extend({ status: z.enum(['active', 'locked', 'disabled']).optional(), force_2fa: z.boolean().optional() }).parse(req.body);
-    if (b.status && b.status !== 'active' && (await isAdmin(u.id))) await lastAdminGuard(u.id);
+    if (((b.status && b.status !== 'active') || b.expires_at) && (await isAdmin(u.id))) await lastAdminGuard(u.id);
     await tx(async (c) => {
       for (const k of ['name', 'email', 'status', 'expires_at', 'max_budgets', 'force_2fa']) {
         if (k in b) await c.query(`UPDATE users SET ${k}=$2, updated_at=now() WHERE id=$1`, [u.id, b[k] ?? null]);
@@ -268,6 +268,8 @@ export default async function routes(app) {
   }));
   app.put('/admin/settings', A('settings:update'), async (req) => {
     const b = z.record(z.union([z.string().max(500), z.number(), z.boolean()])).parse(req.body);
+    const allowlist = b['security.admin_ip_allowlist'];
+    if (typeof allowlist === 'string' && !ipAllowed(req.ip, allowlist)) throw bad(`Admin-IP-Allowlist muss deine aktuelle IP (${req.ip}) enthalten, sonst sperrst du dich aus`);
     await setSettings(b);
     await audit(req, 'settings.updated', 'settings', null, { keys: Object.keys(b).filter((k) => k in DEFAULTS) });
     return { ok: true };

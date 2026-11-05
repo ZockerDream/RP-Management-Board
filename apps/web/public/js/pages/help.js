@@ -74,6 +74,22 @@ const sections = [
     text: 'Strecken gehören immer einem Team. Du siehst sie nur als Mitglied dieses Teams. Anlegen können sie Team-Owner und -Editoren; als Viewer kannst du Ergebnisse eintragen, aber keine Strecken verwalten.',
   },
   {
+    title: 'Teams und Rollen',
+    text: 'In „Teams“ lädst du Mitglieder ein und vergibst Rollen. Owner dürfen alles, Editoren buchen und bearbeiten, Viewer sehen nur und tragen Sportergebnisse ein. Ein Team braucht immer mindestens einen Owner; als letzter Owner kannst du es erst verlassen, wenn du die Rolle weitergegeben hast. Mit „Verlassen“ verlässt du ein Team selbst.',
+  },
+  {
+    title: 'Häufige Fragen: Warum fehlt eine Buchung im Saldo?',
+    text: 'Dashboard und Kontostand zeigen nur, was heute wirklich auf dem Konto ist: Einnahmen minus Ausgaben bis zum heutigen Tag. Eine Buchung mit Datum in der Zukunft zählt erst ab diesem Datum, steht aber schon unter „Transaktionen“. Einzahlungen auf ein Sparziel ändern den Saldo nicht, denn das Geld bleibt auf dem Konto und ist nur für das Ziel vorgemerkt.',
+  },
+  {
+    title: 'Häufige Fragen: Warum darf ich ein Team-Objekt nicht speichern?',
+    text: 'Als Viewer eines Teams kannst du dessen Objekte ansehen, aber nicht ändern. Beim Speichern erscheint dann ein Hinweis. Bitte einen Team-Owner, dir die Rolle Editor zu geben.',
+  },
+  {
+    title: 'Häufige Fragen: Warum kann ich einen Kalendertermin nicht ändern?',
+    text: 'Automatische Termine wie Zahlungen, Service oder Feiertage stammen aus anderen Bereichen und sind schreibgeschützt. Ändere sie dort, wo sie entstehen, zum Beispiel beim Fahrzeug oder Dauerauftrag. Eigene Termine kannst du per Klick bearbeiten und löschen.',
+  },
+  {
     title: 'Häufige Fragen: Was tun, wenn ein Schlüssel verloren geht?',
     text: 'Öffne „Schlüssel“, gehe zum passenden Schlüssel und wähle bei der ausgegebenen Kopie „verloren“. Die Kopie bleibt im Inventar als verloren sichtbar und kann nicht erneut ausgegeben werden.',
   },

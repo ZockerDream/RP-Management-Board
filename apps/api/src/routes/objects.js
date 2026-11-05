@@ -17,7 +17,8 @@ const ownerSql = (alias, n = '$1') => `(${alias}.owner_user_id=${n} OR ${alias}.
 async function assertOwner(req, row, write = false) {
   if (row.owner_user_id === req.user.id) return;
   const member = row.team_id && await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [row.team_id, req.user.id]);
-  if (!member || (write && member.team_role === 'viewer')) throw notFound();
+  if (!member) throw notFound();
+  if (write && member.team_role === 'viewer') throw forbidden('Nur Team-Owner und -Editoren dürfen Team-Objekte ändern');
 }
 
 async function ownerValues(req, body) {

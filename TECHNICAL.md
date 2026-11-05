@@ -16,15 +16,16 @@ Die Oberfläche verwendet den Begriff „Konto“. API-Routen und Tabellen heiß
 | Jobs | `pg-boss` im Service `worker` | Keine zusätzliche Redis-Abhängigkeit |
 | Auth | Argon2, JWT + Refresh-Token, TOTP (`otplib`) | siehe 6 |
 | Sonstiges | `pdfkit`, `qrcode`, `nodemailer`, `date-holidays` | |
-| Tests | `node --test` | Unit-Tests ohne Datenbank; End-to-End siehe 9 |
+| Tests | `node --test` | Unit-Tests ohne Datenbank; End-to-End mit Playwright siehe 9 |
 
 ## 2. Repository-Struktur
 
 ```
 budget-manager/
 ├── docker-compose.yml, .env.example, .env-impressum.example
-├── CLAUDE.md, CONCEPT.md, README.md, TECHNICAL.md
+├── AGENTS.md, CLAUDE.md, CONCEPT.md, README.md, TECHNICAL.md
 ├── scripts/                 # gen-secrets.sh, update.sh
+├── tests/e2e/               # API-, Auth- und Browser-Tests gegen einen Wegwerf-Stack
 └── apps/
     ├── api/
     │   ├── Dockerfile, migrations/NNN_*.sql, test/
@@ -73,7 +74,7 @@ goals(id, budget_id, name, target_amount, target_date, installment_amount, insta
 attachments(id, transaction_id, storage_key, mime, size, sha256)
 spending_budgets(id, owner_user_id, name, budget_id, category_id, limit_amount, period_type[daily|weekly|monthly|yearly])
 ```
-Der Kontostand wird berechnet: `balance = Einnahmen − Ausgaben`. Das Dashboard berechnet seinen Gesamtsaldo getrennt und zählt Einzahlungen mit (siehe offene Punkte in CONCEPT.md). Sparziel-Fortschritt = Summe der `deposit`-Buchungen mit `goal_id`. Ein Budget zählt Ausgaben im aktuellen Zeitraum (`periodRange`), geschnitten mit den für den Benutzer zugänglichen Konten; die Woche beginnt am Montag.
+Kontostand und Dashboard-Gesamtsaldo werden gleich berechnet: Einnahmen − Ausgaben mit `booked_at <= heute`; `deposit`-Buchungen bleiben außen vor. Das Dashboard begrenzt auch KPIs, Kategorien, Cashflow und letzte Buchungen per `to` auf heute. Sparziel-Fortschritt = Summe der `deposit`-Buchungen mit `goal_id`. Ein Budget zählt Ausgaben im aktuellen Zeitraum (`periodRange`), geschnitten mit den für den Benutzer zugänglichen Konten; die Woche beginnt am Montag.
 
 ### 4.3 Zeiterfassung und Gehalt
 ```
@@ -128,7 +129,7 @@ Automatische Termine werden beim Abruf aus den Quelltabellen abgeleitet, nicht d
 | Kalender | `GET /calendar?from=&to=`, `POST/PUT/DELETE /calendar/events`, `GET /calendar/ical/:token.ics` |
 | Sonstiges | `/integrations/:provider/*`, `/bug-reports`, `/attachments/:id`, `GET /public/imprint` |
 
-Fehlerformat: `{ error, message }`. Validierungsfehler und von PostgreSQL abgelehnte Werte (keine gültige UUID, nicht existierendes Datum) ergeben 400. Fremde Datensätze ergeben 404 oder eine leere Liste. Beträge werden als String ausgegeben.
+Fehlerformat: `{ error, message }`. Validierungsfehler und von PostgreSQL abgelehnte Werte (keine gültige UUID, nicht existierendes Datum) ergeben 400. Fremde Datensätze ergeben 404 oder eine leere Liste; Viewer erhalten beim Ändern von Team-Objekten 403. Beträge werden als String ausgegeben.
 
 ## 6. Sicherheit
 
@@ -183,7 +184,7 @@ Der Server liefert für `[from, to]` die Vereinigung aus eigenen Terminen und ab
 - **Logging:** JSON auf stdout, keine Passwörter oder Tokens.
 - **Backups:** verschlüsselter Dump; Wiederherstellung per `src/cli/backup.js restore` ohne das Schema `pgboss`, danach `docker compose restart api worker`.
 - **Updates:** `./scripts/update.sh`; Migrationen vorwärtskompatibel halten.
-- **Tests:** `npm test` in `apps/api` (Unit). End-to-End immer in einem eigenen Compose-Projekt mit eigenen Volumes und eigenem `APP_VERSION`, nie gegen die produktive Instanz; siehe [CLAUDE.md](CLAUDE.md).
+- **Tests:** `npm test` in `apps/api` (Unit). End-to-End immer in einem eigenen Compose-Projekt mit eigenen Volumes und eigenem `APP_VERSION`, nie gegen die produktive Instanz; siehe [tests/e2e/README.md](tests/e2e/README.md).
 
 ## 10. Grenzen
 

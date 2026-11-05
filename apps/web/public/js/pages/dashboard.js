@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, esc, eur, eur0, fdate, empty, budgetTag, MONTH_NAMES, monthStart, monthEnd } from '../ui.js';
+import { $, esc, eur, eur0, fdate, empty, budgetTag, MONTH_NAMES, monthStart, monthEnd, todayStr } from '../ui.js';
 import { areaChart, donut, gauge } from '../charts.js';
 import { txForm, loadBudgets } from './common.js';
 import { can, state } from '../app.js';
@@ -25,11 +25,13 @@ export async function render(view) {
   const eventsRequest = can('calendar:read') ? api.get('/calendar') : Promise.resolve([]);
 
   async function load() {
-    const from = monthStart(range), to = monthEnd(range);
+    // Das Dashboard zeigt nur den echten Stand: Buchungen mit Datum in der Zukunft zählen noch nicht
+    const now = todayStr();
+    const from = monthStart(range), to = monthEnd(range) > now ? now : monthEnd(range);
     const q = `scope=${scope}&from=${from}&to=${to}`;
     const [ov, cats, tl, budgets, txs, vehicles, events] = await Promise.all([
-      api.get(`/stats/overview?${q}`), api.get(`/stats/by-category?${q}`), api.get(`/stats/timeline?scope=${scope}&months=6`),
-      loadBudgets(), api.get(`/transactions?scope=${scope}&limit=6`).catch(() => ({ items: [] })),
+      api.get(`/stats/overview?${q}`), api.get(`/stats/by-category?${q}`), api.get(`/stats/timeline?scope=${scope}&months=6&to=${now}`),
+      loadBudgets(), api.get(`/transactions?scope=${scope}&limit=6&to=${now}`).catch(() => ({ items: [] })),
       vehiclesRequest, eventsRequest,
     ]);
     const inc = Number(ov.income), exp = Number(ov.expense);

@@ -35,7 +35,7 @@ Webanwendung zur Verwaltung persönlicher und geteilter Konten, kombiniert mit Z
 
 | Bereich | Tab | Funktionen |
 |---|---|---|
-| User-Management | Benutzer | Suche, Filter, Anlegen, Einladen, Bearbeiten, Sperren, 2FA erzwingen oder zurücksetzen, Sitzungen beenden, CSV-Export |
+| User-Management | Benutzer | Suche, Filter, Anlegen, Einladen, Bearbeiten, Sperren, Zugangsablauf, 2FA erzwingen oder zurücksetzen, Sitzungen beenden, CSV-Export; der letzte aktive Admin kann weder gesperrt noch befristet werden |
 | | Rollen & Rechte | Eigene Rollen, Rechte-Matrix je Ressource, Datenbereich (alle, eigene Gruppen, eigene Daten), Kontolimit pro Benutzer, Standardrolle |
 | | Gruppen | Mitglieder und Rollen, automatische Zuordnung per E-Mail-Domain, Gruppenleitung |
 | | Teams | Alle Teams mit Besitzer und Status |
@@ -51,10 +51,10 @@ Rechte-Modell (RBAC): `User → Rollen (direkt oder über Gruppe) → Permission
 ## 4. Finanzfunktionen
 
 ### 4.1 Dashboard
-Filter Solo / Team / Gesamt und Monat. KPI-Karten (Gesamtsaldo, Einnahmen, Ausgaben, Sparquote), Diagramme: Cashflow (Fläche), Ausgaben nach Kategorie (Donut), Konto-Auslastung (Gauges), dazu Fuhrpark, nächste Termine und letzte Buchungen. Alle Diagramme sind SVG.
+Filter Solo / Team / Gesamt und Monat. KPI-Karten (Gesamtsaldo, Einnahmen, Ausgaben, Sparquote), Diagramme: Cashflow (Fläche), Ausgaben nach Kategorie (Donut), Konto-Auslastung (Gauges), dazu Fuhrpark, nächste Termine und letzte Buchungen. Alle Diagramme sind SVG. Das Dashboard zeigt nur den echten Stand: Buchungen mit Datum in der Zukunft zählen erst ab diesem Datum, Sparziel-Einzahlungen ändern den Saldo nicht, weil das Geld auf dem Konto bleibt.
 
 ### 4.2 Konten
-Die Oberfläche nennt diese Finanzbereiche „Konten“; intern bleiben API und Datenbank aus Kompatibilitätsgründen bei `budgets` und `budget_id`. Zwei strikt getrennte Arten: `solo` (gehört einem User) und `shared` (gehört einem Team). Jede Karte zeigt Kontostand (Einkommen minus Ausgaben), Einkommen und Ausgaben. Das Formular fragt nur Name, Typ und Team ab; Ausgabenlimits werden als Budgets (4.3) gepflegt. Kategorien können eigene Limits haben.
+Die Oberfläche nennt diese Finanzbereiche „Konten“; intern bleiben API und Datenbank aus Kompatibilitätsgründen bei `budgets` und `budget_id`. Zwei strikt getrennte Arten: `solo` (gehört einem User) und `shared` (gehört einem Team). Jede Karte zeigt Kontostand (Einkommen minus Ausgaben bis heute), Einkommen und Ausgaben. Das Formular fragt nur Name, Typ und Team ab; Ausgabenlimits werden als Budgets (4.3) gepflegt. Kategorien können eigene Limits haben.
 
 ### 4.3 Budgets
 Ein Budget ist ein Ausgabenlimit: Name, Betrag und Zeitraum (Tag, Woche, Monat, Jahr), optional begrenzt auf ein Konto oder eine Kategorie. Die Karte zeigt laufenden Zeitraum, Verbrauch, Rest oder Überschreitung. Budgets gehören dem jeweiligen Benutzer; gezählt werden Ausgaben aller für ihn zugänglichen Konten, auch geteilter. Löschen eines Budgets lässt Buchungen unberührt.
@@ -143,6 +143,6 @@ Ein vorhandener Betreiber-Proxy kann optional TLS terminieren; er ist nicht Best
 
 ## 12. Offene Punkte
 
-- Sparziel-Einzahlungen zählen im Dashboard-Saldo als Plus, im Kontostand nicht; die gewünschte Regel ist noch festzulegen.
+- Viewer sehen an Team-Objekten „Bearbeiten“, erhalten aber beim Speichern eine Absage; die Knöpfe sollten ausgeblendet werden.
 - Die Karte „Konto-Auslastung“ ist für Konten ohne Limit wenig aussagekräftig; sie sollte entfallen oder auf Budgets umgestellt werden.
 - Nicht enthalten: SSO/OIDC, LDAP, Bankanbindung, MT940, S3/SFTP-Backupziele, E-Mail-Bestätigung bei Registrierung, Restore in der Oberfläche.

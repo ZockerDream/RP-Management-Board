@@ -1,6 +1,6 @@
 # Budget Manager
 
-Selbst gehostete Verwaltung persönlicher und geteilter Konten: Buchungen, Ausgaben-Budgets, Daueraufträge, Sparziele, Zeiterfassung mit Gehaltsgutschrift, Sport-Bestenlisten, Berichte, Teams, Kalender, Google-/Outlook-Sync, Objektverwaltung (Fahrzeuge, Häuser, Personen, Schlüssel), Rollen & Rechte, 2FA und verschlüsselte Backups. Konzept: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Projektwissen für die Weiterentwicklung mit Claude: [CLAUDE.md](CLAUDE.md).
+Selbst gehostete Verwaltung persönlicher und geteilter Konten: Buchungen, Ausgaben-Budgets, Daueraufträge, Sparziele, Zeiterfassung mit Gehaltsgutschrift, Sport-Bestenlisten, Berichte, Teams, Kalender, Google-/Outlook-Sync, Objektverwaltung (Fahrzeuge, Häuser, Personen, Schlüssel), Rollen & Rechte, 2FA und verschlüsselte Backups. Konzept: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Anleitung für KI-Assistenten mit allen Anforderungen: [AGENTS.md](AGENTS.md), Tests: [tests/e2e/README.md](tests/e2e/README.md).
 
 ## Architektur
 
