@@ -2,7 +2,12 @@ import { api, refresh, setToken, onLogout, hasToken } from './api.js';
 import { $, $$, esc, toast, setCurrency, bindPasswordToggles, passwordToggleButton } from './ui.js';
 import { md5 } from './md5.js';
 
-export const state = { me: null, perms: new Set(), mfaSetup: false };
+export const state = { me: null, perms: new Set(), mfaSetup: false, appName: 'Budget Manager' };
+export function applyAppName(name) {
+  state.appName = (name || '').trim() || 'Budget Manager';
+  document.title = state.appName;
+  document.querySelectorAll('[data-app-name]').forEach((n) => { n.textContent = state.appName; });
+}
 export const can = (p) => state.perms.has(p);
 
 const store = {
@@ -13,18 +18,31 @@ const store = {
 const PAGES = {
   dashboard: { perm: 'budget:read', load: () => import('./pages/dashboard.js') },
   impressum: { perm: null, load: () => import('./pages/imprint.js') },
+  datenschutz: { perm: null, load: () => import('./pages/privacy.js') },
   'bug-report': { perm: null, load: () => import('./pages/bug-report.js') },
   transactions: { perm: 'transaction:read', load: () => import('./pages/transactions.js') },
   work: { perm: null, load: () => import('./pages/work.js') },
+  spending: { perm: 'budget:read', load: () => import('./pages/spending.js') },
+  'sport-run': { perm: null, load: () => import('./pages/sport.js').then((m) => ({ render: (view) => m.render(view, 'run') })) },
+  'sport-swim': { perm: null, load: () => import('./pages/sport.js').then((m) => ({ render: (view) => m.render(view, 'swim') })) },
+  'sport-bike': { perm: null, load: () => import('./pages/sport.js').then((m) => ({ render: (view) => m.render(view, 'bike') })) },
   budgets: { perm: 'budget:read', load: () => import('./pages/budgets.js') },
   recurring: { perm: 'recurring:read', load: () => import('./pages/recurring.js') },
   goals: { perm: 'goal:read', load: () => import('./pages/goals.js') },
   reports: { perm: 'report:read', load: () => import('./pages/reports.js') },
   teams: { perm: 'team:read', load: () => import('./pages/teams.js') },
   calendar: { perm: 'calendar:read', load: () => import('./pages/calendar.js') },
+  'assets-vehicles': { perm: 'vehicle:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'vehicles') })) },
+  'assets-properties': { perm: 'property:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'properties') })) },
+  'assets-people': { perm: 'person:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'people') })) },
+  'assets-keys': { perm: 'key:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'keys') })) },
+  'assets-manage': { perm: 'key:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'manage') })) },
   assets: { perm: 'key:read', load: () => import('./pages/assets.js') },
   help: { perm: null, load: () => import('./pages/help.js') },
-  admin: { perm: 'admin:access', load: () => import('./pages/admin.js') },
+  'admin-users': { perm: 'admin:access', load: () => import('./pages/admin.js').then((m) => ({ render: (view, params) => m.render(view, params, 'users') })) },
+  'admin-server': { perm: 'admin:access', load: () => import('./pages/admin.js').then((m) => ({ render: (view, params) => m.render(view, params, 'server') })) },
+  'admin-tickets': { perm: 'admin:access', load: () => import('./pages/admin.js').then((m) => ({ render: (view, params) => m.render(view, params, 'tickets') })) },
+  admin: { perm: 'admin:access', load: () => import('./pages/admin.js').then((m) => ({ render: (view, params) => m.render(view, params, 'users') })) },
   settings: { perm: null, load: () => import('./pages/settings.js') },
 };
 
@@ -56,8 +74,8 @@ export function renderAvatars() {
 const authEl = $('#auth');
 const appEl = $('.app');
 
-const card = (title, lead, body) => `<div class="auth-card"><div class="auth-brand"><svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="bmg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#17171f"/><stop offset="1" stop-color="#08080b"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#bmg2)"/><rect x=".5" y=".5" width="31" height="31" rx="8.5" fill="none" stroke="#fff" stroke-opacity=".14"/><rect x="7" y="16" width="4.5" height="9" rx="2.25" fill="#fff" fill-opacity=".32"/><rect x="13.75" y="11" width="4.5" height="14" rx="2.25" fill="#fff" fill-opacity=".6"/><rect x="20.5" y="6" width="4.5" height="19" rx="2.25" fill="var(--primary)"/></svg><span>Budget Manager</span></div>
-  <h1>${esc(title)}</h1><p class="auth-lead">${lead}</p>${body}<p class="auth-lead" style="margin-top:14px"><a href="#/impressum">Impressum</a></p></div>`;
+const card = (title, lead, body) => `<div class="auth-card"><div class="auth-brand"><svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="bmg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#17171f"/><stop offset="1" stop-color="#08080b"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#bmg2)"/><rect x=".5" y=".5" width="31" height="31" rx="8.5" fill="none" stroke="#fff" stroke-opacity=".14"/><rect x="7" y="16" width="4.5" height="9" rx="2.25" fill="#fff" fill-opacity=".32"/><rect x="13.75" y="11" width="4.5" height="14" rx="2.25" fill="#fff" fill-opacity=".6"/><rect x="20.5" y="6" width="4.5" height="19" rx="2.25" fill="var(--primary)"/></svg><span data-app-name>${esc(state.appName)}</span></div>
+  <h1>${esc(title)}</h1><p class="auth-lead">${lead}</p>${body}<p class="auth-lead" style="margin-top:14px"><a href="#/impressum">Impressum</a> · <a href="#/datenschutz">Datenschutz</a></p></div>`;
 
 function authForm(id, fields, submit, extra = '') {
   return `<form id="${id}" class="auth-form" novalidate>${fields}<p class="auth-error" role="alert" hidden></p><button class="btn auth-submit" type="submit">${esc(submit)}</button></form>${extra}`;
@@ -138,7 +156,7 @@ function tokenScreen(kind, token) {
 }
 
 function registerScreen() {
-  showAuth(card('Konto erstellen', 'Registriere dich für Budget Manager.',
+  showAuth(card('Konto erstellen', `Registriere dich für ${esc(state.appName)}.`,
     authForm('reg', inp('name', 'Name', 'text', 'name') + inp('email', 'E-Mail', 'email', 'username') + inp('password', 'Passwort', 'password', 'new-password'), 'Registrieren', '<p class="auth-lead" style="margin-top:14px"><a href="#/login">Zurück</a></p>')));
   bind('reg', async (v) => {
     await api.post('/auth/register', v);
@@ -157,9 +175,13 @@ const parseHash = () => {
 let gen = 0;
 export async function route() {
   const { page, params } = parseHash();
-  if (!state.me && page === 'impressum') {
-    const mod = await PAGES.impressum.load();
-    return mod.render($('#auth'), params);
+  if (['impressum', 'datenschutz'].includes(page)) {
+    if (!state.me) {
+      authEl.classList.remove('hidden');
+      appEl.classList.add('hidden');
+      const mod = await PAGES[page].load();
+      return mod.render(authEl, params);
+    }
   }
   if (['reset', 'invite'].includes(page)) return tokenScreen(page, params.get('token') || '');
   if (!state.me) {
@@ -290,6 +312,8 @@ document.addEventListener('keydown', (e) => {
 window.addEventListener('hashchange', route);
 
 (async () => {
+  const cfg = await api.get('/auth/config').catch(() => null);
+  if (cfg) applyAppName(cfg.app_name);
   if (await refresh()) await boot();
   else { state.me = null; await route(); }
   if (!hasToken()) $('.auth-loading')?.remove();

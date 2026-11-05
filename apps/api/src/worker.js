@@ -21,6 +21,7 @@ for (const [name, job] of Object.entries(JOBS)) {
 }
 log.info(`Worker gestartet (${Object.keys(JOBS).join(', ')})`);
 await runJob('recurring.run', log);
+await runJob('payroll.run', log);
 
 const stop = async () => {
   await boss.stop({ graceful: true, timeout: 20000 });

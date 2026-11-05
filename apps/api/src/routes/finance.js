@@ -29,7 +29,12 @@ async function decorate(b, role, teamName) {
      FROM categories c WHERE c.budget_id=$1 ORDER BY c.name`,
     [b.id, ...periodRange(b)],
   );
-  return { ...b, role, team_name: teamName || null, used, pct: lim > 0 ? Math.round((Number(used) / lim) * 1000) / 10 : 0, categories: cats };
+  const totals = await one(
+    `SELECT COALESCE(sum(amount) FILTER (WHERE type='income'),0) income, COALESCE(sum(amount) FILTER (WHERE type='expense'),0) expenses
+     FROM transactions WHERE budget_id=$1`,
+    [b.id],
+  );
+  return { ...b, role, team_name: teamName || null, income: totals.income, expenses: totals.expenses, balance: (Number(totals.income) - Number(totals.expenses)).toFixed(2), used, pct: lim > 0 ? Math.round((Number(used) / lim) * 1000) / 10 : 0, categories: cats };
 }
 
 export default async function routes(app) {

@@ -173,8 +173,8 @@ export default async function routes(app) {
     const b = personSchema.partial().parse(req.body);
     const patch = { ...b };
     if (patch.scope) Object.assign(patch, await ownerValues(req, { scope: patch.scope, team_id: patch.team_id }));
+    else delete patch.team_id;
     delete patch.scope;
-    delete patch.team_id;
     const keys = Object.keys(patch);
     if (keys.length) await q(`UPDATE people SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1`, [req.params.id, ...keys.map((key) => patch[key])]);
     return { ok: true };
@@ -234,8 +234,8 @@ export default async function routes(app) {
       await checkCostBudget(req, merged);
       const patch = { ...b };
       if (patch.scope) Object.assign(patch, await ownerValues(req, { scope: patch.scope, team_id: patch.team_id }));
+      else delete patch.team_id;
       delete patch.scope;
-      delete patch.team_id;
       const keys = Object.keys(patch).filter((k) => [...K.cols, ...COST_COLS, 'owner_user_id', 'team_id'].includes(k));
       await tx(async (c) => {
         let after = before;
@@ -278,7 +278,7 @@ export default async function routes(app) {
   }, async (req) => {
     const credentials = z.object({ password: z.string().min(1), code: z.string().max(10).optional() }).parse(req.body);
     await reauthenticatePin(req, credentials);
-    const property = await one(`SELECT * FROM properties p WHERE p.id=$1 AND ${ownerSql('p')}`, [req.params.id, req.user.id]);
+    const property = await one(`SELECT * FROM properties p WHERE p.id=$1 AND ${ownerSql('p', '$2')}`, [req.params.id, req.user.id]);
     if (!property || !property.door_pin_enc) throw notFound('Kein Tür-PIN hinterlegt');
     await recordPinAccess(req, property.id, 'revealed');
     return { pin: decrypt(property.door_pin_enc) };
@@ -303,7 +303,7 @@ export default async function routes(app) {
   });
 
   app.get('/keys/:id/qr', authz('key:read'), async (req) => {
-    const key = await one(`SELECT k.id FROM keys k WHERE k.id=$1 AND ${ownerSql('k')}`, [req.params.id, req.user.id]);
+    const key = await one(`SELECT k.id FROM keys k WHERE k.id=$1 AND ${ownerSql('k', '$2')}`, [req.params.id, req.user.id]);
     if (!key) throw notFound();
     const url = `${config.appUrl}/#/assets?tab=keys&key=${encodeURIComponent(key.id)}`;
     return { image: await QRCode.toDataURL(url, { errorCorrectionLevel: 'M', margin: 2, width: 320 }) };

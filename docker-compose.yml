@@ -33,16 +33,6 @@ x-api-env: &api-env
   MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
   GITHUB_ISSUES_TOKEN: ${GITHUB_ISSUES_TOKEN:-}
   GITHUB_ISSUES_REPOSITORY: ${GITHUB_ISSUES_REPOSITORY:-ZockerDream/budget-manager}
-  IMPRINT_NAME: ${IMPRINT_NAME:-}
-  IMPRINT_REPRESENTATIVE: ${IMPRINT_REPRESENTATIVE:-}
-  IMPRINT_STREET: ${IMPRINT_STREET:-}
-  IMPRINT_POSTAL_CODE: ${IMPRINT_POSTAL_CODE:-}
-  IMPRINT_CITY: ${IMPRINT_CITY:-}
-  IMPRINT_EMAIL: ${IMPRINT_EMAIL:-}
-  IMPRINT_PHONE: ${IMPRINT_PHONE:-}
-  IMPRINT_REGISTER: ${IMPRINT_REGISTER:-}
-  IMPRINT_VAT_ID: ${IMPRINT_VAT_ID:-}
-  IMPRINT_RESPONSIBLE: ${IMPRINT_RESPONSIBLE:-}
   LOG_LEVEL: ${LOG_LEVEL:-info}
 
 x-hardening: &hardening
@@ -80,6 +70,9 @@ services:
       dockerfile: apps/api/Dockerfile
     image: budget-manager-api:${APP_VERSION:-latest}
     environment: *api-env
+    env_file:
+      - path: .env-impressum
+        required: false
     ports:
       - "${BIND_ADDR:-0.0.0.0}:${HTTP_PORT:-8080}:3000"
     volumes:

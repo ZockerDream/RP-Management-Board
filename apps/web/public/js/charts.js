@@ -20,7 +20,7 @@ export function areaChart(el, { labels, series, format = v => v, height = 260 })
   const id = 'a' + uid++;
   const W = el.clientWidth || 600, H = height;
   const pad = { l: 46, r: 12, t: 12, b: 28 };
-  const max = niceMax(Math.max(...series.flatMap(s => s.data)));
+  const max = niceMax(Math.max(...series.flatMap(s => s.data))) || 1;
   const n = labels.length;
   const x = i => pad.l + i * (W - pad.l - pad.r) / (n - 1);
   const y = v => pad.t + (H - pad.t - pad.b) * (1 - v / max);

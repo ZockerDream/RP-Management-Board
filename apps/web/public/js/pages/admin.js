@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { $, esc, eur, fdate, fdatetime, empty, openForm, confirmBox, toast, showSecret, debounce, tag } from '../ui.js';
 import { areaChart } from '../charts.js';
-import { can } from '../app.js';
+import { can, applyAppName } from '../app.js';
 
 const STATUS = { active: ['ok', 'Aktiv'], locked: ['warn', 'Gesperrt'], disabled: ['bad', 'Deaktiviert'], invited: ['', 'Eingeladen'] };
 const fmtBytes = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
@@ -9,12 +9,19 @@ const fmtUp = (s) => `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} m
 const errBox = (x) => `<div class="card"><p class="auth-error">${esc(x.message)}</p></div>`;
 const btn = (attr, label) => `<button class="btn ghost sm" ${attr}>${label}</button>`;
 
-export async function render(view) {
+const SECTIONS = {
+  users: { title: 'User-Management', desc: 'Benutzer, Rollen, Gruppen und Teams', tabs: ['users', 'roles', 'groups', 'teams'] },
+  server: { title: 'Server-Management', desc: 'Übersicht, Sicherheit, System, Integrationen und Audit-Log', tabs: ['overview', 'settings', 'system', 'integr', 'audit'] },
+  tickets: { title: 'Tickets', desc: 'Gemeldete Fehler und Anfragen', tabs: ['tickets'] },
+};
+
+export async function render(view, params, section) {
+  const meta = SECTIONS[section] || SECTIONS.users;
   const ALL = [['overview', 'Übersicht', 'admin:access'], ['tickets', 'Tickets', 'admin:access'], ['users', 'Benutzer', 'user:read'], ['roles', 'Rollen & Rechte', 'role:read'], ['groups', 'Gruppen', 'group:read'], ['teams', 'Teams', 'team:read'],
-    ['settings', 'Sicherheit & Einstellungen', 'settings:read'], ['system', 'System & Backups', 'settings:read'], ['integr', 'Integrationen', 'settings:read'], ['audit', 'Audit-Log', 'audit:read']].filter((t) => can(t[2]));
+    ['settings', 'Sicherheit & Einstellungen', 'settings:read'], ['system', 'System & Backups', 'settings:read'], ['integr', 'Integrationen', 'settings:read'], ['audit', 'Audit-Log', 'audit:read']].filter((t) => meta.tabs.includes(t[0]) && can(t[2]));
   const D = { roles: [], groups: [], users: [] };
-  view.innerHTML = `<div class="page-head"><div><h1>Verwaltung</h1><p>Benutzer, Rollen, Sicherheit und System</p></div><div class="actions" id="ad-actions"></div></div>
-    <div><div class="tabs">${ALL.map(([k, l], i) => `<button data-tab="${k}" class="${i ? '' : 'on'}">${l}</button>`).join('')}</div>${ALL.map(([k], i) => `<div class="tab-panel ${i ? '' : 'on'}" data-panel="${k}"></div>`).join('')}</div>`;
+  view.innerHTML = `<div class="page-head"><div><h1>${meta.title}</h1><p>${meta.desc}</p></div><div class="actions" id="ad-actions"></div></div>
+    <div><div class="tabs" ${ALL.length < 2 ? 'hidden' : ''}>${ALL.map(([k, l], i) => `<button data-tab="${k}" class="${i ? '' : 'on'}">${l}</button>`).join('')}</div>${ALL.map(([k], i) => `<div class="tab-panel ${i ? '' : 'on'}" data-panel="${k}"></div>`).join('')}</div>`;
   const cur = () => $('.tabs .on', view).dataset.tab;
 
   const loadRoles = async () => { const r = await api.get('/admin/roles'); D.roles = r.roles; D.catalog = r.catalog; };
@@ -164,7 +171,7 @@ export async function render(view) {
         e.preventDefault();
         const body = {};
         for (const i of e.target.querySelectorAll('input[name]')) body[i.name] = i.type === 'checkbox' ? i.checked : i.type === 'number' ? Number(i.value) : i.value;
-        try { await api.put('/admin/settings', body); toast('Einstellungen gespeichert'); } catch (x) { toast(x.message, true); }
+        try { await api.put('/admin/settings', body); if (body['general.app_name'] !== undefined) applyAppName(body['general.app_name']); toast('Einstellungen gespeichert'); } catch (x) { toast(x.message, true); }
       });
       $('#s-mail', el)?.addEventListener('click', async () => { try { await api.post('/admin/settings/test-mail'); toast('SMTP-Verbindung erfolgreich'); } catch (x) { toast(x.message, true); } });
     },
