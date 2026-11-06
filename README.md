@@ -1,13 +1,13 @@
 # Budget Manager
 
-Selbst gehostete Verwaltung persönlicher und geteilter Konten: Buchungen, Ausgaben-Budgets, Daueraufträge, Sparziele, Zeiterfassung mit Gehaltsgutschrift, Sport-Bestenlisten, Berichte, Teams, Kalender, Google-/Outlook-Sync, Objektverwaltung (Fahrzeuge, Häuser, Personen, Schlüssel), Rollen & Rechte, 2FA und verschlüsselte Backups. Konzept: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Anleitung für KI-Assistenten mit allen Anforderungen: [AGENTS.md](AGENTS.md), Tests: [tests/e2e/README.md](tests/e2e/README.md).
+Selbst gehostete Verwaltung persönlicher und geteilter Konten: Buchungen, Ausgaben-Budgets, Daueraufträge, Sparziele, Zeiterfassung mit Gehaltsgutschrift, Sport-Bestenlisten, Berichte, Teams, Kalender, Notizblock, ToDos mit Deadline-Benachrichtigung, Google-/Outlook-Sync, Objektverwaltung (Fahrzeuge, Häuser, Personen, Schlüssel), Rollen & Rechte, 2FA und verschlüsselte Backups. Konzept: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Anleitung für KI-Assistenten mit allen Anforderungen: [AGENTS.md](AGENTS.md), Tests: [tests/e2e/README.md](tests/e2e/README.md).
 
 ## Architektur
 
 | Service  | Image / Build        | Aufgabe                                              |
 |----------|----------------------|------------------------------------------------------|
 | `api`    | Node 22 / Fastify    | **einziger Einstiegspunkt** (Port 8080): SPA und REST-API, Auth (JWT + Refresh-Cookie), RBAC, 2FA |
-| `worker` | wie `api`            | Hintergrundjobs: Daueraufträge, Gehalt, Erinnerungen, Berichte, Backups |
+| `worker` | wie `api`            | Hintergrundjobs: Daueraufträge, Gehalt, Erinnerungen, ToDo-Deadlines, Berichte, Backups |
 | `db`     | PostgreSQL           | Datenhaltung (nur im internen Netz `backend`)        |
 
 Nur `api` veröffentlicht **einen** Port (`HTTP_PORT`, Standard 8080, plain HTTP) und liefert sowohl die Weboberfläche als auch `/api` direkt aus. Das Repository enthält keinen Reverse-Proxy und benötigt keinen. `db` bleibt im internen Netz, der Worker hat keinen veröffentlichten Port. Ein bereits vorhandener NGINX kann optional vor den App-Port geschaltet werden; seine Konfiguration und sein Container sind nicht Teil dieses Repositories. Container laufen mit gedroppten Capabilities, `no-new-privileges` und Healthchecks; Restart-Policy `unless-stopped`.
@@ -40,7 +40,7 @@ Ohne Proxy direkt `http://<server-ip>:8080` öffnen. Bei HTTP sind Cookies nicht
 |----------|-----------|
 | `APP_URL` | öffentliche URL (Cookies, Links in Mails) |
 | `BIND_ADDR`, `HTTP_PORT` | Bindeadresse und der eine veröffentlichte Port (Standard `0.0.0.0:8080`) |
-| `TRUST_PROXY` | vertrauenswürdige Proxy-IP(s)/CIDR(s), standardmäßig `false` |
+| `TRUST_PROXY` | vertrauenswürdige Proxy-IP(s)/CIDR(s), standardmäßig `false`. Hinter einem Proxy unbedingt setzen, sonst teilen sich alle Benutzer dessen IP, auch beim Login-Limit und im Audit-Log; die App warnt dann unter *Server-Management → Sicherheit & Einstellungen* |
 | `TZ` | Zeitzone |
 | `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Datenbank |
 | `JWT_SECRET` | Signatur der Access-Tokens (mind. 32 Zeichen) |
@@ -103,7 +103,7 @@ Sichere zusätzlich `.env` (insbesondere `ENCRYPTION_KEY`) und `.env-impressum` 
 `JWT_SECRET` ändern + `docker compose up -d` → alle Nutzer müssen sich neu anmelden. `DB_PASSWORD` zusätzlich in der Datenbank ändern (`ALTER USER`). `ENCRYPTION_KEY` nicht ändern, ohne Daten neu zu verschlüsseln.
 
 ## Sicherheit
-- Passwörter mit Argon2, Login-Sperre (5 Versuche/15 min), Rate-Limits, optionale TOTP-2FA mit Recovery-Codes (global oder pro Benutzer erzwingbar).
+- Passwörter mit Argon2, Login-Sperre (5 Versuche/15 min), Rate-Limits bei Passwort- und Code-Prüfungen, optionale TOTP-2FA mit Recovery-Codes (global oder pro Benutzer erzwingbar).
 - Access-Token im Speicher, Refresh-Token als httpOnly-/SameSite-Strict-Cookie mit Rotation.
 - Strikte CSP (keine Inline-Skripte), X-Frame-Options DENY; HSTS im vorgelagerten Proxy.
 - Rollen & Rechte (`resource:action`), Audit-Log, Webhooks mit HMAC-Signatur (`X-BM-Signature`).

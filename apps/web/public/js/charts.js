@@ -5,14 +5,19 @@ function smooth(pts) {
   let d = `M${pts[0][0]},${pts[0][1]}`;
   for (let i = 0; i < pts.length - 1; i++) {
     const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
-    d += ` C${p1[0] + (p2[0] - p0[0]) / 6},${p1[1] + (p2[1] - p0[1]) / 6} ${p2[0] - (p3[0] - p1[0]) / 6},${p2[1] - (p3[1] - p1[1]) / 6} ${p2[0]},${p2[1]}`;
+    // Die Kurve bleibt zwischen ihren Stützpunkten und schwingt nicht unter 0 oder über den Spitzenwert
+    const within = v => Math.min(Math.max(v, Math.min(p1[1], p2[1])), Math.max(p1[1], p2[1]));
+    d += ` C${p1[0] + (p2[0] - p0[0]) / 6},${within(p1[1] + (p2[1] - p0[1]) / 6)} ${p2[0] - (p3[0] - p1[0]) / 6},${within(p2[1] - (p3[1] - p1[1]) / 6)} ${p2[0]},${p2[1]}`;
   }
   return d;
 }
 
+// Achse in ganzen Schritten: Die Beschriftung rundet auf ganze Beträge, sonst stünde dort „1 €, 1 €, 1 €“
 const niceMax = v => {
+  if (!(v > 0)) return 4;
   const raw = v / 4, mag = 10 ** Math.floor(Math.log10(raw));
-  return [1, 2, 2.5, 5, 7.5, 10].find(s => s * mag >= raw) * mag * 4;
+  const step = [1, 2, 2.5, 5, 7.5, 10].find(s => s * mag >= raw) * mag;
+  return Math.max(1, Math.ceil(step)) * 4;
 };
 
 /* Mehrreihiges Flächen-/Liniendiagramm mit Hover-Tooltip */
@@ -20,14 +25,16 @@ export function areaChart(el, { labels, series, format = v => v, height = 260 })
   const id = 'a' + uid++;
   const W = el.clientWidth || 600, H = height;
   const pad = { l: 46, r: 12, t: 12, b: 28 };
-  const max = niceMax(Math.max(...series.flatMap(s => s.data))) || 1;
+  const max = niceMax(Math.max(...series.flatMap(s => s.data)));
   const n = labels.length;
   const x = i => pad.l + i * (W - pad.l - pad.r) / (n - 1);
   const y = v => pad.t + (H - pad.t - pad.b) * (1 - v / max);
 
   const ticks = [0, 1, 2, 3, 4].map(t => max / 4 * t);
   const grid = ticks.map(t => `<line class="grid-line" x1="${pad.l}" x2="${W - pad.r}" y1="${y(t)}" y2="${y(t)}"/><text class="axis" x="${pad.l - 8}" y="${y(t) + 4}" text-anchor="end">${format(t)}</text>`).join('');
-  const xl = labels.map((l, i) => `<text class="axis" x="${x(i)}" y="${H - 6}" text-anchor="middle">${l}</text>`).join('');
+  // Bei schmalen Diagrammen nur jede n-te Beschriftung, der neueste Wert steht immer da
+  const every = Math.max(1, Math.ceil(n * 48 / Math.max(1, W - pad.l - pad.r)));
+  const xl = labels.map((l, i) => ((n - 1 - i) % every ? '' : `<text class="axis" x="${x(i)}" y="${H - 6}" text-anchor="middle">${l}</text>`)).join('');
 
   const defs = series.map((s, k) => `<linearGradient id="${id}g${k}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:${s.color};stop-opacity:.35"/><stop offset="1" style="stop-color:${s.color};stop-opacity:0"/></linearGradient>`).join('');
   const paths = series.map((s, k) => {

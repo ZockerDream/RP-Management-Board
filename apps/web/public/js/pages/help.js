@@ -2,8 +2,12 @@ import { $, esc } from '../ui.js';
 
 const sections = [
   {
+    title: 'Dashboard: Tag, Woche oder Monat',
+    text: 'Oben im Dashboard wechselst du zwischen den Ansichten Tag, Woche und Monat und wählst daneben den Zeitraum. Einnahmen, Ausgaben, Sparquote und die Ausgaben nach Kategorie beziehen sich auf den gewählten Zeitraum; der Cashflow zeigt die letzten 14 Tage, 8 Wochen oder 6 Monate. Der Gesamtsaldo bleibt immer der heutige Stand. Die Woche beginnt mit dem Tag, den du im Profil als Wochenstart eingestellt hast. Deine Ansicht merkt sich der Browser.',
+  },
+  {
     title: 'Konten und Kategorien',
-    text: 'Unter „Konten“ legst du persönliche oder geteilte Team-Konten an. Jede Karte zeigt Kontostand, Einkommen und Ausgaben. Kategorien teilen die Buchungen eines Kontos auf und können ein eigenes Limit haben. Wähle ein Konto aus, um seine Kategorien zu sehen.',
+    text: 'Unter „Konten“ legst du persönliche oder geteilte Team-Konten an. Jede Karte zeigt Kontostand, Einkommen und Ausgaben. Neue Konten erhalten deine Profilwährung; änderst du die Währung später, werden Beträge nicht umgerechnet. Kategorien teilen die Buchungen eines Kontos auf und können ein eigenes Limit haben. Wähle ein Konto aus, um seine Kategorien zu sehen.',
   },
   {
     title: 'Budgets: Ausgaben begrenzen',
@@ -18,12 +22,20 @@ const sections = [
     text: 'Unter „Stundenzettel“ kannst du mit „Einstempeln“ eine Zeiterfassung starten, pausieren und mit „Ausstempeln“ beenden. Pausen werden nicht als Arbeitszeit gezählt. Die Tages-, Wochen- und Monatsansicht zeigt erfasste Zeiten; Monatsübersicht und PDF enthalten Arbeitszeit, Sollzeit und Überstundensaldo. Die wöchentliche Sollzeit stellst du im Profil ein. Einzelne Einträge lassen sich manuell ergänzen, bearbeiten oder löschen. Projekte können privat oder im Team geführt werden.',
   },
   {
-    title: 'Gehalt und Überstunden',
-    text: 'Trage im Profil Wochen-Sollzeit, Stundenlohn und Überstundenzuschlag ein und wähle ein persönliches Konto für die Gehaltsgutschrift. Das Basisgehalt wird dann täglich gegen 03:45 Uhr für den Vortag gutgeschrieben, auch am Wochenende und unabhängig von deiner Anwesenheit. Erfasste Stunden über dem Wochen-Soll (Montag bis Sonntag) werden zusätzlich mit Stundenlohn plus Zuschlag vergütet. Die erste Gutschrift erscheint daher frühestens am Folgetag.',
+    title: 'Gehalt: Festgehalt und Bonus',
+    text: 'Unter „Stundenzettel → Gehalt einstellen“ oder im Profil trägst du Festgehalt pro Tag, Wochen-Sollzeit und Bonus ein und wählst ein persönliches Konto für die Gehaltsgutschrift. Das Festgehalt wird jeden Tag gegen 03:45 Uhr für den Vortag gutgeschrieben, auch am Wochenende und unabhängig von deinen Stunden. Sobald du das Wochen-Soll (Montag bis Sonntag) erreicht hast, gibt es für jede weitere Stunde zusätzlich den Bonus, einen Prozentsatz des Festgehalts. Beispiel mit 1.669 Festgehalt, 13 Stunden Soll und 17 % Bonus: Bei 8 Stunden in der Woche gibt es täglich nur die 1.669. Erreichst du das Soll am Dienstag, bringt ab dann jede weitere Stunde 283,73 extra. Erreichst du es erst am Samstag, zählen nur noch die restlichen Stunden von Samstag und Sonntag. Montags beginnt die Zählung neu. Stunden, die du später für dieselbe Woche nachträgst, kommen mit der nächsten Gutschrift dazu; eine abgeschlossene Woche wird nicht nachberechnet. Die erste Gutschrift erscheint frühestens am Folgetag.',
   },
   {
     title: 'Sport: Strecken und Bestenliste',
     text: 'Unter „Laufen“, „Schwimmen“ und „Biken“ sehen Teammitglieder die Strecken ihres Teams. Team-Owner und -Editoren legen Strecken mit Checkpoints und optionaler Distanz an. Über „Ergebnis eintragen“ erfasst jedes Mitglied Punkte, optional die Zeit im Format mm:ss und die erreichten Checkpoints. Die Bestenliste sortiert nach Punkten, bei Gleichstand nach der Zeit. Eigene Ergebnisse kannst du jederzeit löschen.',
+  },
+  {
+    title: 'Notizblock',
+    text: 'Unter „Notizblock“ schreibst du Notizen nur für dich (Solo) oder für ein Team. Team-Owner und -Editoren können Team-Notizen bearbeiten, Viewer sie lesen. Mit „Anheften“ bleibt eine Notiz oben. Über das Suchfeld findest du Notizen nach Titel und Text.',
+  },
+  {
+    title: 'ToDos und Deadlines',
+    text: 'Unter „ToDos“ legst du Aufgaben für dich (Solo) oder ein Team an, auf Wunsch mit Deadline, und hakst sie per Kästchen ab. Zu offenen ToDos mit Deadline erscheint eine Benachrichtigung in der Glocke: einen Tag vorher, am Fälligkeitstag und einmal, wenn das ToDo überfällig ist. Team-ToDos erinnern alle Teammitglieder. Unter „Einstellungen → Benachrichtigungen“ kannst du das bei „ToDo-Deadlines“ abschalten oder zusätzlich per E-Mail bekommen. Team-Owner und -Editoren dürfen Team-ToDos ändern und abhaken, Viewer sie sehen.',
   },
   {
     title: 'Fahrzeuge und Häuser',
@@ -58,6 +70,10 @@ const sections = [
     text: 'Unter „Fehler melden“ beschreibst du ein Problem mit Titel, Beschreibung und den Schritten, die dazu geführt haben. Die Meldung erscheint bei den Administratoren unter „Tickets“.',
   },
   {
+    title: 'Tickets kommentieren und löschen',
+    text: 'Unter jedem Ticket schreiben Melder und Administratoren Kommentare; die jeweils andere Seite bekommt dazu eine Benachrichtigung. Eigene Kommentare kannst du löschen, Administratoren jeden. Das ganze Ticket löschen kann der Melder oder ein Administrator, samt allen Kommentaren. Kommentare bleiben intern, und ein verknüpftes GitHub-Issue bleibt beim Löschen bestehen.',
+  },
+  {
     title: 'Häufige Fragen: Warum weicht die Arbeitszeit ab?',
     text: 'Pausen werden bei der Zeiterfassung nicht als Arbeitszeit gezählt. Prüfe bei manuellen Einträgen die eingetragene Pause. Das Monats-Soll verteilt deine Wochen-Sollzeit gleichmäßig auf alle Kalendertage des Monats (Wochen-Soll × Kalendertage ÷ 7); Feiertage werden nicht abgezogen.',
   },
@@ -67,7 +83,11 @@ const sections = [
   },
   {
     title: 'Häufige Fragen: Warum habe ich noch kein Gehalt erhalten?',
-    text: 'Prüfe im Profil, ob ein Konto für die Gehaltsgutschrift gewählt ist und ein Stundenlohn eingetragen ist. Die Gutschrift erfolgt immer nachts für den Vortag, also frühestens am Tag nach dem Einrichten.',
+    text: 'Prüfe unter „Stundenzettel → Gehalt einstellen“, ob ein Konto für die Gehaltsgutschrift gewählt und ein Festgehalt eingetragen ist. Die Gutschrift erfolgt immer nachts für den Vortag, also frühestens am Tag nach dem Einrichten.',
+  },
+  {
+    title: 'Häufige Fragen: Warum kann ich kein Gehaltskonto auswählen?',
+    text: 'Gehalt wird nur auf ein eigenes persönliches Konto in deiner Profilwährung gebucht. Team-Konten und Konten in einer anderen Währung stehen deshalb in der Liste, sind aber nicht wählbar. Fehlt ein passendes Konto, lege es unter „Konten“ an; neue Konten erhalten automatisch deine Profilwährung.',
   },
   {
     title: 'Häufige Fragen: Warum sehe ich keine Sportstrecken?',
@@ -105,7 +125,7 @@ const sections = [
 
 export async function render(view) {
   view.innerHTML = `<div class="page-head"><div><h1>Hilfe</h1><p>So funktionieren die wichtigsten Bereiche</p></div></div>
-    <div class="card"><label class="field">Hilfe durchsuchen<input id="help-search" type="search" placeholder="z. B. Budget, Gehalt, Sport, PIN"></label><p class="muted" id="help-count" aria-live="polite"></p></div>
+    <div class="card"><label class="field">Hilfe durchsuchen<input id="help-search" type="search" placeholder="z. B. Budget, Gehalt, ToDo, PIN"></label><p class="muted" id="help-count" aria-live="polite"></p></div>
     <div class="grid cols-2" id="help-results">${sections.map(({ title, text }, index) => `<section class="card" data-help-item="${index}"><h2>${esc(title)}</h2><p class="muted">${esc(text)}</p></section>`).join('')}</div>`;
   const search = $('#help-search', view);
   const items = [...view.querySelectorAll('[data-help-item]')];

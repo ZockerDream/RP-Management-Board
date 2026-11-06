@@ -53,11 +53,11 @@ function fieldHtml(f) {
   if (f.type === 'checkbox') return `<label class="${cls} row start"><input type="checkbox" id="${id}" name="${f.name}" ${f.value ? 'checked' : ''}> ${esc(f.label)}</label>`;
   if (f.type === 'html') return `<div class="full">${f.html}</div>`;
   let input;
-  if (f.type === 'select') input = `<select ${common}>${(f.options || []).map((o) => `<option value="${esc(o.v)}" ${String(o.v) === String(val) ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}</select>`;
+  if (f.type === 'select') input = `<select ${common}>${(f.options || []).map((o) => `<option value="${esc(o.v)}" ${String(o.v) === String(val) ? 'selected' : ''} ${o.disabled ? 'disabled' : ''}>${esc(o.l)}</option>`).join('')}</select>`;
   else if (f.type === 'multi') {
     input = `<div class="stack" style="gap:6px;max-height:150px;overflow:auto">${(f.options || []).map((o) => `<label class="row start" style="font-weight:400;color:var(--text)"><input type="checkbox" name="${f.name}" value="${esc(o.v)}" ${(val || []).includes(o.v) ? 'checked' : ''}> ${esc(o.l)}</label>`).join('')}</div>`;
-  } else if (f.type === 'textarea') input = `<textarea ${common} rows="3">${esc(val)}</textarea>`;
-  else input = `<input type="${f.type || 'text'}" ${common} value="${esc(val)}" ${f.step ? `step="${f.step}"` : ''} ${f.min !== undefined ? `min="${f.min}"` : ''} ${f.autocomplete ? `autocomplete="${f.autocomplete}"` : ''}>`;
+  } else if (f.type === 'textarea') input = `<textarea ${common} rows="${f.rows || 3}" ${f.maxlength ? `maxlength="${f.maxlength}"` : ''}>${esc(val)}</textarea>`;
+  else input = `<input type="${f.type || 'text'}" ${common} value="${esc(val)}" ${f.step ? `step="${f.step}"` : ''} ${f.min !== undefined ? `min="${f.min}"` : ''} ${f.maxlength ? `maxlength="${f.maxlength}"` : ''} ${f.autocomplete ? `autocomplete="${f.autocomplete}"` : ''}>`;
   if (f.type === 'password') input = `<span class="password-control">${input}${passwordToggleButton(f.label)}</span>`;
   return `<label class="${cls}">${esc(f.label)}${input}${f.help ? `<small class="muted">${esc(f.help)}</small>` : ''}</label>`;
 }

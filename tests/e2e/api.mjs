@@ -1,4 +1,6 @@
 // API-E2E gegen den isolierten Stack. Jede 5xx-Antwort zählt automatisch als Fehler.
+import { execFileSync } from 'node:child_process';
+
 const BASE = process.env.BASE || 'http://localhost:18088';
 const results = { pass: 0, fail: [] };
 const fives = [];
@@ -37,6 +39,12 @@ const ok = (name, r, status = 200) => { check(name, r.status === status, `status
 const denied = (name, r, allowed = [401, 403, 404]) => check(name, allowed.includes(r.status), `status=${r.status} ${JSON.stringify(r.data)?.slice(0, 160)}`);
 const invalid = (name, r) => check(name, r.status >= 400 && r.status < 500, `status=${r.status} ${JSON.stringify(r.data)?.slice(0, 160)}`);
 
+// Der Stack läuft in Europe/Berlin; kurz nach Mitternacht weicht UTC davon ab
+const dayAt = (offset) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date(Date.now() + offset * 86400000));
+const project = process.env.E2E_PROJECT || 'bm-e2e';
+const psql = (sql) => execFileSync('docker', ['exec', `${project}-db-1`, 'psql', '-U', 'budget', '-d', 'budget', '-tA', '-c', sql]).toString().trim();
+const runJob = (name) => execFileSync('docker', ['exec', `${project}-worker-1`, 'node', '--input-type=module', '-e', `const { runJob } = await import('/app/src/jobs.js'); await runJob('${name}', { info() {}, warn() {}, error(o, m) { console.error(m, o?.err?.message); process.exitCode = 1; } }); setTimeout(() => process.exit(process.exitCode || 0), 500);`], { stdio: 'pipe' });
+
 // ---------- Basis, Header, Statik
 for (const p of ['/health', '/ready', '/']) check(`static ${p}`, (await fetch(BASE + p)).status === 200);
 // Versionierte Assets: neues HTML darf nie auf alte Dateien aus einem Cache treffen
@@ -45,7 +53,7 @@ const assetBase = indexText.match(/src="(assets\/[0-9a-f]{12}\/)js\/app\.js"/)?.
 check('HTML verweist auf versionierte Assets', !!assetBase, indexText.slice(0, 300));
 check('HTML ohne unversionierte Assets', !/(src|href)="(js|css)\//.test(indexText));
 check('HTML wird immer neu geprüft', indexRes.headers.get('cache-control') === 'no-cache', indexRes.headers.get('cache-control'));
-for (const p of ['js/app.js', 'js/theme.js', 'js/pages/sport.js', 'js/pages/spending.js', 'js/pages/privacy.js', 'css/auth.css', 'favicon.svg']) {
+for (const p of ['js/app.js', 'js/theme.js', 'js/pages/sport.js', 'js/pages/spending.js', 'js/pages/privacy.js', 'js/pages/notes.js', 'js/pages/todos.js', 'js/pages/ticket-view.js', 'css/auth.css', 'favicon.svg']) {
   const res = await fetch(`${BASE}/${assetBase}${p}`);
   check(`Asset ${p}`, res.status === 200 && /immutable/.test(res.headers.get('cache-control') || ''), `${res.status} ${res.headers.get('cache-control')}`);
 }
@@ -58,6 +66,9 @@ check('kein X-Powered-By', !rootHeaders.get('x-powered-by'));
 denied('ohne Token /me', await anon.get('/me'), [401]);
 denied('ohne Token /sport/routes', await anon.get('/sport/routes'), [401]);
 denied('ohne Token /spending-budgets', await anon.get('/spending-budgets'), [401]);
+denied('ohne Token /notes', await anon.get('/notes'), [401]);
+denied('ohne Token /todos', await anon.get('/todos'), [401]);
+denied('ohne Token Ticket löschen', await anon.del('/bug-reports/1'), [401]);
 denied('Falsches Passwort', await anon.post('/auth/login', { email: 'admin@e2e.test', password: 'falsch' }), [400, 401]);
 const pub = ok('public imprint', await anon.get('/public/imprint'));
 check('Impressum hat neue Felder', 'country' in pub && 'website' in pub && 'supervisory' in pub && 'note' in pub, JSON.stringify(Object.keys(pub)));
@@ -212,6 +223,28 @@ const tlAll = (await alice.get(`/stats/timeline?budget_id=${solo.id}&months=2`))
 const sumExp = (rows) => rows.reduce((n, r) => n + Number(r.expense), 0);
 check('Cashflow mit to ohne Zukunft', sumExp(tlNow) === 40, String(sumExp(tlNow)));
 check('Bericht-Cashflow ohne to unverändert', future.slice(0, 7) !== today.slice(0, 7) || sumExp(tlAll) === 47, String(sumExp(tlAll)));
+// Dashboard-Ansichten: Tag und Woche
+const tlDay = ok('Cashflow nach Tagen', await alice.get(`/stats/timeline?budget_id=${solo.id}&granularity=day&periods=14&to=${today}`));
+check('Tagesansicht hat 14 Punkte bis heute', tlDay.length === 14 && tlDay.at(-1).bucket === today, JSON.stringify(tlDay.at(-1)));
+check('Tagesansicht ohne Zukunft', sumExp(tlDay) === 40, String(sumExp(tlDay)));
+check('Heutige Ausgabe am heutigen Tag', Number(tlDay.at(-1).expense) === 40, JSON.stringify(tlDay.at(-1)));
+const tlWeek = ok('Cashflow nach Wochen', await alice.get(`/stats/timeline?budget_id=${solo.id}&granularity=week&periods=8&week_start=1&to=${today}`));
+check('Wochenansicht hat 8 Punkte', tlWeek.length === 8, String(tlWeek.length));
+check('Woche beginnt am Montag', tlWeek.every((row) => new Date(`${row.bucket}T00:00:00Z`).getUTCDay() === 1), tlWeek[0].bucket);
+check('Wochenansicht ohne Zukunft', sumExp(tlWeek) === 40, String(sumExp(tlWeek)));
+const tlSun = ok('Woche ab Sonntag', await alice.get(`/stats/timeline?granularity=week&periods=2&week_start=0&to=${today}`));
+check('Woche beginnt am Sonntag', tlSun.every((row) => new Date(`${row.bucket}T00:00:00Z`).getUTCDay() === 0), tlSun[0].bucket);
+const tlFuture = (await alice.get(`/stats/timeline?budget_id=${solo.id}&granularity=day&periods=14&to=${future}`)).data;
+check('Zukunft zählt nur mit späterem to', sumExp(tlFuture) === 47, String(sumExp(tlFuture)));
+check('Monatsansicht bleibt nach Monaten', (await alice.get('/stats/timeline?months=2')).data.every((row) => /^\d{4}-\d{2}$/.test(row.month)));
+const dayKpi = ok('KPI eines Tages', await alice.get(`/stats/overview?budget_id=${solo.id}&from=${today}&to=${today}`));
+check('KPI eines Tages stimmt', Number(dayKpi.expense) === 40, dayKpi.expense);
+invalid('Unbekannte Granularität', await alice.get('/stats/timeline?granularity=stunde'));
+invalid('Zu viele Perioden', await alice.get('/stats/timeline?granularity=day&periods=500'));
+invalid('Wochenstart ungültig', await alice.get('/stats/timeline?granularity=week&week_start=5'));
+invalid('Datum ungültig (Cashflow)', await alice.get('/stats/timeline?granularity=day&to=2026-13-45'));
+invalid('Datum nicht vorhanden (Cashflow)', await alice.get('/stats/timeline?granularity=week&to=2026-02-31'));
+check('Fremde sehen keinen Cashflow', sumExp((await dave.get(`/stats/timeline?budget_id=${solo.id}&granularity=day`)).data) === 0);
 
 // ---------- Statistik / Berichte
 for (const p of ['/stats/overview', '/stats/by-category', '/stats/timeline', '/stats/overview?scope=solo', '/stats/overview?scope=shared', '/reports/costs', '/reports/saved', '/notifications', '/me/sessions', '/me/notification-prefs', '/me/api-keys', '/integrations', '/assets/overview', '/assets/costs', '/assets/log']) ok(`GET ${p}`, await alice.get(p));
@@ -219,7 +252,26 @@ const saved = ok('Geplanter Bericht', await alice.post('/reports/saved', { kind:
 ok('Bericht löschen', await alice.del(`/reports/saved/${saved.id}`));
 
 // ---------- Zeiterfassung & Gehalt
-ok('Profil Gehalt', await alice.patch('/me', { weekly_work_hours: 7, hourly_rate: 10, overtime_surcharge_percent: 25, payroll_budget_id: solo.id }));
+// Neue Konten übernehmen die Profilwährung, sonst wären sie nie als Gehaltskonto wählbar
+ok('Profil auf CHF', await dave.patch('/me', { currency: 'CHF' }));
+const daveAccount = ok('Konto ohne Währung', await dave.post('/budgets', { name: 'Franken', type: 'solo' }));
+check('Neues Konto hat Profilwährung', (await dave.get('/budgets')).data.find((row) => row.id === daveAccount.id)?.currency === 'CHF');
+ok('Gehaltskonto in Profilwährung wählbar', await dave.patch('/me', { payroll_budget_id: daveAccount.id }));
+const daveEuro = ok('Konto mit fester Währung', await dave.post('/budgets', { name: 'Euro', type: 'solo', currency: 'EUR' }));
+check('Angegebene Währung bleibt', (await dave.get('/budgets')).data.find((row) => row.id === daveEuro.id)?.currency === 'EUR');
+invalid('Gehaltskonto in anderer Währung abgelehnt', await dave.patch('/me', { payroll_budget_id: daveEuro.id }));
+invalid('Team-Konto als Gehaltskonto abgelehnt', await alice.patch('/me', { payroll_budget_id: shared.id }));
+invalid('Fremdes Konto als Gehaltskonto abgelehnt', await dave.patch('/me', { payroll_budget_id: solo.id }));
+ok('Gehaltskonto entfernen', await dave.patch('/me', { payroll_budget_id: null }));
+ok('Profil zurück auf EUR', await dave.patch('/me', { currency: 'EUR' }));
+ok('Testkonto löschen', await dave.del(`/budgets/${daveAccount.id}`));
+ok('Testkonto 2 löschen', await dave.del(`/budgets/${daveEuro.id}`));
+ok('Profil Gehalt', await alice.patch('/me', { weekly_work_hours: 7, daily_salary: 10, hourly_bonus_percent: 25, payroll_budget_id: solo.id }));
+invalid('Gehaltskonto bleibt in Profilwährung', await alice.patch(`/budgets/${solo.id}`, { currency: 'USD' }));
+const otherAccount = ok('Konto zum Umstellen', await alice.post('/budgets', { name: 'Reisekasse', type: 'solo' }));
+ok('Währung eines anderen Kontos ändern', await alice.patch(`/budgets/${otherAccount.id}`, { currency: 'CHF' }));
+check('Währung geändert', (await alice.get('/budgets')).data.find((row) => row.id === otherAccount.id).currency === 'CHF');
+ok('Konto zum Umstellen löschen', await alice.del(`/budgets/${otherAccount.id}`));
 const proj = ok('Projekt privat', await alice.post('/work-projects', { name: 'P1' }));
 const teamProj = ok('Projekt Team', await alice.post('/work-projects', { name: 'P2', team_id: team.id }));
 const we = ok('Eintrag', await alice.post('/work-hours', { work_date: today, hours: 3.5, note: 'x', started_at: '08:00', ended_at: '12:00', break_minutes: 30 }));
@@ -244,11 +296,58 @@ const tm = (teamRep.members || teamRep).find?.((m) => m.user_id === meAlice.user
 check('Team-Bericht weekly_target pro Mitglied', tm && tm.weekly_target === 7, JSON.stringify(tm)?.slice(0, 240));
 denied('Viewer sieht Teamzeiten nicht', await carol.get(`/work-hours/team/monthly?team_id=${team.id}&month=${month}`));
 denied('Fremder sieht Teamzeiten nicht', await dave.get(`/work-hours/team/monthly?team_id=${team.id}&month=${month}`));
-ok('Editor setzt Mitarbeiter-Einstellung', await bob.patch(`/work-hours/team/${team.id}/members/${meAlice.user.id}/settings`, { hourly_rate: 11 }));
-denied('Viewer setzt Einstellung nicht', await carol.patch(`/work-hours/team/${team.id}/members/${meAlice.user.id}/settings`, { hourly_rate: 1 }));
+ok('Editor setzt Mitarbeiter-Einstellung', await bob.patch(`/work-hours/team/${team.id}/members/${meAlice.user.id}/settings`, { daily_salary: 11 }));
+denied('Viewer setzt Einstellung nicht', await carol.patch(`/work-hours/team/${team.id}/members/${meAlice.user.id}/settings`, { daily_salary: 1 }));
+check('Bericht zeigt Bonus je Stunde', (await alice.get(`/work-hours/monthly?month=${month}`)).data.bonus_per_hour === '2.75');
 denied('Editor löscht Teamprojekt nicht (nur Owner)', await bob.del(`/work-projects/${teamProj.id}`));
 ok('Owner löscht Teamprojekt', await alice.del(`/work-projects/${teamProj.id}`));
 denied('Fremder löscht Projekt nicht', await dave.del(`/work-projects/${proj.id}`));
+
+// ---------- Gehaltslauf mit dem Beispiel des Auftraggebers, über den echten Worker-Job
+// 1.669 pro Tag, 13 Stunden Wochen-Soll, 17 % vom Festgehalt je Stunde darüber (283,73)
+const plusDays = (date, days) => { const value = new Date(`${date}T00:00:00Z`); value.setUTCDate(value.getUTCDate() + days); return value.toISOString().slice(0, 10); };
+const mondayOfThisWeek = (() => { const value = new Date(`${dayAt(0)}T00:00:00Z`); return plusDays(dayAt(0), -((value.getUTCDay() + 6) % 7)); })();
+const [week1, week2, week3] = [-21, -14, -7].map((days) => plusDays(mondayOfThisWeek, days));
+const salaryAccount = ok('Gehaltskonto für das Beispiel', await bob.post('/budgets', { name: 'Gehalt Bob', type: 'solo' }));
+ok('Gehalt laut Beispiel', await bob.patch('/me', { daily_salary: 1669, weekly_work_hours: 13, hourly_bonus_percent: 17, payroll_budget_id: salaryAccount.id }));
+const salaryProfile = (await bob.get('/me')).data.user;
+check('Profil liefert das neue Modell', Number(salaryProfile.daily_salary) === 1669 && Number(salaryProfile.hourly_bonus_percent) === 17 && !('hourly_rate' in salaryProfile), JSON.stringify(salaryProfile));
+psql(`UPDATE users SET payroll_start_date='${week1}' WHERE id='${uB.id}'`);
+const workedHours = {
+  [week1]: 8, // Woche 1: Soll nicht erreicht
+  [week2]: 8, [plusDays(week2, 1)]: 7, [plusDays(week2, 2)]: 1, // Woche 2: Soll am Dienstag erreicht
+  [week3]: 2, [plusDays(week3, 1)]: 2, [plusDays(week3, 2)]: 2, [plusDays(week3, 3)]: 2, [plusDays(week3, 4)]: 2, [plusDays(week3, 5)]: 4, [plusDays(week3, 6)]: 2, // Woche 3: Soll am Samstag erreicht
+};
+for (const [work_date, hours] of Object.entries(workedHours)) ok(`Stunden ${work_date}`, await bob.post('/work-hours', { work_date, hours }));
+runJob('payroll.run');
+const salaryRows = () => psql(`SELECT payroll_date||'|'||base_amount||'|'||overtime_hours||'|'||overtime_pay FROM payroll_payments WHERE user_id='${uB.id}' ORDER BY payroll_date`).split('\n').map((line) => { const [date, base, hours, pay] = line.split('|'); return { date, base, hours: Number(hours), pay }; });
+const paidBefore = salaryRows();
+const expectedDays = Math.round((Date.parse(`${dayAt(-1)}T00:00:00Z`) - Date.parse(`${week1}T00:00:00Z`)) / 86400000) + 1;
+check('Für jeden Tag genau eine Zahlung', paidBefore.length === expectedDays, `${paidBefore.length} statt ${expectedDays}`);
+check('Festgehalt jeden Tag 1.669', paidBefore.every((row) => row.base === '1669.00'), JSON.stringify(paidBefore.filter((row) => row.base !== '1669.00')));
+const bonusIn = (monday) => paidBefore.filter((row) => row.date >= monday && row.date <= plusDays(monday, 6) && row.hours > 0).map((row) => `${row.date}:${row.hours}:${row.pay}`).join();
+check('Woche 1: Soll verfehlt, kein Bonus', bonusIn(week1) === '', bonusIn(week1));
+check('Woche 2: Bonus ab Dienstag', bonusIn(week2) === `${plusDays(week2, 1)}:2:567.46,${plusDays(week2, 2)}:1:283.73`, bonusIn(week2));
+check('Woche 3: nur Rest Samstag und Sonntag', bonusIn(week3) === `${plusDays(week3, 5)}:1:283.73,${plusDays(week3, 6)}:2:567.46`, bonusIn(week3));
+check('Montag beginnt neu', bonusIn(mondayOfThisWeek) === '', bonusIn(mondayOfThisWeek));
+const expectedSalary = expectedDays * 1669 + 567.46 + 283.73 + 283.73 + 567.46;
+check('Kontostand stimmt auf den Cent', (await bob.get('/budgets')).data.find((row) => row.id === salaryAccount.id).balance === expectedSalary.toFixed(2), `${(await bob.get('/budgets')).data.find((row) => row.id === salaryAccount.id).balance} statt ${expectedSalary.toFixed(2)}`);
+const salaryBookings = (await bob.get(`/transactions?budget_id=${salaryAccount.id}&limit=100`)).data.items;
+check('Buchungstexte', salaryBookings.some((row) => row.title === 'Festgehalt und Bonus' && /567\.46 EUR Bonus für 2 Stunden/.test(row.note)) && salaryBookings.some((row) => row.title === 'Festgehalt'), JSON.stringify(salaryBookings[0]));
+check('Bonus-Buchung im Betrag', salaryBookings.some((row) => Number(row.amount) === 1952.73));
+runJob('payroll.run');
+check('Zweiter Lauf zahlt nichts doppelt', salaryRows().length === expectedDays);
+ok('Stunden nachtragen', await bob.post('/work-hours', { work_date: week1, hours: 20 }));
+runJob('payroll.run');
+check('Abgeschlossene Woche wird nicht nachberechnet', JSON.stringify(salaryRows()) === JSON.stringify(paidBefore));
+const salaryMonth = ok('Monatsbericht mit Gehalt', await bob.get(`/work-hours/monthly?month=${plusDays(week2, 1).slice(0, 7)}`));
+check('Bericht nennt Bonus je Stunde', salaryMonth.bonus_per_hour === '283.73' && salaryMonth.daily_salary === 1669, JSON.stringify(salaryMonth.bonus_per_hour));
+const salaryPdf = await bob.raw(`/work-hours/monthly.pdf?month=${plusDays(week2, 1).slice(0, 7)}`);
+check('Monats-PDF mit Gehalt', salaryPdf.status === 200 && salaryPdf.buf.slice(0, 4).toString() === '%PDF');
+invalid('Festgehalt negativ', await bob.patch('/me', { daily_salary: -1 }));
+invalid('Bonus zu hoch', await bob.patch('/me', { hourly_bonus_percent: 1001 }));
+invalid('Festgehalt mit drei Nachkommastellen', await bob.patch('/me', { daily_salary: 1.234 }));
+ok('Gehaltskonto von Bob lösen', await bob.patch('/me', { payroll_budget_id: null }));
 
 // ---------- Objekte
 const person = ok('Person', await alice.post('/people', { name: 'Hans', kind: 'employee', email: '' }));
@@ -279,6 +378,45 @@ denied('IDOR Haus', await bob.patch(`/properties/${house.id}`, { name: 'x' }));
 ok('Objekt privat→Team', await alice.patch(`/vehicles/${car.id}`, { scope: 'team', team_id: team.id }));
 check('Team sieht Fahrzeug', (await carol.get('/vehicles')).data.some((v) => v.id === car.id));
 denied('Viewer ändert Teamobjekt nicht', await carol.patch(`/vehicles/${car.id}`, { make_model: 'x' }));
+// Die Oberfläche blendet Aktionen anhand der Rolle aus, dazu muss sie in den Listen stehen
+const roleOf = async (who, path, itemId) => (await who.get(path)).data.find((row) => row.id === itemId)?.role;
+check('Rolle in der Liste: Viewer', (await roleOf(carol, '/vehicles', car.id)) === 'viewer');
+check('Rolle in der Liste: Editor', (await roleOf(bob, '/vehicles', car.id)) === 'editor');
+check('Rolle in der Liste: Team-Owner', (await roleOf(alice, '/vehicles', car.id)) === 'owner');
+check('Rolle in der Liste: privat', (await roleOf(alice, '/properties', house.id)) === 'owner');
+const teamPerson = ok('Team-Person', await alice.post('/people', { name: 'Teamer', scope: 'team', team_id: team.id }));
+const teamKey = ok('Team-Schlüssel', await alice.post('/keys', { code: 'TK', label: 'Team-Tor', vehicle_id: car.id, scope: 'team', team_id: team.id, copies: 2 }));
+check('Rolle bei Personen', (await roleOf(carol, '/people', teamPerson.id)) === 'viewer');
+check('Rolle bei Schlüsseln', (await roleOf(carol, '/keys', teamKey.id)) === 'viewer');
+const teamIssue = ok('Team-Schlüssel ausgeben', await alice.post(`/keys/${teamKey.id}/assign`, { person_id: teamPerson.id }));
+denied('Viewer gibt nicht aus', await carol.post(`/keys/${teamKey.id}/assign`, { person_id: teamPerson.id }));
+denied('Viewer nimmt nicht zurück', await carol.post(`/assignments/${teamIssue.id}/return`, {}));
+denied('Viewer meldet nicht verloren', await carol.post(`/assignments/${teamIssue.id}/lost`, {}));
+ok('Editor nimmt zurück', await bob.post(`/assignments/${teamIssue.id}/return`, {}));
+// Teil-Updates lassen alles andere unverändert (Zod 4 setzt bei .partial() sonst Standardwerte)
+ok('Schlüssel nur umbenennen', await alice.patch(`/keys/${teamKey.id}`, { label: 'Team-Tor 2' }));
+const keptKey = (await alice.get('/keys')).data.find((row) => row.id === teamKey.id);
+check('Schlüssel behält Kopien und Team', keptKey.copies === 2 && keptKey.team_id === team.id && keptKey.kind === 'Haustür', JSON.stringify(keptKey).slice(0, 200));
+ok('Person nur umbenennen', await alice.patch(`/people/${teamPerson.id}`, { name: 'Teamer 2' }));
+check('Person behält Team', (await alice.get('/people')).data.find((row) => row.id === teamPerson.id).team_id === team.id);
+ok('Haus-Kosten bleiben bei Namensänderung', await alice.patch(`/properties/${house.id}`, { name: 'Haus A3' }));
+check('Haus behält Kosten', Number((await alice.get('/properties')).data.find((row) => row.id === house.id).cost_amount) === 150);
+check('Eintrag behält Notiz und Pause', (await alice.get(`/work-hours?from=${today}&to=${today}`)).data.items.some((row) => row.id === we.id && row.note === 'x' && row.break_minutes === 30));
+const keepTx = ok('Buchung mit Details', await alice.post('/transactions', { budget_id: solo.id, type: 'income', income_kind: 'salary', amount: '1', booked_at: today, title: 'Behalten', note: 'Notiz', tags: ['a'] }));
+ok('Buchung nur umbenennen', await alice.patch(`/transactions/${keepTx.id}`, { title: 'Behalten 2' }));
+const keptTx = (await alice.get(`/transactions?q=Behalten`)).data.items[0];
+check('Buchung behält Notiz, Tags und Art', keptTx.note === 'Notiz' && keptTx.tags.includes('a') && keptTx.income_kind === 'salary', JSON.stringify(keptTx));
+ok('Testbuchung löschen', await alice.del(`/transactions/${keepTx.id}`));
+const keepRule = ok('Dauerauftrag mit Abstand', await alice.post('/recurring', { name: 'Behalten', budget_id: solo.id, type: 'expense', amount: '5', frequency: 'weekly', interval: 3, start_date: future }));
+ok('Dauerauftrag nur umbenennen', await alice.patch(`/recurring/${keepRule.id}`, { name: 'Behalten 2' }));
+const keptRule = (await alice.get('/recurring')).data.find((row) => row.id === keepRule.id);
+check('Dauerauftrag behält Abstand', keptRule.interval === 3 && keptRule.active === true, JSON.stringify(keptRule).slice(0, 200));
+ok('Testauftrag löschen', await alice.del(`/recurring/${keepRule.id}`));
+const keepGoal = ok('Sparziel mit Rhythmus', await alice.post('/goals', { budget_id: solo.id, name: 'Behalten', target_amount: '10', installment_frequency: 'weekly', installment_interval: 2 }));
+ok('Sparziel nur umbenennen', await alice.patch(`/goals/${keepGoal.id}`, { name: 'Behalten 2' }));
+const keptGoal = (await alice.get('/goals')).data.find((row) => row.id === keepGoal.id);
+check('Sparziel behält Rhythmus', keptGoal.installment_frequency === 'weekly' && keptGoal.installment_interval === 2, JSON.stringify(keptGoal));
+ok('Testziel löschen', await alice.del(`/goals/${keepGoal.id}`));
 ok('Patch ohne scope mit team_id ignoriert', await alice.patch(`/properties/${house.id}`, { name: 'Haus A2', team_id: team.id }));
 check('team_id ohne scope bleibt privat', !(await bob.get('/properties')).data.some((p) => p.id === house.id));
 ok('Person Patch', await alice.patch(`/people/${person.id}`, { function: 'Chef' }));
@@ -327,6 +465,145 @@ check('Eigene Tickets', (await alice.get('/bug-reports')).data.items.length >= 1
 check('Bob sieht fremdes Ticket nicht', (await bob.get('/bug-reports')).data.items.length === 0);
 denied('User sieht Admin-Tickets nicht', await alice.get('/admin/bug-reports'));
 ok('Admin-Tickets', await admin.get('/admin/bug-reports'));
+// Kommentare und Löschen
+const unread = async (who, kind) => (await who.get('/notifications')).data.items.filter((item) => item.kind === kind).length;
+const aliceTicketBefore = await unread(alice, 'ticket_comment');
+const adminTicketBefore = await unread(admin, 'ticket_comment');
+const adminComment = ok('Admin kommentiert', await admin.post(`/admin/bug-reports/${bug.id}/comments`, { body: 'Bitte <script>alert(1)</script> prüfen' }));
+check('Melder wird benachrichtigt', (await unread(alice, 'ticket_comment')) === aliceTicketBefore + 1);
+const reply = ok('Melder antwortet', await alice.post(`/bug-reports/${bug.id}/comments`, { body: 'Danke\nzweite Zeile' }));
+check('Admin wird benachrichtigt', (await unread(admin, 'ticket_comment')) === adminTicketBefore + 1);
+check('Eigener Kommentar löst keine Eigenbenachrichtigung aus', (await unread(alice, 'ticket_comment')) === aliceTicketBefore + 1);
+const seen = (await alice.get('/bug-reports')).data.items.find((item) => String(item.id) === String(bug.id));
+check('Melder sieht beide Kommentare mit Namen', seen.comments.length === 2 && seen.comments[1].user_name === 'alice', JSON.stringify(seen.comments).slice(0, 200));
+check('Kommentar bleibt wörtlich', seen.comments[0].body.includes('<script>'), seen.comments[0].body);
+check('Admin sieht Kommentare', (await admin.get('/admin/bug-reports')).data.items.find((item) => String(item.id) === String(bug.id)).comments.length === 2);
+invalid('Leerer Kommentar', await alice.post(`/bug-reports/${bug.id}/comments`, { body: '   ' }));
+invalid('Zu langer Kommentar', await alice.post(`/bug-reports/${bug.id}/comments`, { body: 'x'.repeat(5001) }));
+invalid('Ticket-ID ungültig', await alice.post('/bug-reports/abc/comments', { body: 'x' }));
+invalid('Kommentar-ID ungültig', await alice.del(`/bug-reports/${bug.id}/comments/abc`));
+denied('Fremder kommentiert nicht', await bob.post(`/bug-reports/${bug.id}/comments`, { body: 'x' }));
+denied('User nutzt Admin-Kommentar nicht', await bob.post(`/admin/bug-reports/${bug.id}/comments`, { body: 'x' }));
+denied('Fremder löscht Kommentar nicht', await bob.del(`/bug-reports/${bug.id}/comments/${reply.id}`));
+denied('Melder löscht Admin-Kommentar nicht', await alice.del(`/bug-reports/${bug.id}/comments/${adminComment.id}`));
+ok('Melder löscht eigenen Kommentar', await alice.del(`/bug-reports/${bug.id}/comments/${reply.id}`));
+ok('Admin löscht fremden Kommentar', await admin.del(`/admin/bug-reports/${bug.id}/comments/${adminComment.id}`));
+denied('Kommentar ist weg', await admin.del(`/admin/bug-reports/${bug.id}/comments/${adminComment.id}`));
+denied('Fremder löscht Ticket nicht', await bob.del(`/bug-reports/${bug.id}`));
+denied('User löscht nicht über Admin-Pfad', await bob.del(`/admin/bug-reports/${bug.id}`));
+const bug2 = ok('Ticket 2', await alice.post('/bug-reports', { title: 'Zweites Ticket', description: 'Beschreibung mit mindestens zwanzig Zeichen.', steps: '' }));
+ok('Kommentar an Ticket 2', await alice.post(`/bug-reports/${bug2.id}/comments`, { body: 'wird mit gelöscht' }));
+ok('Melder löscht eigenes Ticket', await alice.del(`/bug-reports/${bug2.id}`));
+check('Ticket ist weg', !(await alice.get('/bug-reports')).data.items.some((item) => String(item.id) === String(bug2.id)));
+denied('Gelöschtes Ticket nicht mehr kommentierbar', await alice.post(`/bug-reports/${bug2.id}/comments`, { body: 'x' }));
+const bug3 = ok('Ticket 3', await bob.post('/bug-reports', { title: 'Drittes Ticket', description: 'Beschreibung mit mindestens zwanzig Zeichen.', steps: '' }));
+ok('Admin löscht fremdes Ticket', await admin.del(`/admin/bug-reports/${bug3.id}`));
+check('Löschen steht im Audit-Log', (await admin.get('/admin/audit?limit=20&q=ticket.deleted')).data.some((row) => row.action === 'ticket.deleted'));
+
+// ---------- Notizblock
+const fiveK = 'x'.repeat(50001);
+const noteSolo = ok('Notiz solo', await alice.post('/notes', { title: 'Meine Notiz', body: 'Text <img src=x onerror=alert(1)>' }));
+const noteTeam = ok('Notiz Team', await bob.post('/notes', { title: 'Team-Notiz', body: 'Für alle', team_id: team.id }));
+const notesOf = async (who) => (await who.get('/notes')).data;
+check('Eigene und Team-Notiz', (await notesOf(alice)).some((n) => n.id === noteSolo.id) && (await notesOf(alice)).some((n) => n.id === noteTeam.id));
+check('Rolle in der Liste', (await notesOf(carol)).find((n) => n.id === noteTeam.id)?.role === 'viewer');
+check('Viewer sieht fremde Solo-Notiz nicht', !(await notesOf(carol)).some((n) => n.id === noteSolo.id));
+check('Fremder sieht nichts', !(await notesOf(dave)).some((n) => [noteSolo.id, noteTeam.id].includes(n.id)));
+denied('IDOR Notiz ändern', await bob.patch(`/notes/${noteSolo.id}`, { title: 'x' }), [404]);
+denied('IDOR Notiz löschen', await dave.del(`/notes/${noteSolo.id}`), [404]);
+denied('Fremder ändert Team-Notiz nicht', await dave.patch(`/notes/${noteTeam.id}`, { title: 'x' }), [404]);
+denied('Viewer ändert Team-Notiz nicht', await carol.patch(`/notes/${noteTeam.id}`, { title: 'x' }), [403]);
+denied('Viewer löscht Team-Notiz nicht', await carol.del(`/notes/${noteTeam.id}`), [403]);
+denied('Viewer legt keine Team-Notiz an', await carol.post('/notes', { title: 'x', team_id: team.id }), [403]);
+denied('Fremder legt keine Team-Notiz an', await dave.post('/notes', { title: 'x', team_id: team.id }), [404]);
+ok('Owner ändert Team-Notiz', await alice.patch(`/notes/${noteTeam.id}`, { body: 'Geändert von Alice' }));
+check('Team sieht Änderung und Bearbeiter', (await notesOf(bob)).find((n) => n.id === noteTeam.id)?.updated_by_name === 'alice', JSON.stringify((await notesOf(bob)).find((n) => n.id === noteTeam.id)?.updated_by_name));
+const beforePin = (await notesOf(alice)).find((n) => n.id === noteSolo.id);
+ok('Notiz anheften', await alice.patch(`/notes/${noteSolo.id}`, { pinned: true }));
+const afterPin = await notesOf(alice);
+check('Angeheftet steht oben', afterPin[0].id === noteSolo.id && afterPin[0].pinned === true);
+check('Anheften zählt nicht als Bearbeitung', afterPin[0].updated_at === beforePin.updated_at, `${beforePin.updated_at} ${afterPin[0].updated_at}`);
+invalid('Notiz ohne Inhalt', await alice.post('/notes', { title: '  ', body: '  ' }));
+invalid('Notiz leer machen', await alice.patch(`/notes/${noteSolo.id}`, { title: '', body: '' }));
+invalid('Titel zu lang', await alice.post('/notes', { title: 'x'.repeat(151) }));
+invalid('Text zu lang', await alice.post('/notes', { body: fiveK }));
+invalid('Notiz-ID ungültig', await alice.patch('/notes/abc', { title: 'x' }));
+invalid('Team-ID ungültig', await alice.post('/notes', { title: 'x', team_id: 'abc' }));
+invalid('Null-Byte im Text', await alice.post('/notes', { title: 'a\u0000b' }));
+denied('Notiz nicht vorhanden', await alice.patch('/notes/00000000-0000-4000-8000-000000000000', { title: 'x' }), [404]);
+ok('Notiz privat→Team', await alice.patch(`/notes/${noteSolo.id}`, { team_id: team.id }));
+check('Team sieht verschobene Notiz', (await notesOf(carol)).some((n) => n.id === noteSolo.id));
+denied('Viewer verschiebt nicht', await carol.patch(`/notes/${noteSolo.id}`, { team_id: null }), [403]);
+ok('Notiz Team→privat', await alice.patch(`/notes/${noteSolo.id}`, { team_id: null }));
+check('Team sieht sie nicht mehr', !(await notesOf(bob)).some((n) => n.id === noteSolo.id));
+check('Besitzerin behält sie', (await notesOf(alice)).find((n) => n.id === noteSolo.id)?.role === 'owner');
+const noteExtra = ok('Notiz zum Löschen', await alice.post('/notes', { body: 'nur Text, kein Titel' }));
+ok('Notiz löschen', await alice.del(`/notes/${noteExtra.id}`));
+denied('Gelöschte Notiz ist weg', await alice.del(`/notes/${noteExtra.id}`), [404]);
+
+// ---------- ToDos
+const todosOf = async (who) => (await who.get('/todos')).data;
+const todoSolo = ok('ToDo solo', await alice.post('/todos', { title: 'Steuer abgeben', due_date: dayAt(1), note: 'Belege' }));
+const todoTeam = ok('ToDo Team', await bob.post('/todos', { title: 'Team-Aufgabe', due_date: dayAt(0), team_id: team.id }));
+const todoFree = ok('ToDo ohne Deadline', await alice.post('/todos', { title: 'Irgendwann' }));
+check('Team-ToDo für Team sichtbar', (await todosOf(carol)).find((t) => t.id === todoTeam.id)?.role === 'viewer');
+check('Solo-ToDo nicht für Team sichtbar', !(await todosOf(bob)).some((t) => t.id === todoSolo.id));
+check('Fremder sieht keine ToDos', !(await todosOf(dave)).some((t) => [todoSolo.id, todoTeam.id].includes(t.id)));
+denied('IDOR ToDo ändern', await bob.patch(`/todos/${todoSolo.id}`, { title: 'x' }), [404]);
+denied('IDOR ToDo löschen', await dave.del(`/todos/${todoSolo.id}`), [404]);
+denied('Viewer hakt nicht ab', await carol.patch(`/todos/${todoTeam.id}`, { done: true }), [403]);
+denied('Viewer löscht nicht', await carol.del(`/todos/${todoTeam.id}`), [403]);
+denied('Viewer legt kein Team-ToDo an', await carol.post('/todos', { title: 'x', team_id: team.id }), [403]);
+invalid('ToDo ohne Titel', await alice.post('/todos', { title: '   ' }));
+invalid('ToDo Datum ungültig', await alice.post('/todos', { title: 'x', due_date: '2026-13-45' }));
+invalid('ToDo Datum nicht vorhanden', await alice.post('/todos', { title: 'x', due_date: '2026-02-31' }));
+invalid('ToDo Titel zu lang', await alice.post('/todos', { title: 'x'.repeat(201) }));
+invalid('ToDo-ID ungültig', await alice.patch('/todos/abc', { done: true }));
+ok('Editor ändert Team-ToDo', await bob.patch(`/todos/${todoTeam.id}`, { note: 'wichtig' }));
+ok('Editor hakt ab', await bob.patch(`/todos/${todoTeam.id}`, { done: true }));
+const doneRow = (await todosOf(alice)).find((t) => t.id === todoTeam.id);
+check('Erledigt mit Name', doneRow.done_at && doneRow.done_by_name === 'bob', JSON.stringify(doneRow));
+ok('Wieder öffnen', await alice.patch(`/todos/${todoTeam.id}`, { done: false }));
+const reopened = (await todosOf(alice)).find((t) => t.id === todoTeam.id);
+check('Geöffnet ohne Erledigt-Daten', !reopened.done_at && !reopened.done_by_name, JSON.stringify(reopened));
+ok('Deadline entfernen', await alice.patch(`/todos/${todoFree.id}`, { title: 'Später' }));
+check('Andere Felder bleiben', (await todosOf(alice)).find((t) => t.id === todoSolo.id).note === 'Belege');
+
+// Deadline-Benachrichtigungen über den echten Worker-Job
+const runTodoJob = () => runJob('todos.remind');
+const dueNotes = async (who) => (await who.get('/notifications')).data.items.filter((item) => item.kind === 'todo_due');
+const todoOverdue = ok('ToDo überfällig', await alice.post('/todos', { title: 'Überfällig', due_date: dayAt(-3) }));
+const todoLater = ok('ToDo später', await alice.post('/todos', { title: 'Viel später', due_date: dayAt(30) }));
+const todoDone = ok('ToDo erledigt mit Deadline', await alice.post('/todos', { title: 'Schon erledigt', due_date: dayAt(0) }));
+ok('Abhaken vor dem Lauf', await alice.patch(`/todos/${todoDone.id}`, { done: true }));
+ok('Carol schaltet ToDo-Glocke ab', await carol.put('/me/notification-prefs', [{ kind: 'todo_due', in_app: false, email: false }]));
+runTodoJob();
+const aliceDue = await dueNotes(alice);
+check('Morgen fällig gemeldet', aliceDue.some((item) => item.title === 'ToDo morgen fällig: Steuer abgeben'), JSON.stringify(aliceDue.map((i) => i.title)));
+check('Heute fällig gemeldet', aliceDue.some((item) => item.title === 'ToDo heute fällig: Team-Aufgabe'));
+check('Überfällig gemeldet', aliceDue.some((item) => item.title === 'ToDo überfällig: Überfällig'));
+check('Spätere Deadline noch nicht', !aliceDue.some((item) => item.title.includes('Viel später')));
+check('Erledigt meldet nicht', !aliceDue.some((item) => item.title.includes('Schon erledigt')));
+check('Ohne Deadline meldet nicht', !aliceDue.some((item) => /Später|Irgendwann/.test(item.title)));
+check('Team-ToDo erreicht andere Mitglieder', (await dueNotes(bob)).some((item) => item.title === 'ToDo heute fällig: Team-Aufgabe'));
+check('Solo-ToDo erreicht andere nicht', !(await dueNotes(bob)).some((item) => item.title.includes('Steuer')));
+check('Abgeschaltete Benachrichtigung bleibt aus', (await dueNotes(carol)).length === 0);
+check('Fremde bekommen nichts', (await dueNotes(dave)).length === 0);
+const firstCount = (await dueNotes(alice)).length;
+runTodoJob();
+check('Zweiter Lauf meldet nicht doppelt', (await dueNotes(alice)).length === firstCount, `${firstCount} -> ${(await dueNotes(alice)).length}`);
+ok('Deadline verschieben', await alice.patch(`/todos/${todoLater.id}`, { due_date: dayAt(0) }));
+runTodoJob();
+check('Neue Deadline meldet erneut', (await dueNotes(alice)).some((item) => item.title === 'ToDo heute fällig: Viel später'));
+ok('Team-ToDo löschen', await bob.del(`/todos/${todoTeam.id}`));
+ok('ToDo löschen', await alice.del(`/todos/${todoDone.id}`));
+denied('Gelöschtes ToDo ist weg', await alice.del(`/todos/${todoDone.id}`), [404]);
+const expNew = ok('DSGVO-Export mit Notizen und ToDos', await alice.get('/me/export'));
+check('Export enthält Notizen, ToDos, Tickets', expNew.notes.some((n) => n.id === noteSolo.id) && expNew.todos.some((t) => t.id === todoSolo.id) && expNew.bug_reports.some((b) => String(b.id) === String(bug.id)));
+check('Export ohne Notizen anderer', !expNew.notes.some((n) => n.id === noteTeam.id));
+ok('Team-ToDo für die Browser-Tests', await bob.post('/todos', { title: 'Team-Protokoll', due_date: dayAt(5), team_id: team.id }));
+const jobNames = (await admin.get('/admin/system')).data.jobs.map((job) => job.name);
+check('Job erscheint in der Systemübersicht', jobNames.includes('todos.remind'), jobNames.join());
 
 // ---------- Admin
 for (const p of ['/admin/overview', '/admin/users', '/admin/roles', '/admin/groups', '/admin/teams', '/admin/settings', '/admin/system', '/admin/audit?limit=10', '/admin/api-keys', '/admin/webhooks', '/admin/backups']) ok(`GET ${p}`, await admin.get(p));
@@ -344,12 +621,98 @@ const backup = await admin.post('/admin/backups', {});
 check('Backup erstellen', backup.status === 200, JSON.stringify(backup.data).slice(0, 300));
 const backups = ok('Backups', await admin.get('/admin/backups'));
 check('Backup erscheint', backups.length >= 1 || backups.files?.length >= 1, JSON.stringify(backups).slice(0, 200));
+// Benutzer-Teil-Update darf Rollen nicht leeren
+ok('Benutzer nur umbenennen', await admin.patch(`/admin/users/${uC.id}`, { name: 'carol' }));
+check('Benutzer behält Rollen', (await admin.get('/admin/users')).data.find((row) => row.id === uC.id).roles.includes('User'));
+// Validierungsmeldungen sind deutsch und nennen das Feld verständlich
+const reportError = await alice.post('/reports/saved', { kind: 'monthly', rhythm: 'monthly', recipients: ['kaputt'] });
+check('Meldung zu Empfängern', reportError.status === 400 && reportError.data.message === 'Empfänger 1 ist keine gültige E-Mail-Adresse', reportError.data.message);
+const titleError = await alice.post('/notes', { title: 'x'.repeat(151) });
+check('Meldung zu langem Titel', titleError.data.message === 'Titel darf höchstens 150 Zeichen lang sein', titleError.data.message);
+const missingError = await alice.post('/todos', {});
+check('Meldung zu fehlendem Feld', missingError.data.message === 'Titel fehlt', missingError.data.message);
+// Proxy ohne TRUST_PROXY fällt im Admin-Bereich auf
+const viaProxy = await fetch(`${BASE}/api/admin/settings`, { headers: { authorization: `Bearer ${admin.token.t}`, 'x-forwarded-for': '203.0.113.9' } });
+check('Proxy-Hinweis bei fehlendem TRUST_PROXY', (await viaProxy.json()).env.proxy_not_trusted === true);
+check('Kein Proxy-Hinweis ohne Proxy', (await admin.get('/admin/settings')).data.env.proxy_not_trusted === false);
+// Benachrichtigungs-Schalter gelten für alle Arten
+ok('Dave schaltet Team-Meldungen ab', await dave.put('/me/notification-prefs', [{ kind: 'team_added', in_app: false, email: false }]));
+const switchTeam = ok('Team für Schalter-Test', await alice.post('/teams', { name: 'Schalter' }));
+ok('Dave hinzufügen', await alice.post(`/teams/${switchTeam.id}/members`, { email: uD.email, team_role: 'viewer' }));
+const daveTeamNotes = async () => (await dave.get('/notifications')).data.items.filter((item) => item.kind === 'team_added').length;
+check('Abgeschaltete Art erscheint nicht', (await daveTeamNotes()) === 0);
+const daveUnread = (await dave.get('/notifications')).data.unread;
+ok('Dave schaltet sie wieder an', await dave.put('/me/notification-prefs', [{ kind: 'team_added', in_app: true, email: false }]));
+check('Danach ist sie wieder sichtbar', (await daveTeamNotes()) === 1);
+check('Zähler folgt dem Schalter', (await dave.get('/notifications')).data.unread === daveUnread + 1);
+ok('Team für Schalter-Test löschen', await alice.del(`/teams/${switchTeam.id}`));
+// Mailversand, wenn ein Test-SMTP läuft (MAILPIT=http://localhost:18025)
+if (process.env.MAILPIT) {
+  const mails = async (to, subject) => {
+    const { messages } = await (await fetch(`${process.env.MAILPIT}/api/v1/messages?limit=200`)).json();
+    return messages.filter((message) => message.To.some((address) => address.Address === to) && message.Subject.includes(subject)).length;
+  };
+  const mailsAfter = async (to, subject, count) => { for (let i = 0; i < 25; i++) { if ((await mails(to, subject)) >= count) return true; await new Promise((resolve) => setTimeout(resolve, 200)); } return false; };
+  ok('Mailversand einschalten', await admin.put('/admin/settings', { 'mail.enabled': true }));
+  const commentsBefore = await mails(uA.email, 'Neuer Kommentar zu Ticket');
+  ok('Kommentar ohne Mail-Wahl', await admin.post(`/admin/bug-reports/${bug.id}/comments`, { body: 'ohne Mail' }));
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  check('Ohne Wahl keine Mail', (await mails(uA.email, 'Neuer Kommentar zu Ticket')) === commentsBefore);
+  ok('Alice wählt Mail für Kommentare', await alice.put('/me/notification-prefs', [{ kind: 'ticket_comment', in_app: true, email: true }]));
+  ok('Kommentar mit Mail-Wahl', await admin.post(`/admin/bug-reports/${bug.id}/comments`, { body: 'mit Mail' }));
+  check('Kommentar kommt per Mail', await mailsAfter(uA.email, 'Neuer Kommentar zu Ticket', commentsBefore + 1));
+  // Nur E-Mail, ohne Glocke: Der Job läuft zweimal, die Mail darf nur einmal kommen
+  ok('Alice: ToDo nur per Mail', await alice.put('/me/notification-prefs', [{ kind: 'todo_due', in_app: false, email: true }]));
+  const mailTodo = ok('ToDo für Mail', await alice.post('/todos', { title: 'Mail-Aufgabe', due_date: dayAt(0) }));
+  runTodoJob();
+  check('ToDo-Deadline kommt per Mail', await mailsAfter(uA.email, 'ToDo heute fällig: Mail-Aufgabe', 1));
+  psql(`UPDATE todos SET last_reminder=NULL WHERE id='${mailTodo.id}'`);
+  runTodoJob();
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  check('Mail kommt nur einmal', (await mails(uA.email, 'ToDo heute fällig: Mail-Aufgabe')) === 1);
+  check('Glocke bleibt aus', !(await alice.get('/notifications')).data.items.some((item) => item.title.includes('Mail-Aufgabe')));
+  // Ältere Arten: E-Mail-Schalter wirkt jetzt auch dort
+  ok('Dave wählt Mail für Team-Meldungen', await dave.put('/me/notification-prefs', [{ kind: 'team_added', in_app: true, email: true }]));
+  const mailTeam = ok('Team für Mail-Test', await alice.post('/teams', { name: 'MailTeam' }));
+  ok('Dave hinzufügen für Mail', await alice.post(`/teams/${mailTeam.id}/members`, { email: uD.email, team_role: 'viewer' }));
+  check('Team-Meldung kommt per Mail', await mailsAfter(uD.email, 'zu „MailTeam“', 1));
+  ok('Team für Mail-Test löschen', await alice.del(`/teams/${mailTeam.id}`));
+  ok('Alice: ToDo wieder normal', await alice.put('/me/notification-prefs', [{ kind: 'todo_due', in_app: true, email: false }, { kind: 'ticket_comment', in_app: true, email: false }]));
+  ok('Testaufgabe löschen', await alice.del(`/todos/${mailTodo.id}`));
+}
+// Zugang gilt bis einschließlich zum Ablaufdatum
+ok('Ablauf heute', await admin.patch(`/admin/users/${uD.id}`, { expires_at: dayAt(0) }));
+const expiringLogin = await anon.post('/auth/login', { email: uD.email, password: uD.password });
+check('Am letzten Tag noch gültig', expiringLogin.status === 200, JSON.stringify(expiringLogin.data));
+const expiringClient = client({ t: expiringLogin.data.access_token });
+ok('Sitzung am letzten Tag aktiv', await expiringClient.get('/me'));
+ok('Ablauf gestern', await admin.patch(`/admin/users/${uD.id}`, { expires_at: dayAt(-1) }));
+denied('Abgelaufene Sitzung endet sofort', await expiringClient.get('/me'), [401]);
+denied('Abgelaufen meldet sich nicht an', await anon.post('/auth/login', { email: uD.email, password: uD.password }), [403]);
+ok('Ablauf entfernen', await admin.patch(`/admin/users/${uD.id}`, { expires_at: null }));
+ok('Ohne Ablauf wieder aktiv', await expiringClient.get('/me'));
 ok('User sperren', await admin.patch(`/admin/users/${uD.id}`, { status: 'disabled' }));
 denied('Deaktivierter Login', await anon.post('/auth/login', { email: uD.email, password: uD.password }), [400, 401, 403, 423]);
 
 // ---------- Aufräum-Kaskaden
 ok('Konto löschen entfernt Budgetbezug', await alice.del(`/budgets/${shared.id}`));
 check('Budgets nach Kontolöschung konsistent', (await alice.get('/spending-budgets')).status === 200);
+
+// ---------- Rate-Limits: nur dort, wo Passwörter oder Codes geprüft werden
+const statuses = (requests) => Promise.all(requests).then((rows) => rows.map((row) => row.status));
+const burst = (count, make) => statuses(Array.from({ length: count }, make));
+check('Kein allgemeines Limit auf der API', (await burst(350, () => fetch(`${BASE}/api/auth/config`))).every((status) => status === 200));
+check('Kein allgemeines Limit auf statischen Dateien', (await burst(350, () => fetch(`${BASE}/${assetBase}js/app.js`))).every((status) => status === 200));
+check('Kein Limit beim Erneuern der Sitzung', !(await burst(30, () => fetch(`${BASE}/api/auth/refresh`, { method: 'POST' }))).includes(429));
+const passwordTries = [];
+for (let i = 0; i < 12; i++) passwordTries.push((await alice.post('/me/password', { current: 'falsch', password: 'egal-egal-egal' })).status);
+check('Passwort ändern bleibt begrenzt', passwordTries.includes(429) && passwordTries[0] === 400, passwordTries.join());
+const reveals = [];
+for (let i = 0; i < 7; i++) reveals.push((await alice.post(`/properties/${house.id}/pin/reveal`, { password: 'falsch' })).status);
+check('Tür-PIN bleibt begrenzt', reveals.includes(429), reveals.join());
+const loginTries = [];
+for (let i = 0; i < 12; i++) loginTries.push((await anon.post('/auth/login', { email: 'niemand@e2e.test', password: 'falsch' })).status);
+check('Login bleibt begrenzt', loginTries.includes(429), loginTries.join());
 
 // ---------- Ergebnis
 check('keine 5xx-Antworten', fives.length === 0, `\n  ${fives.join('\n  ')}`);

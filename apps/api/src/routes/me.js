@@ -14,7 +14,7 @@ import { payrollRun } from '../jobs.js';
 
 const publicUser = (u) => ({
   id: u.id, email: u.email, name: u.name, locale: u.locale, currency: u.currency, timezone: u.timezone, week_start: u.week_start,
-  weekly_work_hours: u.weekly_work_hours, hourly_rate: u.hourly_rate, overtime_surcharge_percent: u.overtime_surcharge_percent,
+  weekly_work_hours: u.weekly_work_hours, daily_salary: u.daily_salary, hourly_bonus_percent: u.hourly_bonus_percent,
   payroll_budget_id: u.payroll_budget_id,
   theme: u.theme, accent: u.accent, gravatar_enabled: u.gravatar_enabled, totp_enabled: u.totp_enabled,
   has_ical: !!u.ical_token, last_login_at: u.last_login_at,
@@ -34,8 +34,8 @@ export default async function routes(app) {
       timezone: z.string().max(60).optional(),
       week_start: z.number().int().min(0).max(1).optional(),
       weekly_work_hours: z.number().min(1).max(168).multipleOf(0.25).optional(),
-      hourly_rate: z.number().min(0).max(99999999.99).multipleOf(0.01).optional(),
-      overtime_surcharge_percent: z.number().min(0).max(1000).multipleOf(0.01).optional(),
+      daily_salary: z.number().min(0).max(9999999999.99).multipleOf(0.01).optional(),
+      hourly_bonus_percent: z.number().min(0).max(1000).multipleOf(0.01).optional(),
       payroll_budget_id: z.string().uuid().nullish(),
       theme: z.enum(['system', 'light', 'dark']).optional(),
       accent: z.enum(['indigo', 'emerald', 'ocean', 'rose', 'amber', 'mono']).optional(),
@@ -69,7 +69,10 @@ export default async function routes(app) {
     return publicUser(await one('SELECT * FROM users WHERE id=$1', [req.user.id]));
   });
 
-  app.post('/me/password', requireAuth, async (req, reply) => {
+  // Prüft Passwort oder 2FA-Code, also begrenzt gegen Durchprobieren
+  const checksSecret = { ...requireAuth, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
+
+  app.post('/me/password', checksSecret, async (req, reply) => {
     const { current, password } = z.object({ current: z.string(), password: z.string() }).parse(req.body);
     if (!(await verifyPassword(req.user.password_hash, current))) throw bad('Aktuelles Passwort ist falsch', 'wrong_password');
     await checkPassword(password);
@@ -101,7 +104,7 @@ export default async function routes(app) {
     const uri = totpUri(req.user.email, secret);
     return { secret, uri, qr_svg: await QRCode.toString(uri, { type: 'svg', margin: 1, width: 200 }) };
   });
-  app.post('/me/2fa/enable', requireAuth, async (req) => {
+  app.post('/me/2fa/enable', checksSecret, async (req) => {
     const { code } = z.object({ code: z.string().min(6).max(10) }).parse(req.body);
     if (!req.user.totp_secret_enc) throw bad('Zuerst Einrichtung starten');
     if (!totpValid(decrypt(req.user.totp_secret_enc), code)) throw bad('Code ungültig', 'invalid_code');
@@ -114,7 +117,7 @@ export default async function routes(app) {
     await audit(req, '2fa.enabled', 'user', req.user.id);
     return { recovery_codes: codes };
   });
-  app.post('/me/2fa/disable', requireAuth, async (req) => {
+  app.post('/me/2fa/disable', checksSecret, async (req) => {
     const { password } = z.object({ password: z.string() }).parse(req.body);
     if (!(await verifyPassword(req.user.password_hash, password))) throw bad('Passwort ist falsch', 'wrong_password');
     if (await getSetting('security.force_2fa')) throw bad('2FA ist für alle Konten verpflichtend');
@@ -123,7 +126,7 @@ export default async function routes(app) {
     await audit(req, '2fa.disabled', 'user', req.user.id);
     return { ok: true };
   });
-  app.post('/me/2fa/recovery', requireAuth, async (req) => {
+  app.post('/me/2fa/recovery', checksSecret, async (req) => {
     const { password } = z.object({ password: z.string() }).parse(req.body);
     if (!req.user.totp_enabled) throw bad('2FA ist nicht aktiv');
     if (!(await verifyPassword(req.user.password_hash, password))) throw bad('Passwort ist falsch', 'wrong_password');
@@ -136,9 +139,10 @@ export default async function routes(app) {
   });
 
   // Benachrichtigungen
+  const shownInApp = `n.user_id=$1 AND NOT EXISTS (SELECT 1 FROM notification_prefs p WHERE p.user_id=n.user_id AND p.kind=n.kind AND NOT p.in_app)`;
   app.get('/notifications', requireAuth, async (req) => ({
-    items: await many('SELECT id, kind, title, body, read_at, created_at FROM notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50', [req.user.id]),
-    unread: (await one('SELECT count(*)::int n FROM notifications WHERE user_id=$1 AND read_at IS NULL', [req.user.id])).n,
+    items: await many(`SELECT n.id, n.kind, n.title, n.body, n.read_at, n.created_at FROM notifications n WHERE ${shownInApp} ORDER BY n.created_at DESC LIMIT 50`, [req.user.id]),
+    unread: (await one(`SELECT count(*)::int n FROM notifications n WHERE ${shownInApp} AND n.read_at IS NULL`, [req.user.id])).n,
   }));
   app.post('/notifications/read', requireAuth, async (req) => {
     await q('UPDATE notifications SET read_at=now() WHERE user_id=$1 AND read_at IS NULL', [req.user.id]);
@@ -189,13 +193,17 @@ export default async function routes(app) {
     const transactions = await many(
       `SELECT t.* FROM transactions t JOIN budgets b ON b.id=t.budget_id WHERE b.owner_user_id=$1 ORDER BY booked_at`, [req.user.id]);
     const work_entries = await many('SELECT * FROM work_entries WHERE user_id=$1 ORDER BY work_date', [req.user.id]);
-    const [work_projects, timer, contacts, calendar_events] = await Promise.all([
+    const [work_projects, timer, contacts, calendar_events, notes, todos, bug_reports, bug_report_comments] = await Promise.all([
       many('SELECT * FROM work_projects WHERE owner_user_id=$1 OR team_id IN (SELECT team_id FROM team_members WHERE user_id=$1) ORDER BY name', [req.user.id]),
       one('SELECT * FROM work_timers WHERE user_id=$1', [req.user.id]),
       many('SELECT provider,external_id,name,email,phone,updated_at FROM synced_contacts WHERE user_id=$1 ORDER BY provider,name', [req.user.id]),
       many('SELECT provider,external_id,title,starts_at,ends_at,all_day,updated_at FROM synced_calendar_events WHERE user_id=$1 ORDER BY starts_at', [req.user.id]),
+      many('SELECT id,team_id,title,body,pinned,created_at,updated_at FROM notes WHERE owner_user_id=$1 OR created_by=$1 ORDER BY created_at', [req.user.id]),
+      many('SELECT id,team_id,title,note,due_date,done_at,created_at,updated_at FROM todos WHERE owner_user_id=$1 OR created_by=$1 ORDER BY created_at', [req.user.id]),
+      many('SELECT id,title,description,steps,github_url,created_at FROM bug_reports WHERE user_id=$1 ORDER BY created_at', [req.user.id]),
+      many('SELECT report_id,body,created_at FROM bug_report_comments WHERE user_id=$1 ORDER BY created_at', [req.user.id]),
     ]);
-    return { exported_at: new Date().toISOString(), user: u, budgets, transactions, work_entries, work_projects, work_timer: timer, contacts, calendar_events };
+    return { exported_at: new Date().toISOString(), user: u, budgets, transactions, work_entries, work_projects, work_timer: timer, contacts, calendar_events, notes, todos, bug_reports, bug_report_comments };
   });
 }
 

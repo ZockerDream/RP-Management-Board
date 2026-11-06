@@ -1,6 +1,8 @@
 import { one, many, q } from './db.js';
 import { verifyJwt, sha256 } from './security.js';
 import { getSetting } from './settings.js';
+import { config } from './config.js';
+import { accessExpired, dateInZone } from './periods.js';
 
 export class HttpError extends Error {
   constructor(status, message, code) {
@@ -99,6 +101,7 @@ export async function authenticate(req) {
     req.sessionId = p.sid;
   }
   if (!userRow) throw new HttpError(401, 'Benutzer nicht aktiv', 'unauthenticated');
+  if (accessExpired(userRow.expires_at, dateInZone(config.tz))) throw new HttpError(401, 'Zugang ist abgelaufen', 'expired');
   const acc = await loadAccess(userRow.id);
   req.user = userRow;
   req.perms = acc.perms;
@@ -156,6 +159,26 @@ export async function budgetAccess(userId, budgetId, write = false) {
   if (write && role === 'viewer') throw forbidden('Nur Leserechte auf diesem Konto');
   if (write && b.archived) throw bad('Konto ist archiviert');
   return { budget: b, role };
+}
+
+// Datensätze, die einer Person oder einem Team gehören (Notizen, ToDos): liefert die Rolle, Viewer dürfen nur lesen
+export async function recordRole(userId, row, write = false) {
+  if (!row) throw notFound();
+  const role = row.owner_user_id === userId
+    ? 'owner'
+    : row.team_id && (await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [row.team_id, userId]))?.team_role;
+  if (!role) throw notFound();
+  if (write && role === 'viewer') throw forbidden('Nur Team-Owner und -Editoren dürfen das ändern');
+  return role;
+}
+
+// Besitzer eines neuen oder verschobenen Datensatzes: ohne Team gehört er der Person selbst
+export async function recordOwner(userId, teamId) {
+  if (!teamId) return { owner_user_id: userId, team_id: null };
+  const member = await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [teamId, userId]);
+  if (!member) throw notFound('Team nicht gefunden');
+  if (member.team_role === 'viewer') throw forbidden('Nur Team-Owner und -Editoren dürfen das ändern');
+  return { owner_user_id: null, team_id: teamId };
 }
 
 export const accessibleBudgetIds = async (userId) =>

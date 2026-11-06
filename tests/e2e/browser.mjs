@@ -1,20 +1,17 @@
 import { chromium } from 'playwright';
-const BASE = 'http://localhost:18088';
+const BASE = process.env.BASE || 'http://localhost:18088';
 const out = '/work/shots';
 const fails = [], problems = [];
 let passed = 0;
 const check = (name, ok, extra = '') => { if (ok) passed++; else { fails.push(`${name} ${extra}`); console.log(`FAIL ${name} ${extra}`); } };
 
 const browser = await chromium.launch();
-const stamps = [];
-const throttle = async () => { for (;;) { const now = Date.now(); while (stamps.length && now - stamps[0] > 61000) stamps.shift(); if (stamps.length < 200) return; await new Promise((r) => setTimeout(r, 1000)); } };
 async function session(viewport = { width: 1400, height: 900 }) {
   const ctx = await browser.newContext({ viewport, serviceWorkers: 'block' });
   const page = await ctx.newPage();
   let where = 'start';
   page.on('console', (m) => { if (m.type() === 'error' && !/gravatar|status of 4\d\d/i.test(m.text())) problems.push(`[${where}] console: ${m.text().slice(0, 220)}`); });
   page.on('pageerror', (e) => problems.push(`[${where}] pageerror: ${e.message.slice(0, 220)}`));
-  page.on('request', () => stamps.push(Date.now()));
   page.on('response', (r) => { if (r.status() >= 500) problems.push(`[${where}] ${r.status()} ${r.url()}`); });
   page.on('requestfailed', (r) => { const f = r.failure()?.errorText || ''; if (!/ABORTED|gravatar/i.test(`${f} ${r.url()}`)) problems.push(`[${where}] requestfailed ${r.url()} ${f}`); });
   return { ctx, page, at: (w) => { where = w; } };
@@ -29,7 +26,7 @@ async function login(page, email, password) {
   await page.waitForSelector('.app:not(.hidden) #view');
   await settle(page);
 }
-const go = async (page, hash) => { await throttle(); await page.evaluate((h) => { location.hash = h; }, hash); await page.waitForTimeout(150); await settle(page); await page.waitForTimeout(200); };
+const go = async (page, hash) => { await page.evaluate((h) => { location.hash = h; }, hash); await page.waitForTimeout(150); await settle(page); await page.waitForTimeout(200); };
 const submit = async (page) => { await page.click('.modal.open button[type=submit]'); await until(page, () => !document.querySelector('.modal.open form')); await page.waitForTimeout(350); };
 const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-error')?.textContent || '');
 
@@ -67,7 +64,7 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await login(page, 'alice@e2e.test', 'alice-Sehr-Sicher-9931!');
   const navs = await page.$$eval('.sidebar a.nav', (ns) => ns.filter((n) => n.offsetParent !== null).map((n) => n.getAttribute('href')));
   check('User sieht keine Admin-Links', !navs.some((h) => h.includes('admin')), navs.join());
-  for (const want of ['#/spending', '#/sport-run', '#/sport-swim', '#/sport-bike', '#/assets-vehicles', '#/assets-properties', '#/assets-people', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/datenschutz', '#/impressum']) check(`Nav ${want}`, navs.includes(want));
+  for (const want of ['#/notes', '#/todos', '#/spending', '#/sport-run', '#/sport-swim', '#/sport-bike', '#/assets-vehicles', '#/assets-properties', '#/assets-people', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/datenschutz', '#/impressum']) check(`Nav ${want}`, navs.includes(want));
   for (const h of navs) {
     at(`alice ${h}`);
     await go(page, h);
@@ -75,7 +72,7 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
     check(`Seite ${h} hat Inhalt`, ((await page.textContent('#view')) || '').trim().length > 10);
     for (const t of await page.$$('#view .tabs:not([hidden]) [data-tab]')) { await t.click(); await page.waitForTimeout(250); check(`${h} Tab ${await t.getAttribute('data-tab')}`, !(await viewErr(page)), await viewErr(page)); }
     const name = h.replace('#/', '');
-    if (['dashboard', 'budgets', 'spending', 'sport-run', 'work', 'assets-manage', 'help', 'datenschutz', 'impressum'].includes(name)) await page.screenshot({ path: `${out}/alice-${name}.png` });
+    if (['dashboard', 'budgets', 'spending', 'sport-run', 'work', 'notes', 'todos', 'bug-report', 'assets-manage', 'help', 'datenschutz', 'impressum'].includes(name)) await page.screenshot({ path: `${out}/alice-${name}.png` });
   }
   // Admin-URL direkt gesperrt
   at('alice admin direkt');
@@ -87,8 +84,159 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await go(page, '#/dashboard');
   check('Dashboard ohne zukünftige Buchung', !/Zukunft Test/.test(await page.textContent('#view')));
   check('Gesamtsaldo gleich Kontostand', /960,50/.test(await page.locator('.kpi', { hasText: 'Gesamtsaldo' }).textContent()), await page.locator('.kpi', { hasText: 'Gesamtsaldo' }).textContent());
+  const dashboardText = await page.textContent('#d-body');
+  check('Dashboard zeigt Budget-Auslastung', /Budget-Auslastung/.test(dashboardText) && !/Konto-Auslastung/.test(dashboardText));
+  check('Auslastung nennt echte Budgets', await page.locator('.gauge', { hasText: 'Gesamt' }).count() === 1);
   await go(page, '#/transactions');
   check('Transaktionen zeigen zukünftige Buchung', /Zukunft Test/.test(await page.textContent('#view')));
+
+  // Dashboard: Tag, Woche, Monat
+  at('alice dashboard ansichten');
+  await go(page, '#/dashboard');
+  const activeView = () => page.$eval('#d-view .on', (b) => b.dataset.v);
+  const yAxis = () => page.$$eval('#d-cash text.axis[text-anchor="end"]', (t) => t.map((x) => x.textContent));
+  const expenseKpi = () => page.locator('.kpi', { hasText: 'Ausgaben' }).locator('.value').textContent();
+  check('Monat ist die Standardansicht', (await activeView()) === 'month');
+  for (const [mode, caption, count, chart] of [['day', 'am gewählten Tag', 14, 'letzte 14 Tage'], ['week', 'in der gewählten Woche', 8, 'letzte 8 Wochen'], ['month', 'im gewählten Monat', 3, 'letzte 6 Monate']]) {
+    await page.click(`#d-view [data-v=${mode}]`);
+    await page.waitForTimeout(700);
+    const body = await page.textContent('#d-body');
+    check(`Ansicht ${mode}: Beschriftung`, body.includes(caption), body.slice(0, 200));
+    check(`Ansicht ${mode}: Diagrammtitel`, body.includes(chart));
+    check(`Ansicht ${mode}: Zeiträume`, (await page.locator('#d-range option').count()) === count);
+    check(`Ansicht ${mode}: Saldo bleibt heutiger Stand`, /960,50/.test(await page.locator('.kpi', { hasText: 'Gesamtsaldo' }).textContent()));
+    check(`Ansicht ${mode}: keine kaputten Werte`, !/undefined|NaN|null/.test(body));
+    check(`Ansicht ${mode}: Achse ohne doppelte Werte`, new Set(await yAxis()).size === 5, (await yAxis()).join());
+    check(`Ansicht ${mode}: Kurve bleibt im Diagramm`, await page.evaluate(() => { const box = document.querySelector('#d-cash svg').getBoundingClientRect(); return [...document.querySelectorAll('#d-cash path[fill="none"]')].every((p) => p.getBoundingClientRect().bottom <= box.bottom - 27); }));
+    await page.screenshot({ path: `${out}/alice-dashboard-${mode}.png` });
+  }
+  await page.click('#d-view [data-v=day]');
+  await page.waitForTimeout(600);
+  check('Tagesansicht: heutige Ausgabe', /40,00/.test(await expenseKpi()), await expenseKpi());
+  await page.selectOption('#d-range', '-1');
+  await page.waitForTimeout(600);
+  check('Tagesansicht: gestern andere Werte', /0,00/.test(await expenseKpi()) && !/40,00/.test(await expenseKpi()), await expenseKpi());
+  await page.click('#d-view [data-v=week]');
+  await page.waitForTimeout(600);
+  check('Wechsel setzt auf den laufenden Zeitraum', (await page.inputValue('#d-range')) === '0');
+  check('Wochenansicht: enthält heutige Ausgabe', /40,00/.test(await expenseKpi()), await expenseKpi());
+  await go(page, '#/help');
+  await go(page, '#/dashboard');
+  check('Ansicht bleibt beim Seitenwechsel', (await activeView()) === 'week');
+  for (const mode of ['day', 'week', 'day', 'month']) await page.click(`#d-view [data-v=${mode}]`);
+  await page.waitForTimeout(900);
+  check('Schneller Wechsel zeigt die letzte Wahl', (await page.textContent('#d-body')).includes('im gewählten Monat'));
+  await page.selectOption('#d-range', '-1');
+  await page.waitForTimeout(500);
+  check('Letzter Monat bleibt wählbar', !/undefined|NaN/.test(await page.textContent('#d-body')));
+
+  // Notizblock
+  at('alice notizen');
+  await go(page, '#/notes');
+  check('Notiz wird als Text gezeigt', /onerror=alert/.test(await page.textContent('#n-list')) && !(await page.$('#n-list img')));
+  await page.click('#n-new');
+  check('Notiz: Solo und Team wählbar', (await page.$$eval('.modal.open [name=team_id] option', (o) => o.map((x) => x.textContent))).some((t) => t.includes('E2E Team')));
+  await page.click('.modal.open button[type=submit]');
+  await page.waitForSelector('.modal.open .auth-error:not([hidden])');
+  check('Leere Notiz wird abgelehnt', /erforderlich/.test(await page.textContent('.modal.open .auth-error')));
+  await page.fill('.modal.open [name=title]', 'UI Notiz');
+  await page.fill('.modal.open [name=body]', 'Zeile 1\nZeile 2');
+  await submit(page);
+  const noteCard = page.locator('#n-list .memo', { hasText: 'UI Notiz' });
+  check('Notiz angelegt', await noteCard.count() === 1);
+  check('Zeilenumbrüche bleiben', await noteCard.locator('.memo-body').evaluate((n) => getComputedStyle(n).whiteSpace === 'pre-wrap' && n.textContent === 'Zeile 1\nZeile 2'));
+  await noteCard.locator('[data-edit]').click();
+  check('Notiz vorbefüllt', (await page.inputValue('.modal.open [name=body]')) === 'Zeile 1\nZeile 2');
+  await page.selectOption('.modal.open [name=team_id]', { label: 'Team: E2E Team' });
+  await submit(page);
+  check('Notiz im Team', /E2E Team/.test(await noteCard.textContent()));
+  await noteCard.locator('[data-pin]').click();
+  await page.waitForTimeout(400);
+  check('Notiz angeheftet steht vorn', /UI Notiz/.test(await page.locator('#n-list .memo').first().textContent()) && /Angeheftet/.test(await noteCard.textContent()));
+  await page.click('#n-scope [data-s=solo]');
+  check('Filter Solo', await noteCard.count() === 0);
+  await page.click('#n-scope [data-s=team]');
+  check('Filter Team', await noteCard.count() === 1 && await page.locator('#n-list .memo', { hasText: 'Meine Notiz' }).count() === 0);
+  await page.click('#n-scope [data-s=all]');
+  await page.fill('#n-search', 'zeile 2');
+  check('Suche findet Text', await noteCard.count() === 1 && await page.locator('#n-list .memo').count() === 1);
+  await page.fill('#n-search', 'gibt-es-nicht');
+  check('Suche ohne Treffer', /Keine passende Notiz/.test(await page.textContent('#n-list')));
+  check('Suche behält Fokus', await page.evaluate(() => document.activeElement?.id === 'n-search'));
+  await page.screenshot({ path: `${out}/alice-notes-search.png` });
+  await page.fill('#n-search', '');
+  await noteCard.locator('[data-del]').click();
+  await submit(page);
+  check('Notiz gelöscht', await noteCard.count() === 0);
+
+  // ToDos
+  at('alice todos');
+  await go(page, '#/todos');
+  const openText = await page.textContent('#t-list');
+  for (const word of ['Überfällig', 'Heute', 'Demnächst', 'Ohne Deadline', 'Morgen fällig', 'Steuer abgeben']) check(`ToDos zeigen ${word}`, openText.includes(word), openText.slice(0, 200));
+  await page.screenshot({ path: `${out}/alice-todos.png` });
+  await page.click('#t-new');
+  await page.click('.modal.open button[type=submit]');
+  await page.waitForTimeout(200);
+  check('ToDo braucht einen Titel', await page.locator('.modal.open form').count() === 1);
+  await page.fill('.modal.open [name=title]', 'UI Aufgabe');
+  await page.fill('.modal.open [name=due_date]', new Date(Date.now() + 10 * 86400000).toLocaleDateString('sv-SE'));
+  await page.selectOption('.modal.open [name=team_id]', { label: 'Team: E2E Team' });
+  await submit(page);
+  const todoRow = page.locator('#t-list .todo-row', { hasText: 'UI Aufgabe' });
+  check('ToDo angelegt', await todoRow.count() === 1 && /E2E Team/.test(await todoRow.textContent()));
+  await todoRow.locator('[data-edit]').click();
+  await page.fill('.modal.open [name=note]', 'Mit <b>Notiz</b>');
+  await submit(page);
+  check('ToDo-Notiz bleibt Text', /<b>Notiz<\/b>/.test(await todoRow.textContent()));
+  await todoRow.locator('[data-done]').check();
+  await page.waitForTimeout(500);
+  check('Abgehakt verschwindet aus Offen', await todoRow.count() === 0);
+  await page.click('#t-status [data-status=done]');
+  check('Erledigt zeigt es mit Name', /Erledigt .* von alice/.test(await todoRow.textContent()), await todoRow.textContent());
+  await page.screenshot({ path: `${out}/alice-todos-done.png` });
+  await todoRow.locator('[data-done]').uncheck();
+  await page.waitForTimeout(500);
+  await page.click('#t-status [data-status=open]');
+  check('Wieder offen', await todoRow.count() === 1);
+  await page.click('#t-scope [data-s=solo]');
+  check('ToDo-Filter Solo', await todoRow.count() === 0);
+  await page.click('#t-scope [data-s=team]');
+  check('ToDo-Filter Team', await todoRow.count() === 1 && await page.locator('#t-list .todo-row', { hasText: 'Steuer abgeben' }).count() === 0);
+  await page.click('#t-scope [data-s=all]');
+  await todoRow.locator('[data-del]').click();
+  await submit(page);
+  check('ToDo gelöscht', await todoRow.count() === 0);
+  await page.click('#bell');
+  await page.waitForTimeout(400);
+  check('Glocke meldet ToDo-Deadline', /ToDo morgen fällig: Steuer abgeben/.test(await page.textContent('#notification-items')));
+  await page.click('#bell');
+
+  // Eigene Tickets
+  at('alice tickets');
+  await go(page, '#/bug-report');
+  await page.fill('#bug-report-form [name=title]', 'UI Ticket zum Löschen');
+  await page.fill('#bug-report-form [name=description]', 'Beschreibung mit mindestens zwanzig Zeichen.');
+  await page.click('#bug-report-form button[type=submit]');
+  const ownTicket = page.locator('#bug-report-list .ticket', { hasText: 'UI Ticket zum Löschen' });
+  await ownTicket.waitFor();
+  await ownTicket.locator('[name=body]').fill('   ');
+  await ownTicket.locator('[data-comment-form] button').click();
+  await page.waitForTimeout(200);
+  check('Leerer Kommentar wird nicht gesendet', await ownTicket.locator('.ticket-comment').count() === 0);
+  await ownTicket.locator('[name=body]').fill('Mein Kommentar <i>x</i>\nzweite Zeile');
+  await ownTicket.locator('[data-comment-form] button').click();
+  await ownTicket.locator('.ticket-comment').waitFor();
+  check('Kommentar erscheint als Text', /<i>x<\/i>/.test(await ownTicket.locator('.ticket-comment').textContent()) && /alice/.test(await ownTicket.locator('.ticket-comment').textContent()));
+  check('Kommentarfeld ist danach leer', (await ownTicket.locator('[name=body]').inputValue()) === '');
+  await page.screenshot({ path: `${out}/alice-ticket-comment.png` });
+  await ownTicket.locator('[data-comment-del]').click();
+  await submit(page);
+  check('Eigener Kommentar gelöscht', await ownTicket.locator('.ticket-comment').count() === 0);
+  await ownTicket.locator('[data-ticket-del]').click();
+  check('Löschen fragt nach', /endgültig/.test(await page.textContent('.modal.open')));
+  await submit(page);
+  check('Eigenes Ticket gelöscht', await ownTicket.count() === 0);
 
   // Konten
   at('alice konten');
@@ -96,6 +244,7 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   check('Konto zeigt Kontostand', /Kontostand/.test(await page.textContent('#view')) && /Einkommen/.test(await page.textContent('#view')));
   await page.click('#view button:has-text("Neues Konto")');
   check('Kontoformular ohne Limit/Zeitraum', !(await page.$('.modal.open [name=limit_amount]')) && !(await page.$('.modal.open [name=period_type]')));
+  check('Kontoformular schlägt Profilwährung vor', (await page.inputValue('.modal.open [name=currency]')) === 'EUR');
   await page.fill('.modal.open [name=name]', 'UI Konto');
   await submit(page);
   check('Konto über UI angelegt', /UI Konto/.test(await page.textContent('#view')));
@@ -170,6 +319,57 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   const modeSel = await page.$('#work-mode');
   if (modeSel) for (const v of await page.$$eval('#work-mode option', (o) => o.map((x) => x.value))) { await page.selectOption('#work-mode', v); await page.waitForTimeout(350); check(`Stundenzettel Modus ${v}`, !/undefined|NaN/.test(await page.textContent('#view'))); }
 
+  // Gehalt: Konto direkt auf dem Stundenzettel wählbar, nicht passende Konten mit Begründung
+  at('alice gehalt');
+  await go(page, '#/budgets');
+  await page.click('#view button:has-text("Neues Konto")');
+  await page.fill('.modal.open [name=name]', 'Team-Kasse');
+  await page.selectOption('.modal.open [name=type]', 'shared');
+  await submit(page);
+  await go(page, '#/work');
+  check('Stundenzettel zeigt Gehaltskonto', /Gutschrift auf Giro neu/.test(await page.textContent('#pay-summary')), await page.textContent('#pay-summary'));
+  await page.click('#pay-settings');
+  const payOptions = () => page.$$eval('.modal.open [name=payroll_budget_id] option', (o) => o.map((x) => ({ text: x.textContent, off: x.disabled })));
+  check('Eigenes Konto wählbar', (await payOptions()).some((o) => /UI Konto/.test(o.text) && !o.off), JSON.stringify(await payOptions()));
+  check('Team-Konto mit Begründung gesperrt', (await payOptions()).some((o) => /Team-Kasse.*Team-Konto/.test(o.text) && o.off), JSON.stringify(await payOptions()));
+  check('Gehaltsdialog nach dem neuen Modell', !!(await page.$('.modal.open [name=daily_salary]')) && !!(await page.$('.modal.open [name=hourly_bonus_percent]')) && !(await page.$('.modal.open [name=hourly_rate]')));
+  await page.selectOption('.modal.open [name=payroll_budget_id]', { label: 'UI Konto (EUR)' });
+  await page.fill('.modal.open [name=daily_salary]', '1669');
+  await page.fill('.modal.open [name=weekly_work_hours]', '13');
+  await page.fill('.modal.open [name=hourly_bonus_percent]', '17');
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: `${out}/alice-gehalt.png` });
+  await submit(page);
+  const paySummary = await page.textContent('#pay-summary');
+  check('Gehaltskonto gewechselt', /Gutschrift auf UI Konto/.test(paySummary), paySummary);
+  // Währungsformate enthalten ein geschütztes Leerzeichen vor dem €, deshalb \s
+  check('Festgehalt und Bonus wie vereinbart', /Festgehalt 1\.669,00\s€ pro Tag/.test(paySummary) && /13\sStd\./.test(paySummary) && /17 % = 283,73\s€ je Stunde/.test(paySummary), paySummary);
+  check('Wochen-Soll oben aktualisiert', /13 Std\./.test(await page.textContent('#work-kpi-target')));
+  await page.screenshot({ path: `${out}/alice-gehalt-karte.png` });
+  await page.selectOption('#work-mode', 'month');
+  await page.waitForTimeout(400);
+  check('Monatsansicht nennt Festgehalt und Bonus', /Festgehalt: .*Bonus: .*Gesamt: /.test(await page.textContent('#work-list')) && !/undefined|NaN/.test(await page.textContent('#view')));
+  await page.selectOption('#work-mode', 'week');
+  await page.waitForTimeout(300);
+  const teamCard = page.locator('#team-work-report .card', { hasText: 'carol' });
+  check('Team-Stundenzettel nach dem neuen Modell', /Festgehalt .* pro Tag/.test(await teamCard.textContent()) && !/undefined|NaN/.test(await teamCard.textContent()));
+  await teamCard.locator('[data-team-settings]').click();
+  await page.waitForSelector('.modal.open form');
+  check('Mitarbeitereinstellungen nach dem neuen Modell', !!(await page.$('.modal.open [name=daily_salary]')) && !(await page.$('.modal.open [name=hourly_rate]')));
+  await page.click('.modal.open [data-x]');
+  await go(page, '#/settings');
+  check('Profil zeigt dasselbe Konto', /UI Konto/.test(await page.$eval('[name=payroll_budget_id]', (s) => s.selectedOptions[0].textContent)));
+  check('Profil sperrt Team-Konto', await page.$eval('[name=payroll_budget_id]', (s) => [...s.options].some((o) => /Team-Kasse/.test(o.textContent) && o.disabled)));
+  check('Profil zeigt dasselbe Festgehalt', Number(await page.inputValue('[name=daily_salary]')) === 1669 && Number(await page.inputValue('[name=hourly_bonus_percent]')) === 17);
+  await page.selectOption('[name=currency]', 'CHF');
+  check('Währungswechsel erklärt die leere Auswahl', /kein persönliches Konto in CHF/.test(await page.textContent('#p-payroll-hint')), await page.textContent('#p-payroll-hint'));
+  await page.selectOption('[name=currency]', 'EUR');
+  await page.selectOption('[name=payroll_budget_id]', { label: 'Giro neu (EUR)' });
+  await page.click('#p-form .modal-foot button');
+  await page.waitForTimeout(500);
+  await go(page, '#/work');
+  check('Im Profil gewähltes Konto gilt auch hier', /Gutschrift auf Giro neu/.test(await page.textContent('#pay-summary')));
+
   // Objekte: QR, PIN, Filter, Legacy-Links
   at('alice objekte');
   await go(page, '#/assets-keys');
@@ -204,7 +404,7 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   const total = await page.locator('[data-help-item]').count();
   await page.fill('#help-search', 'qwertzuiop');
   check('Hilfe-Suche leer', /Keine passende/.test(await page.textContent('#view')));
-  for (const w of ['Budgets', 'Gehalt', 'Sport', 'Gravatar', 'Fehler melden']) { await page.fill('#help-search', w); check(`Hilfe kennt ${w}`, (await page.locator('[data-help-item]:visible').count()) > 0); }
+  for (const w of ['Budgets', 'Gehalt', 'Gehaltskonto', 'Festgehalt', 'Bonus', 'Sport', 'Gravatar', 'Fehler melden', 'Notizblock', 'ToDo', 'Deadline', 'Tickets', 'Woche']) { await page.fill('#help-search', w); check(`Hilfe kennt ${w}`, (await page.locator('[data-help-item]:visible').count()) > 0); }
   await page.fill('#help-search', 'Schlüssel');
   const vis = await page.locator('[data-help-item]:visible').count();
   check('Hilfe-Suche filtert', vis > 0 && vis < total, `${vis}/${total}`);
@@ -243,12 +443,61 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
     check(`Admin ${h} ohne Fehler`, !(await viewErr(page)), await viewErr(page));
     for (const t of await page.$$('#view .tabs:not([hidden]) [data-tab]')) { await t.click(); await page.waitForTimeout(350); const tab = await t.getAttribute('data-tab'); check(`Admin ${h} Tab ${tab}`, !(await viewErr(page)), await viewErr(page)); if (h.includes('admin')) await page.screenshot({ path: `${out}/admin-${h.slice(2)}-${tab}.png` }); }
   }
+  at('admin proxy');
+  await go(page, '#/admin-server');
+  await page.click('#view .tabs [data-tab=settings]');
+  await page.waitForTimeout(400);
+  check('Einstellungen zeigen TRUST_PROXY', /TRUST_PROXY/.test(await page.textContent('#view')));
+  at('admin ablaufdatum');
+  await go(page, '#/admin-users');
+  await page.locator('#view tr', { hasText: 'carol@e2e.test' }).locator('[data-uedit]').click();
+  check('Ablaufdatum sagt, bis wann es gilt', /bis einschließlich/.test(await page.textContent('.modal.open')));
+  await page.click('.modal.open [data-x]');
   at('admin legacy');
   await go(page, '#/admin');
   check('Alter Link #/admin', (await page.textContent('#view h1')) === 'User-Management');
+  at('admin leeres dashboard');
+  await go(page, '#/dashboard');
+  const emptyAxis = await page.$$eval('#d-cash text.axis[text-anchor="end"]', (t) => t.map((x) => x.textContent));
+  check('Leeres Diagramm: Achse ohne doppelte Werte', new Set(emptyAxis).size === 5, emptyAxis.join());
+  await page.click('#d-view [data-v=day]');
+  await page.waitForTimeout(600);
+  check('Leere Tagesansicht sauber', !/undefined|NaN/.test(await page.textContent('#d-body')));
+  await page.screenshot({ path: `${out}/admin-dashboard-day-empty.png` });
+  at('admin gehalt ohne konto');
+  await go(page, '#/work');
+  check('Ohne Konto ein klarer Hinweis auf der Seite', /Kein Konto für die Gehaltsgutschrift/.test(await page.textContent('#pay-summary')));
+  await page.click('#pay-settings');
+  check('Dialog erklärt, was fehlt', /kein persönliches Konto in EUR/.test(await page.textContent('.modal.open')), await page.textContent('.modal.open'));
+  await page.screenshot({ path: `${out}/admin-gehalt-leer.png` });
+  await page.click('.modal.open [data-x]');
   at('admin tickets');
+  await go(page, '#/bug-report');
+  await page.fill('#bug-report-form [name=title]', 'Admin-Ticket zum Löschen');
+  await page.fill('#bug-report-form [name=description]', 'Beschreibung mit mindestens zwanzig Zeichen.');
+  await page.click('#bug-report-form button[type=submit]');
+  await page.locator('#bug-report-list .ticket', { hasText: 'Admin-Ticket zum Löschen' }).waitFor();
   await go(page, '#/admin-tickets');
   check('Ticket sichtbar', /Fehler im Test/.test(await page.textContent('#view')));
+  const adminTicket = page.locator('#view .ticket', { hasText: 'Fehler im Test' });
+  const commentsBefore = await adminTicket.locator('.ticket-comment').count();
+  await adminTicket.locator('[name=body]').fill('Antwort vom Admin');
+  await adminTicket.locator('[data-comment-form] button').click();
+  await adminTicket.locator('.ticket-comment', { hasText: 'Antwort vom Admin' }).waitFor();
+  check('Admin-Kommentar erscheint', await adminTicket.locator('.ticket-comment').count() === commentsBefore + 1);
+  await adminTicket.locator('[name=body]').fill('Zweiter Kommentar');
+  await adminTicket.locator('[data-comment-form] button').click();
+  await adminTicket.locator('.ticket-comment', { hasText: 'Zweiter Kommentar' }).waitFor();
+  check('Nach erneutem Zeichnen funktioniert das Formular weiter', await adminTicket.locator('.ticket-comment').count() === commentsBefore + 2);
+  await page.screenshot({ path: `${out}/admin-ticket-comment.png` });
+  await adminTicket.locator('.ticket-comment', { hasText: 'Zweiter Kommentar' }).locator('[data-comment-del]').click();
+  check('Genau ein Dialog beim Kommentar-Löschen', await page.locator('.modal.open').count() === 1);
+  await submit(page);
+  check('Kommentar gelöscht', await adminTicket.locator('.ticket-comment').count() === commentsBefore + 1);
+  const doomed = page.locator('#view .ticket', { hasText: 'Admin-Ticket zum Löschen' });
+  await doomed.locator('[data-ticket-del]').click();
+  await submit(page);
+  check('Admin löscht Ticket', await doomed.count() === 0 && await adminTicket.count() === 1);
   at('admin auditlog in objekten');
   await go(page, '#/assets-manage');
   await page.click('#view .tabs [data-tab=audit]');
@@ -268,6 +517,37 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   check('Viewer sieht Bestenliste', /Stadtpark/.test(await page.textContent('#view')));
   check('Viewer ohne Anlegen-Knopf', await page.locator('#route-new:visible').count() === 0);
   check('Viewer ohne Strecke-löschen', await page.locator('[data-route-del]').count() === 0);
+  at('carol objekte');
+  await go(page, '#/assets-vehicles');
+  check('Viewer sieht Team-Fahrzeug', /E2E-1/.test(await page.textContent('#view')));
+  check('Viewer ohne Bearbeiten und Löschen am Fahrzeug', await page.locator('#view [data-edit], #view [data-del]').count() === 0);
+  await go(page, '#/assets-keys');
+  check('Viewer sieht Team-Schlüssel', /Team-Tor/.test(await page.textContent('#view')));
+  check('Viewer ohne Schlüssel-Aktionen', await page.locator('#view [data-edit], #view [data-del], #view [data-assign], #view [data-ret], #view [data-lost]').count() === 0);
+  check('Viewer kann QR-Code weiter öffnen', await page.locator('#view [data-qr]').count() > 0);
+  await go(page, '#/assets-people');
+  check('Viewer ohne Personen-Aktionen', /Teamer/.test(await page.textContent('#view')) && await page.locator('#view [data-edit], #view [data-del]').count() === 0);
+  at('carol notizen');
+  await go(page, '#/notes');
+  const teamNote = page.locator('#n-list .memo', { hasText: 'Team-Notiz' });
+  check('Viewer liest Team-Notiz', await teamNote.count() === 1);
+  check('Viewer ohne Notiz-Aktionen', await teamNote.locator('button').count() === 0);
+  await page.click('#n-new');
+  check('Viewer kann nur solo anlegen', (await page.$$eval('.modal.open [name=team_id] option', (o) => o.map((x) => x.textContent))).join() === 'Solo (nur für mich)');
+  await page.click('.modal.open [data-x]');
+  at('carol todos');
+  await go(page, '#/todos');
+  const teamTodo = page.locator('#t-list .todo-row', { hasText: 'Team-Protokoll' });
+  check('Viewer sieht Team-ToDo', await teamTodo.count() === 1);
+  check('Viewer kann nicht abhaken', await teamTodo.locator('[data-done]').isDisabled());
+  check('Viewer ohne ToDo-Aktionen', await teamTodo.locator('button').count() === 0);
+  at('carol einstellungen');
+  await go(page, '#/settings');
+  await page.click('#view .tabs [data-tab=notif]');
+  await page.waitForTimeout(400);
+  check('ToDo-Deadlines in den Einstellungen', /ToDo-Deadlines/.test(await page.textContent('#view')) && /Kommentare zu Tickets/.test(await page.textContent('#view')));
+  check('Gespeicherte Abwahl bleibt', !(await page.isChecked('[name="todo_due.in_app"]')));
+  check('E-Mail ist ohne Wahl aus', !(await page.isChecked('[name="ticket_comment.email"]')) && await page.isChecked('[name="ticket_comment.in_app"]'));
   await ctx.close();
 }
 
@@ -276,13 +556,23 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   const { page, at, ctx } = await session({ width: 390, height: 800 });
   at('mobil-login');
   await login(page, 'alice@e2e.test', 'alice-Sehr-Sicher-9931!');
-  for (const h of ['#/dashboard', '#/transactions', '#/work', '#/budgets', '#/spending', '#/recurring', '#/goals', '#/reports', '#/teams', '#/calendar', '#/sport-run', '#/assets-vehicles', '#/assets-properties', '#/assets-people', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/settings', '#/impressum', '#/datenschutz']) {
+  for (const h of ['#/dashboard', '#/transactions', '#/work', '#/budgets', '#/spending', '#/recurring', '#/goals', '#/reports', '#/teams', '#/calendar', '#/notes', '#/todos', '#/sport-run', '#/assets-vehicles', '#/assets-properties', '#/assets-people', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/settings', '#/impressum', '#/datenschutz']) {
     at(`mobil ${h}`);
     await go(page, h);
     const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     check(`Mobil ${h} kein horizontales Scrollen`, over <= 1, `${over}px`);
-    if (['#/sport-run', '#/spending', '#/datenschutz', '#/work'].includes(h)) await page.screenshot({ path: `${out}/mobil-${h.slice(2)}.png` });
+    if (['#/sport-run', '#/spending', '#/datenschutz', '#/work', '#/notes', '#/todos', '#/bug-report'].includes(h)) await page.screenshot({ path: `${out}/mobil-${h.slice(2)}.png` });
   }
+  at('mobil dashboard ansichten');
+  await go(page, '#/dashboard');
+  for (const mode of ['day', 'week', 'month']) {
+    await page.click(`#d-view [data-v=${mode}]`);
+    await page.waitForTimeout(500);
+    check(`Mobil Dashboard ${mode} kein horizontales Scrollen`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1);
+    await page.screenshot({ path: `${out}/mobil-dashboard-${mode}.png` });
+  }
+  const mobileLabels = await page.evaluate(() => { document.querySelector('#d-view [data-v=day]').click(); return new Promise((resolve) => setTimeout(() => resolve([...document.querySelectorAll('#d-cash text.axis[text-anchor="middle"]')].map((t) => t.getBoundingClientRect())), 600)); });
+  check('Mobil: Datumsachse überlappt nicht', mobileLabels.every((box, i) => !i || box.left >= mobileLabels[i - 1].right), String(mobileLabels.length));
   at('mobil menu');
   await page.click('#menuBtn');
   await page.waitForTimeout(300);

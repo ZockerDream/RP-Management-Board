@@ -4,15 +4,10 @@ import { nthOccurrence, today, ymd, notify, budgetWatch, addInterval } from './l
 import { sendMail } from './mail.js';
 import { runBackup, pruneBackups } from './backup.js';
 import { getSetting } from './settings.js';
-import { calculateDailyPayroll } from './payroll.js';
+import { planPayroll, mondayOf, nextDate } from './payroll.js';
+import { todoStage, dateInZone } from './periods.js';
 
-function localDate(date = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: config.tz, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
-}
+const localDate = (date = new Date()) => dateInZone(config.tz, date);
 
 function previousDate(date) {
   const value = new Date(`${date}T00:00:00Z`);
@@ -20,22 +15,10 @@ function previousDate(date) {
   return ymd(value);
 }
 
-function mondayOf(date) {
-  const value = new Date(`${date}T00:00:00Z`);
-  value.setUTCDate(value.getUTCDate() - ((value.getUTCDay() + 6) % 7));
-  return ymd(value);
-}
-
-function nextDate(date) {
-  const value = new Date(`${date}T00:00:00Z`);
-  value.setUTCDate(value.getUTCDate() + 1);
-  return ymd(value);
-}
-
 export async function payrollRun(log) {
   const yesterday = previousDate(localDate());
   const users = await many(
-    `SELECT u.id, u.weekly_work_hours, u.hourly_rate, u.overtime_surcharge_percent,
+    `SELECT u.id, u.weekly_work_hours, u.daily_salary, u.hourly_bonus_percent,
             u.payroll_budget_id, u.payroll_start_date, b.currency
      FROM users u JOIN budgets b ON b.id=u.payroll_budget_id
      WHERE u.status='active' AND u.deleted_at IS NULL AND u.payroll_start_date <= $1
@@ -54,53 +37,45 @@ export async function payrollRun(log) {
       [user.id, hoursFrom, yesterday],
     );
     const hoursByDate = new Map(workDays.map((row) => [String(row.work_date).slice(0, 10), Number(row.hours)]));
-    const paidDays = new Set((await many(
-      'SELECT payroll_date FROM payroll_payments WHERE user_id=$1 AND payroll_date BETWEEN $2 AND $3',
+    const paidBonusHours = new Map((await many(
+      'SELECT payroll_date, overtime_hours FROM payroll_payments WHERE user_id=$1 AND payroll_date BETWEEN $2 AND $3',
       [user.id, firstDate, yesterday],
-    )).map((row) => String(row.payroll_date).slice(0, 10)));
-    let weekHours = 0;
-    let currentWeek = null;
-    for (let date = hoursFrom; date <= yesterday; date = nextDate(date)) {
-      const week = mondayOf(date);
-      if (week !== currentWeek) {
-        weekHours = 0;
-        currentWeek = week;
-      }
-      const todayHours = hoursByDate.get(date) || 0;
-      if (date >= firstDate && !paidDays.has(date)) {
-        const payment = calculateDailyPayroll({
-          date,
-          weeklyTarget: Number(user.weekly_work_hours),
-          hourlyRate: Number(user.hourly_rate),
-          surchargePercent: Number(user.overtime_surcharge_percent),
-          previousWeekHours: weekHours,
-          todayHours,
-        });
-        await tx(async (client) => {
-          const reservation = await client.query(
-            `INSERT INTO payroll_payments(user_id,payroll_date,budget_id,base_amount,overtime_hours,overtime_pay)
-             VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (user_id,payroll_date) DO NOTHING RETURNING id`,
-            [user.id, date, user.payroll_budget_id, payment.base_amount, payment.overtime_hours, payment.overtime_pay],
+    )).map((row) => [String(row.payroll_date).slice(0, 10), Number(row.overtime_hours)]));
+    const payments = planPayroll({
+      firstDate,
+      lastDate: yesterday,
+      weeklyTarget: Number(user.weekly_work_hours),
+      dailySalary: Number(user.daily_salary),
+      bonusPercent: Number(user.hourly_bonus_percent),
+      hoursByDate,
+      paidBonusHours,
+    });
+    for (const payment of payments) {
+      const { date } = payment;
+      await tx(async (client) => {
+        const reservation = await client.query(
+          `INSERT INTO payroll_payments(user_id,payroll_date,budget_id,base_amount,overtime_hours,overtime_pay)
+           VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (user_id,payroll_date) DO NOTHING RETURNING id`,
+          [user.id, date, user.payroll_budget_id, payment.base_amount, payment.overtime_hours, payment.overtime_pay],
+        );
+        if (!reservation.rowCount) return;
+        if (Number(payment.total_amount) > 0) {
+          const withBonus = Number(payment.overtime_pay) > 0;
+          const transaction = await client.query(
+            `INSERT INTO transactions(budget_id,created_by,type,amount,booked_at,title,note,source,income_kind)
+             VALUES ($1,$2,'income',$3,$4,$5,$6,'payroll','salary') RETURNING id`,
+            [
+              user.payroll_budget_id, user.id, payment.total_amount, date,
+              `Festgehalt${withBonus ? ' und Bonus' : ''}`,
+              withBonus
+                ? `${payment.base_amount} ${user.currency} Festgehalt; ${payment.overtime_pay} ${user.currency} Bonus für ${payment.overtime_hours} Stunden über dem Wochen-Soll (${user.hourly_bonus_percent} % vom Festgehalt je Stunde)`
+                : `${payment.base_amount} ${user.currency} Festgehalt`,
+            ],
           );
-          if (!reservation.rowCount) return;
-          if (Number(payment.total_amount) > 0) {
-            const transaction = await client.query(
-              `INSERT INTO transactions(budget_id,created_by,type,amount,booked_at,title,note,source,income_kind)
-               VALUES ($1,$2,'income',$3,$4,$5,$6,'payroll','salary') RETURNING id`,
-              [
-                user.payroll_budget_id, user.id, payment.total_amount, date,
-                `Basisgehalt${Number(payment.overtime_pay) > 0 ? ' und Überstundenvergütung' : ''}`,
-                Number(payment.overtime_pay) > 0
-                  ? `${payment.base_amount} ${user.currency} Basisgehalt; ${payment.overtime_pay} ${user.currency} Überstundenvergütung für ${payment.overtime_hours} Stunden (Stundenlohn plus ${user.overtime_surcharge_percent} %)`
-                  : `${payment.base_amount} ${user.currency} tägliches Basisgehalt`,
-              ],
-            );
-            await client.query('UPDATE payroll_payments SET transaction_id=$2 WHERE id=$1', [reservation.rows[0].id, transaction.rows[0].id]);
-          }
-        });
-        processed++;
-      }
-      weekHours += todayHours;
+          await client.query('UPDATE payroll_payments SET transaction_id=$2 WHERE id=$1', [reservation.rows[0].id, transaction.rows[0].id]);
+        }
+      });
+      processed++;
     }
   }
   log.info(`Gehaltsbuchungen für ${yesterday}: ${processed}`);
@@ -165,10 +140,7 @@ export async function reminders(log) {
     if (days > REMIND_DAYS[e.remind]) continue;
     const users = e.type === 'team' ? (await many('SELECT user_id FROM team_members WHERE team_id=$1', [e.team_id])).map((r) => r.user_id) : [e.owner_id];
     for (const uid of users) {
-      await notify(uid, 'calendar', `Termin: ${e.title}`, days === 0 ? 'Heute' : `In ${days} Tag(en) – ${occ}`, `cal:${e.id}:${occ}`);
-      const u = await one('SELECT email, name FROM users WHERE id=$1', [uid]);
-      const pref = await one("SELECT email FROM notification_prefs WHERE user_id=$1 AND kind='calendar'", [uid]);
-      if (pref?.email) await sendMail({ to: u.email, subject: `Erinnerung: ${e.title}`, text: `${e.title} am ${occ}\n${e.note || ''}`, log });
+      await notify(uid, 'calendar', `Termin: ${e.title}`, `${days === 0 ? 'Heute' : `In ${days} Tag(en) – ${occ}`}${e.note ? `\n${e.note}` : ''}`, `cal:${e.id}:${occ}`, log);
     }
     await q('UPDATE calendar_events SET last_reminded=$2 WHERE id=$1', [e.id, occ]);
     sent++;
@@ -210,6 +182,39 @@ export async function reminders(log) {
     }
   }
   return `${sent} Erinnerungen`;
+}
+
+const TODO_TITLES = { tomorrow: 'ToDo morgen fällig', today: 'ToDo heute fällig', overdue: 'ToDo überfällig' };
+
+export async function todoReminders(log) {
+  const now = localDate();
+  const todos = await many(
+    `SELECT td.id, td.title, td.due_date, td.owner_user_id, td.team_id, td.last_reminder, t.name team_name
+     FROM todos td LEFT JOIN teams t ON t.id=td.team_id
+     WHERE td.done_at IS NULL AND td.due_date IS NOT NULL AND td.due_date <= $1`,
+    [nextDate(now)],
+  );
+  let sent = 0;
+  for (const todo of todos) {
+    const due = String(todo.due_date).slice(0, 10);
+    const stage = todoStage(due, now);
+    const reminder = `${due}:${stage}`;
+    if (!stage || todo.last_reminder === reminder) continue;
+    const users = todo.team_id
+      ? (await many(
+        `SELECT tm.user_id FROM team_members tm JOIN users u ON u.id=tm.user_id
+         WHERE tm.team_id=$1 AND u.status='active' AND u.deleted_at IS NULL`,
+        [todo.team_id],
+      )).map((row) => row.user_id)
+      : [todo.owner_user_id];
+    const deadline = `Deadline: ${due.split('-').reverse().join('.')}${todo.team_name ? ` · Team ${todo.team_name}` : ''}`;
+    for (const userId of users) {
+      await notify(userId, 'todo_due', `${TODO_TITLES[stage]}: ${todo.title}`, deadline, `todo:${todo.id}:${reminder}`, log);
+    }
+    await q('UPDATE todos SET last_reminder=$2 WHERE id=$1', [todo.id, reminder]);
+    sent++;
+  }
+  return `${sent} ToDo-Erinnerungen`;
 }
 
 export async function reportsRun(log) {
@@ -254,6 +259,8 @@ export const JOBS = {
   'payroll.run': { cron: '45 3 * * *', fn: payrollRun },
   'recurring.run': { cron: '*/15 * * * *', fn: recurringRun },
   reminders: { cron: '0 7 * * *', fn: reminders },
+  // Stündlich, damit auch ein heute angelegtes ToDo noch erinnert; nachts bleibt es still
+  'todos.remind': { cron: '5 7-20 * * *', fn: todoReminders },
   'reports.run': { cron: '0 6 * * *', fn: reportsRun },
   backup: { cron: `0 ${config.backupHour} * * *`, fn: backupJob },
   retention: { cron: '30 4 * * *', fn: retention },

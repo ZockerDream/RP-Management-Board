@@ -1,5 +1,6 @@
 import { one, many, q } from './db.js';
 import { hmac, decrypt } from './security.js';
+import { sendMail } from './mail.js';
 
 export const ymd = (d) => d.toISOString().slice(0, 10);
 export const today = () => ymd(new Date());
@@ -65,8 +66,17 @@ async function recipients(budget) {
   return (await many('SELECT user_id FROM team_members WHERE team_id=$1 AND team_role IN (\'owner\',\'editor\')', [budget.team_id])).map((r) => r.user_id);
 }
 
-export async function notify(userId, kind, title, body, dedupe) {
-  await q('INSERT INTO notifications(user_id, kind, title, body, dedupe_key) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING', [userId, kind, title, body, dedupe || null]);
+// Die Zeile entsteht immer: Sie verhindert doppelte Mails, auch wenn „In der App“ aus ist (`/notifications` blendet solche Arten aus).
+// E-Mail nur nach ausdrücklicher Wahl und nur beim ersten Mal; der Versand läuft im Hintergrund, damit SMTP keine Anfrage aufhält.
+export async function notify(userId, kind, title, body, dedupe, log) {
+  const created = await q('INSERT INTO notifications(user_id, kind, title, body, dedupe_key) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING', [userId, kind, title, body, dedupe || null]);
+  if (!created.rowCount) return;
+  const recipient = await one(
+    `SELECT u.email FROM notification_prefs p JOIN users u ON u.id=p.user_id
+     WHERE p.user_id=$1 AND p.kind=$2 AND p.email AND u.status='active' AND u.deleted_at IS NULL`,
+    [userId, kind],
+  );
+  if (recipient) sendMail({ to: recipient.email, subject: title, text: body, log }).catch((err) => log?.error?.({ err }, 'Mailversand fehlgeschlagen'));
 }
 
 export async function fireWebhooks(event, payload, log) {

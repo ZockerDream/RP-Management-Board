@@ -5,6 +5,8 @@ import { requireAuth, notFound, bad, forbidden } from '../authz.js';
 import { toCsv } from '../lib.js';
 import { config } from '../config.js';
 import { calculateWorkCompensation } from '../work-hours.js';
+import { calculateDailyPayroll } from '../payroll.js';
+import { patchSchema } from '../validation.js';
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const parsed = new Date(`${value}T00:00:00Z`);
@@ -164,7 +166,7 @@ export default async function routes(app) {
   });
 
   async function monthlyReport(user) {
-    const { id: userId, month, weekly_work_hours: weeklyHours, hourly_rate: hourlyRate, overtime_surcharge_percent: overtimeSurcharge, currency } = user;
+    const { id: userId, month, weekly_work_hours: weeklyHours, daily_salary: dailySalary, hourly_bonus_percent: bonusPercent, currency } = user;
     const [year, monthNumber] = month.split('-').map(Number);
     const from = `${month}-01`;
     const to = new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
@@ -193,7 +195,8 @@ export default async function routes(app) {
       month, items, daily: [...daily].map(([work_date, hours]) => ({ work_date, hours })),
       total_hours: totalHours, target_hours: targetHours, overtime_balance: totalHours - targetHours,
       weekly_target: Number(weeklyHours), calendar_days: calendarDays,
-      hourly_rate: Number(hourlyRate || 0), overtime_surcharge_percent: Number(overtimeSurcharge || 0),
+      daily_salary: Number(dailySalary || 0), hourly_bonus_percent: Number(bonusPercent || 0),
+      bonus_per_hour: calculateDailyPayroll({ dailySalary: Number(dailySalary || 0), bonusPercent: Number(bonusPercent || 0), bonusHours: 1 }).overtime_pay,
       ...compensation, currency,
     };
   }
@@ -208,7 +211,7 @@ export default async function routes(app) {
     const { team_id: teamId, month } = z.object({ team_id: id, month: monthFilter.shape.month }).parse(req.query);
     await requireTeamEditor(req.user.id, teamId);
     const members = await many(
-      `SELECT u.id,u.name,u.weekly_work_hours,u.hourly_rate,u.overtime_surcharge_percent,u.currency
+      `SELECT u.id,u.name,u.weekly_work_hours,u.daily_salary,u.hourly_bonus_percent,u.currency
        FROM team_members tm JOIN users u ON u.id=tm.user_id
        WHERE tm.team_id=$1 AND u.status='active' AND u.deleted_at IS NULL
        ORDER BY u.name`,
@@ -232,8 +235,8 @@ export default async function routes(app) {
     if (!(await one('SELECT 1 FROM team_members WHERE team_id=$1 AND user_id=$2', [teamId, userId]))) throw notFound();
     const settings = z.object({
       weekly_work_hours: z.number().min(1).max(168).multipleOf(0.25).optional(),
-      hourly_rate: z.number().min(0).max(99999999.99).multipleOf(0.01).optional(),
-      overtime_surcharge_percent: z.number().min(0).max(1000).multipleOf(0.01).optional(),
+      daily_salary: z.number().min(0).max(9999999999.99).multipleOf(0.01).optional(),
+      hourly_bonus_percent: z.number().min(0).max(1000).multipleOf(0.01).optional(),
     }).refine((value) => Object.keys(value).length > 0, 'Mindestens eine Einstellung erforderlich').parse(req.body);
     const keys = Object.keys(settings);
     await q(
@@ -255,8 +258,9 @@ export default async function routes(app) {
     doc.text(`Monats-Soll: ${report.target_hours.toFixed(2)} Std.`);
     doc.text(`Saldo: ${report.overtime_balance >= 0 ? '+' : ''}${report.overtime_balance.toFixed(2)} Std.`);
     const formatPay = (value) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: report.currency || 'EUR' }).format(Number(value));
-    doc.text(`Überstunden: ${report.overtime_hours.toFixed(2)} Std. · Zuschlag: ${report.overtime_surcharge_percent} %`);
-    doc.text(`Basisgehalt: ${formatPay(report.base_pay)} · Überstundenvergütung: ${formatPay(report.overtime_pay)} · Gesamt: ${formatPay(report.total_pay)}`);
+    doc.text(`Festgehalt pro Tag: ${formatPay(report.daily_salary)} · Bonus je Stunde über dem Soll: ${report.hourly_bonus_percent} % = ${formatPay(report.bonus_per_hour)}`);
+    doc.text(`Stunden über dem Wochen-Soll: ${report.overtime_hours.toFixed(2)} Std.`);
+    doc.text(`Festgehalt: ${formatPay(report.base_pay)} · Bonus: ${formatPay(report.overtime_pay)} · Gesamt: ${formatPay(report.total_pay)}`);
     doc.moveDown();
     const drawHeader = () => {
       const y = doc.y;
@@ -310,7 +314,7 @@ export default async function routes(app) {
 
   app.patch('/work-hours/:id', requireAuth, async (req) => {
     const existing = await workEntryAccess(req.user.id, req.params.id);
-    const entry = entryBody.partial().parse(req.body);
+    const entry = patchSchema(entryBody).parse(req.body);
     if (entry.project_id) await projectAccess(existing.user_id, entry.project_id, existing.user_id === req.user.id);
     const keys = Object.keys(entry);
     if (!keys.length) return { ok: true };

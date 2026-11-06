@@ -1,5 +1,6 @@
 import { api } from '../api.js';
-import { esc, empty, fdatetime, toast } from '../ui.js';
+import { empty, toast } from '../ui.js';
+import { ticketHtml, bindTickets } from './ticket-view.js';
 
 export async function render(view) {
   view.innerHTML = `<div class="page-head"><div><h1>Fehler melden</h1><p id="bug-report-hint"></p></div></div>
@@ -22,17 +23,9 @@ export async function render(view) {
     view.querySelector('#bug-report-hint').textContent = data.github_enabled
       ? 'Dein Bericht wird als Ticket gespeichert und zusätzlich als GitHub-Issue für das Projektteam angelegt.'
       : 'Dein Bericht wird als internes Ticket gespeichert. GitHub ist nicht konfiguriert.';
-    list.innerHTML = data.items.length ? data.items.map((ticket) => `<div class="list-item">
-      <div class="grow">
-        <b>#${ticket.id} · ${esc(ticket.title)}</b>
-        <small>${fdatetime(ticket.created_at)}</small>
-        <p style="white-space:pre-wrap;margin-top:8px">${esc(ticket.description)}</p>
-        ${ticket.steps ? `<small style="white-space:pre-wrap;display:block;margin-top:6px">Schritte: ${esc(ticket.steps)}</small>` : ''}
-        ${ticket.github_url ? `<small><a href="${esc(ticket.github_url)}" target="_blank" rel="noopener noreferrer">GitHub-Issue #${ticket.github_issue_number}</a></small>` : ''}
-        ${ticket.github_sync_error ? `<small class="auth-error" style="display:block">GitHub-Synchronisierung fehlgeschlagen: ${esc(ticket.github_sync_error)}</small>` : ''}
-      </div>
-    </div>`).join('') : empty('Noch keine Tickets gemeldet.');
+    list.innerHTML = data.items.length ? data.items.map((ticket) => ticketHtml(ticket)).join('') : empty('Noch keine Tickets gemeldet.');
   };
+  bindTickets(list, '/bug-reports', refresh);
   await refresh();
 
   form.addEventListener('submit', async (event) => {

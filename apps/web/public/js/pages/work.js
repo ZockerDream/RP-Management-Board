@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { $, esc, empty, openForm, confirmBox, toast, todayStr } from '../ui.js';
-import { can, state } from '../app.js';
+import { can, state, reloadMe } from '../app.js';
+import { payrollAccountOptions, payrollAccountHint } from './common.js';
 
 const hoursText = (hours) => `${Number(hours).toLocaleString('de-DE', { maximumFractionDigits: 2 })} Std.`;
 const dateText = (date) => String(date).slice(0, 10).split('-').reverse().join('.');
@@ -51,6 +52,7 @@ async function entryForm(entry, projects) {
 export async function render(view) {
   let entries = [];
   let projects = [];
+  let accounts = [];
   const teamEntries = new Map();
   let timer = null;
   const teams = can('team:read') ? (await api.get('/teams')).filter((team) => team.role !== 'viewer') : [];
@@ -70,6 +72,7 @@ export async function render(view) {
       <div class="card kpi" id="work-kpi-overtime" hidden><span class="label">Überstunden-Saldo</span><span class="value" id="work-kpi-overtime-value">–</span></div>
       <div class="card kpi" id="work-kpi-pay" hidden><span class="label">Vergütung</span><span class="value" id="work-kpi-pay-value">–</span></div>
     </div>
+    <div class="card"><div class="card-head"><h2>Gehalt</h2><button class="btn ghost sm" id="pay-settings">Gehalt einstellen</button></div><div id="pay-summary"></div></div>
     <div class="card"><div class="card-head"><h2>Auswertung</h2><b id="work-total" class="up"></b></div>
       <div class="toolbar" style="gap:8px;flex-wrap:wrap"><select id="work-mode"><option value="week">Woche</option><option value="day">Tag</option><option value="month">Monat</option></select>
       <input id="work-date" type="date" value="${today}"><span id="work-range" class="muted"></span></div><div id="work-list"></div></div>
@@ -110,11 +113,48 @@ export async function render(view) {
     drawTimer();
   }
   const payText = (value, currency = state.me.currency || 'EUR') => new Intl.NumberFormat('de-DE', { style: 'currency', currency }).format(Number(value || 0));
+  // Rechnet wie der Gehaltslauf in Cent, damit hier nie ein anderer Bonus steht als gebucht wird
+  const bonusPerHour = (salary, percent) => Math.round(Math.round(Number(salary || 0) * 100) * Number(percent || 0) / 100) / 100;
+  const salaryText = (salary, target, percent, currency) => `Festgehalt ${payText(salary, currency)} pro Tag · Wochen-Soll ${hoursText(target)} · Bonus ${Number(percent || 0).toLocaleString('de-DE')} % = ${payText(bonusPerHour(salary, percent), currency)} je Stunde über dem Soll`;
   function entriesTable(items) {
     return items.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Datum</th><th>Projekt / Kunde</th><th>Zeitraum</th><th>Pause</th><th>Arbeitszeit</th><th>Notiz</th><th></th></tr></thead><tbody>${items.map((item) => `<tr>
       <td>${dateText(item.work_date)}</td><td>${esc(item.project_name || '–')}</td><td>${timeText(item.started_at)} – ${timeText(item.ended_at)}</td>
       <td>${item.break_minutes || 0} Min.</td><td><b>${hoursText(item.hours)}</b></td><td>${esc(item.note || '–')}</td>
       <td style="white-space:nowrap"><button class="btn ghost sm" data-edit="${item.id}">Bearbeiten</button> <button class="btn ghost sm" data-del="${item.id}">Löschen</button></td></tr>`).join('')}</tbody></table></div>` : empty('Keine Arbeitszeit im gewählten Zeitraum erfasst.');
+  }
+  const salaryFields = (values, currency) => [
+    { name: 'daily_salary', label: `Festgehalt pro Tag (${currency})`, type: 'number', min: 0, step: 0.01, value: values.daily_salary ?? 0, required: true, help: 'Jeden Tag, auch am Wochenende und unabhängig von den Stunden.' },
+    { name: 'weekly_work_hours', label: 'Wochen-Sollzeit (Std.)', type: 'number', min: 1, step: 0.25, value: values.weekly_work_hours ?? 40, required: true, help: 'Ab dieser Stundenzahl (Montag bis Sonntag) gibt es den Bonus.' },
+    { name: 'hourly_bonus_percent', label: 'Bonus je Stunde über dem Soll (% vom Festgehalt)', type: 'number', min: 0, step: 0.01, value: values.hourly_bonus_percent ?? 0, required: true, full: true, help: 'Beispiel: 17 % von 1.669 sind 283,73 je Stunde über dem Soll. Montags beginnt die Zählung neu.' },
+  ];
+  const salaryBody = (values) => ({
+    daily_salary: Number(values.daily_salary),
+    weekly_work_hours: Number(values.weekly_work_hours),
+    hourly_bonus_percent: Number(values.hourly_bonus_percent),
+  });
+  async function loadPay() {
+    accounts = can('budget:read') ? await api.get('/budgets') : [];
+    const me = state.me;
+    const account = accounts.find((item) => item.id === me.payroll_budget_id);
+    $('#pay-summary').innerHTML = `${account ? `<p>Gutschrift auf <b>${esc(account.name)}</b></p>` : '<span class="tag warn">Kein Konto für die Gehaltsgutschrift gewählt</span>'}
+      <p class="muted" style="margin-top:8px">${salaryText(me.daily_salary, me.weekly_work_hours ?? 40, me.hourly_bonus_percent)}</p>`;
+  }
+  function payForm() {
+    const me = state.me;
+    const currency = me.currency || 'EUR';
+    const options = payrollAccountOptions(accounts, me, currency);
+    return openForm({
+      title: 'Gehalt einstellen',
+      fields: [
+        { name: 'payroll_budget_id', label: 'Konto für Gehaltsgutschrift', type: 'select', options, value: me.payroll_budget_id || '', full: true, help: payrollAccountHint(options, currency) },
+        ...salaryFields(me, currency),
+      ],
+      onSubmit: async (values) => {
+        await api.patch('/me', { payroll_budget_id: values.payroll_budget_id || null, ...salaryBody(values) });
+        await reloadMe();
+        toast('Gehalt gespeichert');
+      },
+    });
   }
   async function load() {
     const mode = $('#work-mode').value;
@@ -139,8 +179,8 @@ export async function render(view) {
     const separatedEntries = `<h3>Allgemeine Arbeitszeiten</h3>${entriesTable(generalEntries)}<h3 style="margin-top:20px">Projektzeiten</h3>${entriesTable(projectEntries)}`;
     $('#work-list').innerHTML = mode === 'month'
       ? `<h3>Monatsübersicht</h3>${result.daily.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Datum</th><th>Arbeitszeit</th></tr></thead><tbody>${result.daily.map((day) => `<tr><td>${dateText(day.work_date)}</td><td><b>${hoursText(day.hours)}</b></td></tr>`).join('')}</tbody></table></div>` : empty('Keine Arbeitszeit im Monat erfasst.')}
-        <p class="muted">Stundenlohn: ${payText(result.hourly_rate)} · Zuschlag: ${Number(result.overtime_surcharge_percent).toLocaleString('de-DE')} % · Überstunden: ${hoursText(result.overtime_hours)}</p>
-        <p><b>Basisgehalt: ${payText(result.base_pay)} · Überstundenvergütung: ${payText(result.overtime_pay)} · Gesamt: ${payText(result.total_pay)}</b></p>
+        <p class="muted">${salaryText(result.daily_salary, result.weekly_target, result.hourly_bonus_percent)} · Stunden über dem Soll: ${hoursText(result.overtime_hours)}</p>
+        <p><b>Festgehalt: ${payText(result.base_pay)} · Bonus: ${payText(result.overtime_pay)} · Gesamt: ${payText(result.total_pay)}</b></p>
         ${separatedEntries}`
       : separatedEntries;
   }
@@ -153,9 +193,9 @@ export async function render(view) {
       const project = member.items.filter((item) => item.project_id);
       for (const item of member.items) teamEntries.set(item.id, item);
       return `<div class="card"><div class="card-head"><div class="grow"><h3>${esc(member.name)}</h3>
-        <small>Gesamt ${hoursText(member.total_hours)} · Überstunden ${hoursText(member.overtime_hours)} · Vergütung ${payText(member.total_pay, member.currency)}</small></div>
+        <small>Gesamt ${hoursText(member.total_hours)} · Über dem Soll ${hoursText(member.overtime_hours)} · Vergütung ${payText(member.total_pay, member.currency)}</small></div>
         <button class="btn ghost sm" data-team-settings="${member.user_id}">Mitarbeitereinstellungen</button></div>
-        <p class="muted">Wochen-Soll ${hoursText(member.weekly_target)} · Stundenlohn ${payText(member.hourly_rate, member.currency)} · Zuschlag ${Number(member.overtime_surcharge_percent).toLocaleString('de-DE')} %</p>
+        <p class="muted">${salaryText(member.daily_salary, member.weekly_target, member.hourly_bonus_percent, member.currency)}</p>
         <h4>Allgemeine Arbeitszeiten</h4>${entriesTable(general)}<h4 style="margin-top:16px">Projektzeiten</h4>${entriesTable(project)}</div>`;
     }).join('') : empty('Keine aktiven Teammitglieder gefunden.');
   }
@@ -165,16 +205,10 @@ export async function render(view) {
     return openForm({
       title: `Einstellungen: ${member.name}`,
       fields: [
-        { type: 'html', html: '<small class="muted">Diese Einstellungen gelten für den Mitarbeiter global in allen Teams.</small>' },
-        { name: 'weekly_work_hours', label: 'Wöchentliche Sollzeit (Std.)', type: 'number', min: 1, max: 168, step: 0.25, value: member.weekly_target, required: true },
-        { name: 'hourly_rate', label: `Stundenlohn (${member.currency})`, type: 'number', min: 0, max: 99999999.99, step: 0.01, value: member.hourly_rate, required: true },
-        { name: 'overtime_surcharge_percent', label: 'Überstundenzuschlag (%)', type: 'number', min: 0, max: 1000, step: 0.01, value: member.overtime_surcharge_percent, required: true },
+        { type: 'html', html: '<small class="muted">Diese Einstellungen gelten für den Mitarbeiter global in allen Teams. Das Konto für die Gehaltsgutschrift wählt jeder Mitarbeiter selbst unter „Gehalt einstellen“.</small>' },
+        ...salaryFields({ daily_salary: member.daily_salary, weekly_work_hours: member.weekly_target, hourly_bonus_percent: member.hourly_bonus_percent }, member.currency),
       ],
-      onSubmit: async (values) => api.patch(`/work-hours/team/${$('#work-team').value}/members/${userId}/settings`, {
-        weekly_work_hours: Number(values.weekly_work_hours),
-        hourly_rate: Number(values.hourly_rate),
-        overtime_surcharge_percent: Number(values.overtime_surcharge_percent),
-      }),
+      onSubmit: async (values) => api.patch(`/work-hours/team/${$('#work-team').value}/members/${userId}/settings`, salaryBody(values)),
     });
   }
   async function projectForm() {
@@ -198,6 +232,8 @@ export async function render(view) {
     try {
       if (target.id === 'work-new') {
         if (await entryForm(null, projects)) await load();
+      } else if (target.id === 'pay-settings') {
+        if (await payForm()) { await loadPay(); await load(); }
       } else if (target.id === 'project-new') {
         if (await projectForm()) { await loadProjects(); await load(); }
       } else if (target.id === 'work-export') {
@@ -241,7 +277,7 @@ export async function render(view) {
       toast(error.message, true);
     }
   });
-  await Promise.all([loadProjects(), loadTimer(), load(), loadTeamHours()]);
+  await Promise.all([loadProjects(), loadTimer(), load(), loadTeamHours(), loadPay()]);
   const tick = setInterval(() => {
     if (!view.isConnected) clearInterval(tick);
     else if (timer && !timer.paused_at) drawTimer();

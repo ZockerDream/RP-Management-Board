@@ -90,6 +90,28 @@ label.field > :is(input, select) { margin-top: 6px; color: var(--text); font-siz
 .scroll-x { overflow-x: auto; }
 .link { color: var(--muted); cursor: pointer; font-size: 13px; background: none; border: 0; font-family: inherit; }
 .link:hover { color: var(--text); }
+.text-block { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
+
+/* Notizblock */
+.memo-title { overflow-wrap: anywhere; min-width: 0; flex: 1; }
+.memo-body { flex: 1; max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ToDos */
+.todo-group + .todo-group { margin-top: 22px; }
+.todo-group h3 { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+.todo-row { flex-wrap: wrap; }
+.todo-row .grow { flex: 1 1 200px; overflow-wrap: anywhere; }
+.todo-row input[type="checkbox"] { flex: none; width: 18px; height: 18px; }
+.todo-done { color: var(--muted); font-weight: 500; text-decoration: line-through; }
+
+/* Tickets */
+.list-item.ticket { align-items: flex-start; }
+.ticket-comments { display: grid; gap: 8px; margin: 12px 0; }
+.ticket-comments:empty { display: none; }
+.ticket-comment { padding: 8px 12px; background: var(--surface-2); border-radius: var(--radius-sm); }
+.ticket-comment p { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ticket-comment-form { margin-top: 10px; }
+.ticket-comment-form .row { margin-top: 8px; }
 
 /* Tags */
 .tag { display: inline-flex; align-items: center; padding: 1px 9px; border-radius: 99px; font-size: 11.5px; font-weight: 550; background: var(--surface-2); color: var(--muted); }

@@ -1,10 +1,10 @@
 // Update im selben Browserprofil ohne Cache-Löschen. Erst "before" auf der alten Version, dann Update einspielen, dann "after".
 import { chromium } from 'playwright';
-const BASE = 'http://localhost:18088';
+const BASE = process.env.BASE || 'http://localhost:18088';
 const phase = process.argv[2] || 'after';
 const OUT = process.argv[3] || '/work/upgrade-shots';
 const PROFILE = process.argv[4] || '/work/upgrade-profile';
-const ROUTES = { spending: 'Budgets', 'sport-run': 'Laufen', 'sport-swim': 'Schwimmen', 'sport-bike': 'Biken', 'assets-vehicles': 'Fahrzeuge', 'assets-properties': 'Häuser', 'assets-people': 'Personen', 'assets-keys': 'Schlüssel', 'assets-manage': 'Verwaltung', 'admin-users': 'User-Management', 'admin-server': 'Server-Management', 'admin-tickets': 'Tickets', datenschutz: 'Datenschutzerklärung', impressum: 'Impressum' };
+const ROUTES = { notes: 'Notizblock', todos: 'ToDos', spending: 'Budgets', 'sport-run': 'Laufen', 'sport-swim': 'Schwimmen', 'sport-bike': 'Biken', 'assets-vehicles': 'Fahrzeuge', 'assets-properties': 'Häuser', 'assets-people': 'Personen', 'assets-keys': 'Schlüssel', 'assets-manage': 'Verwaltung', 'admin-users': 'User-Management', 'admin-server': 'Server-Management', 'admin-tickets': 'Tickets', datenschutz: 'Datenschutzerklärung', impressum: 'Impressum' };
 
 const ctx = await chromium.launchPersistentContext(PROFILE, { viewport: { width: 1400, height: 900 }, serviceWorkers: 'block' });
 const page = ctx.pages()[0] || await ctx.newPage();
