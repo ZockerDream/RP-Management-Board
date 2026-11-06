@@ -30,7 +30,7 @@ ADMIN_NAME=E2E Admin
 docker compose -p bm-e2e --env-file /tmp/bm-e2e/test.env up -d --build --wait
 
 node tests/e2e/api.mjs                    # zuerst: legt die Testdaten an
-docker restart bm-e2e-api-1               # setzt das Rate-Limit zurück (300/min pro IP)
+docker restart bm-e2e-api-1               # setzt das Login-Limit zurück (10/min pro IP)
 node tests/e2e/auth.mjs
 
 # Browser-Tests laufen im Playwright-Container; Screenshots landen im Arbeitsverzeichnis
@@ -42,7 +42,21 @@ docker run --rm --network host -v /tmp/bm-e2e/work:/work -w /work mcr.microsoft.
 docker compose -p bm-e2e --env-file /tmp/bm-e2e/test.env down -v   # aufräumen
 ```
 
-Zwischen den Stufen die API neu starten. `browser.mjs` und `crawl.mjs` setzen die Daten aus `api.mjs` voraus; `crawl.mjs` verändert sie stark, also für einen weiteren Lauf den Stack mit `down -v` neu aufsetzen.
+`api.mjs` startet die Jobs `payroll.run` und `todos.remind` per `docker exec` im Worker-Container und setzt für das Gehaltsbeispiel ein Startdatum direkt in der Datenbank, braucht also Docker auf dem Host. Mit `MAILPIT=http://localhost:18025` prüft es zusätzlich den Mailversand über einen Mailpit-Container, sonst entfällt dieser Teil. Zwischen den Stufen die API neu starten. `browser.mjs` und `crawl.mjs` setzen die Daten aus `api.mjs` voraus; `crawl.mjs` verändert sie stark, also für einen weiteren Lauf den Stack mit `down -v` neu aufsetzen.
+
+## Zweiter Stack neben einem benutzten Test-Stack
+
+Testet jemand gerade von Hand auf 18088, nicht denselben Stack nehmen: `down -v` löscht dessen Daten, und `crawl.mjs` verändert sie. Stattdessen eine Kopie der Env-Datei mit anderem `HTTP_PORT`, `APP_URL` und `APP_VERSION` anlegen und die Skripte darauf zeigen lassen:
+
+```bash
+docker compose -p bm-check --env-file /tmp/bm-e2e/check.env up -d --build --wait
+BASE=http://localhost:18089 E2E_PROJECT=bm-check node tests/e2e/api.mjs
+docker restart bm-check-api-1
+BASE=http://localhost:18089 E2E_PROJECT=bm-check node tests/e2e/auth.mjs
+# Im Playwright-Container mit -e BASE=http://localhost:18089
+```
+
+Ein Update des benutzten Stacks ohne Datenverlust: derselbe `up -d --build --wait` ohne `down -v`.
 
 ## Update im selben Browser (upgrade.mjs)
 

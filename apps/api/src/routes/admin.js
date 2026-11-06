@@ -5,6 +5,7 @@ import { one, many, q, tx } from '../db.js';
 import { config } from '../config.js';
 import { adminOnly, bad, notFound, forbidden, invalidatePermCache, ipAllowed, PERMISSION_CATALOG } from '../authz.js';
 import { hashPassword, encrypt, randomToken } from '../security.js';
+import { patchSchema } from '../validation.js';
 import { allSettings, setSettings, jobStatus, DEFAULTS } from '../settings.js';
 import { createInvitation } from './teams.js';
 import { checkPassword } from './auth.js';
@@ -95,7 +96,7 @@ export default async function routes(app) {
   app.patch('/admin/users/:id', A('user:update'), async (req) => {
     const u = await one('SELECT * FROM users WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
     if (!u) throw notFound();
-    const b = userBody.partial().extend({ status: z.enum(['active', 'locked', 'disabled']).optional(), force_2fa: z.boolean().optional() }).parse(req.body);
+    const b = patchSchema(userBody).extend({ status: z.enum(['active', 'locked', 'disabled']).optional(), force_2fa: z.boolean().optional() }).parse(req.body);
     if (((b.status && b.status !== 'active') || b.expires_at) && (await isAdmin(u.id))) await lastAdminGuard(u.id);
     await tx(async (c) => {
       for (const k of ['name', 'email', 'status', 'expires_at', 'max_budgets', 'force_2fa']) {
@@ -262,12 +263,15 @@ export default async function routes(app) {
     many(`SELECT t.id, t.name, t.status, u.name owner, (SELECT count(*)::int FROM team_members tm WHERE tm.team_id=t.id) members, (SELECT count(*)::int FROM budgets b WHERE b.team_id=t.id) budgets FROM teams t JOIN users u ON u.id=t.owner_id ORDER BY t.name`));
 
   // ---- Einstellungen
-  app.get('/admin/settings', A('settings:read'), async () => ({
+  app.get('/admin/settings', A('settings:read'), async (req) => ({
     values: await allSettings(),
-    env: { smtp_configured: mailConfigured(), smtp_host: config.smtp.host, app_url: config.appUrl, hibp: config.hibpCheck, backup_encrypt: config.backupEncrypt, backup_retention_days: config.backupRetentionDays },
+    env: {
+      smtp_configured: mailConfigured(), smtp_host: config.smtp.host, app_url: config.appUrl, hibp: config.hibpCheck, backup_encrypt: config.backupEncrypt, backup_retention_days: config.backupRetentionDays,
+      trust_proxy: Boolean(config.trustProxy), proxy_not_trusted: !config.trustProxy && Boolean(req.headers['x-forwarded-for']),
+    },
   }));
   app.put('/admin/settings', A('settings:update'), async (req) => {
-    const b = z.record(z.union([z.string().max(500), z.number(), z.boolean()])).parse(req.body);
+    const b = z.record(z.string(), z.union([z.string().max(500), z.number(), z.boolean()])).parse(req.body);
     const allowlist = b['security.admin_ip_allowlist'];
     if (typeof allowlist === 'string' && !ipAllowed(req.ip, allowlist)) throw bad(`Admin-IP-Allowlist muss deine aktuelle IP (${req.ip}) enthalten, sonst sperrst du dich aus`);
     await setSettings(b);

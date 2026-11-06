@@ -32,6 +32,8 @@ const PAGES = {
   reports: { perm: 'report:read', load: () => import('./pages/reports.js') },
   teams: { perm: 'team:read', load: () => import('./pages/teams.js') },
   calendar: { perm: 'calendar:read', load: () => import('./pages/calendar.js') },
+  notes: { perm: null, load: () => import('./pages/notes.js') },
+  todos: { perm: null, load: () => import('./pages/todos.js') },
   'assets-vehicles': { perm: 'vehicle:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'vehicles') })) },
   'assets-properties': { perm: 'property:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'properties') })) },
   'assets-people': { perm: 'person:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'people') })) },

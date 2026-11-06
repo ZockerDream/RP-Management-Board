@@ -1,13 +1,11 @@
 // Klick-Roboter: jede Aktionsart auf jeder Seite/jedem Tab, je Rolle. Zwei Durchläufe: sicher (Bestätigungen abbrechen), dann destruktiv.
 import { chromium } from 'playwright';
 import fs from 'node:fs';
-const BASE = 'http://localhost:18088', OUT = process.env.CRAWL_OUT || '/work/crawl'; fs.mkdirSync(OUT, { recursive: true });
+const BASE = process.env.BASE || 'http://localhost:18088', OUT = process.env.CRAWL_OUT || '/work/crawl'; fs.mkdirSync(OUT, { recursive: true });
 const ROLES = { admin: ['admin@e2e.test', 'E2e-Admin-Passw0rd!x'], alice: ['alice@e2e.test', 'alice-Sehr-Sicher-9931!'], carol: ['carol@e2e.test', 'carol-Sehr-Sicher-9931!'] };
 const findings = [], actions = []; let shot = 0, uniq = 0;
 const today = new Date().toISOString().slice(0, 10);
 const find = (kind, where, msg) => { const f = `${kind} | ${where} | ${String(msg).slice(0, 260)}`; if (!findings.includes(f)) { findings.push(f); console.log(f); fs.writeFileSync(`${OUT}/findings.txt`, findings.join('\n')); } };
-const stamps = [];
-const throttle = async () => { for (;;) { const n = Date.now(); while (stamps.length && n - stamps[0] > 61000) stamps.shift(); if (stamps.length < 250) return; await new Promise((r) => setTimeout(r, 1000)); } };
 const browser = await chromium.launch();
 
 async function run(role, destructive) {
@@ -17,7 +15,6 @@ async function run(role, destructive) {
   let where = `${role} start`, downloads = 0;
   page.on('console', (m) => { if (m.type() === 'error' && !/gravatar|status of 4\d\d/i.test(m.text())) find('KONSOLE', where, m.text()); });
   page.on('pageerror', (e) => find('JS-FEHLER', where, e.message));
-  page.on('request', () => stamps.push(Date.now()));
   page.on('download', () => { downloads++; });
   page.on('response', async (r) => {
     const s = r.status(); if (s < 400 || !r.url().includes('/api/') || r.url().includes('/auth/refresh')) return;
@@ -33,7 +30,7 @@ async function run(role, destructive) {
   const ensure = async () => { if (await page.$('#auth:not(.hidden) #login') || !(await page.$('.app:not(.hidden) #view'))) { find('ABGEMELDET', where, 'Sitzung nach Aktion beendet'); await login(); } };
   const clearModals = () => page.evaluate(() => { document.querySelectorAll('#modals .modal').forEach((m) => m.remove()); document.querySelectorAll('.modal.open').forEach((m) => m.classList.remove('open')); document.getElementById('toasts')?.replaceChildren(); });
   const open = async (hash, tab) => {
-    await throttle(); await clearModals();
+    await clearModals();
     await page.evaluate(() => { location.hash = '#/help'; }); await page.waitForTimeout(100);
     await page.evaluate((h) => { location.hash = h; }, hash); await page.waitForTimeout(120); await settle();
     if (tab) { await page.click(`#view .tabs [data-tab="${tab}"]`).catch(() => {}); await page.waitForTimeout(350); }
@@ -86,7 +83,7 @@ async function run(role, destructive) {
       if (!destructive) await page.screenshot({ path: `${OUT}/${String(++shot).padStart(3, '0')}-${loc.replace(/[^\w-]+/g, '_')}.png` });
       // Auswahlfelder und Suchfelder
       const selects = await page.$$eval('#view select', (s) => s.map((x, i) => (x.closest('form') ? null : { i, id: x.id || x.name || i, opts: [...x.options].map((o) => o.value).slice(0, 6) })).filter(Boolean));
-      if (!destructive) for (const s of selects) for (const o of s.opts) { where = `${loc} select:${s.id}=${o}`; await (await page.$$('#view select'))[s.i]?.selectOption(o).catch(() => {}); await page.waitForTimeout(250); await textCheck(where); actions.push(where); await throttle(); }
+      if (!destructive) for (const s of selects) for (const o of s.opts) { where = `${loc} select:${s.id}=${o}`; await (await page.$$('#view select'))[s.i]?.selectOption(o).catch(() => {}); await page.waitForTimeout(250); await textCheck(where); actions.push(where); }
       // Aktionen einsammeln, je Art einmal
       await open(hash, tab);
       const collect = () => page.evaluate(() => [...document.querySelectorAll('#view button, #view a[href], #view [data-sel], #view input[type=checkbox], #view [data-day]')].map((e, i) => {

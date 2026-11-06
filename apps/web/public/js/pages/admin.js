@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { $, esc, eur, fdate, fdatetime, empty, openForm, confirmBox, toast, showSecret, debounce, tag } from '../ui.js';
 import { areaChart } from '../charts.js';
 import { can, applyAppName } from '../app.js';
+import { ticketHtml, bindTickets } from './ticket-view.js';
 
 const STATUS = { active: ['ok', 'Aktiv'], locked: ['warn', 'Gesperrt'], disabled: ['bad', 'Deaktiviert'], invited: ['', 'Eingeladen'] };
 const fmtBytes = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
@@ -39,7 +40,7 @@ export async function render(view, params, section) {
       ...(u ? [{ name: 'password', label: 'Neues Passwort (optional)', type: 'password', autocomplete: 'new-password' }] : []),
       { name: 'role_ids', label: 'Rollen', type: 'multi', options: D.roles.map((r) => ({ v: r.id, l: r.name })), value: u ? D.roles.filter((r) => u.roles.includes(r.name)).map((r) => r.id) : [] },
       ...(D.groups.length ? [{ name: 'group_ids', label: 'Gruppen', type: 'multi', options: D.groups.map((g) => ({ v: g.id, l: g.name })), value: u ? D.groups.filter((g) => u.groups.includes(g.name)).map((g) => g.id) : [] }] : []),
-      { name: 'expires_at', label: 'Zugang läuft ab (optional)', type: 'date', value: u?.expires_at?.slice(0, 10) },
+      { name: 'expires_at', label: 'Zugang gilt bis einschließlich (optional)', type: 'date', value: u?.expires_at?.slice(0, 10) },
       { name: 'max_budgets', label: 'Max. Konten (optional)', type: 'number', min: 0, value: u?.max_budgets ?? '' },
     ];
     return openForm({
@@ -124,13 +125,11 @@ export async function render(view, params, section) {
     },
     async tickets(el) {
       const { items } = await api.get('/admin/bug-reports');
-      el.innerHTML = `<div class="card"><div class="card-head"><h2>Gemeldete Tickets</h2></div>${items.length ? items.map((ticket) => `<div class="list-item"><div class="grow">
-        <b>#${ticket.id} · ${esc(ticket.title)}</b><small>${esc(ticket.user_name)} · ${esc(ticket.user_email)} · ${fdatetime(ticket.created_at)}</small>
-        <p style="white-space:pre-wrap;margin:8px 0">${esc(ticket.description)}</p>
-        ${ticket.steps ? `<small style="white-space:pre-wrap">Schritte: ${esc(ticket.steps)}</small>` : ''}
-        ${ticket.github_url ? `<small><a href="${esc(ticket.github_url)}" target="_blank" rel="noopener noreferrer">GitHub-Issue #${ticket.github_issue_number}</a></small>` : ''}
-        ${ticket.github_sync_error ? `<small class="auth-error">GitHub-Synchronisierung fehlgeschlagen: ${esc(ticket.github_sync_error)}</small>` : ''}
-      </div></div>`).join('') : empty('Noch keine Tickets gemeldet.')}</div>`;
+      el.innerHTML = `<div class="card"><div class="card-head"><h2>Gemeldete Tickets</h2></div>${items.length ? items.map((ticket) => ticketHtml(ticket, true)).join('') : empty('Noch keine Tickets gemeldet.')}</div>`;
+      if (!el._ticketsBound) {
+        el._ticketsBound = true;
+        bindTickets(el, '/admin/bug-reports', () => P.tickets(el));
+      }
     },
     async roles(el) {
       await loadRoles();
@@ -166,7 +165,9 @@ export async function render(view, params, section) {
         <div class="card"><div class="card-head"><h2>Umgebung (.env, schreibgeschützt)</h2></div><div class="stack">
         <div class="row between"><span class="muted">App-URL</span><code>${esc(env.app_url)}</code></div><div class="row between"><span class="muted">SMTP</span><span>${env.smtp_configured ? `konfiguriert (${esc(env.smtp_host)})` : 'nicht konfiguriert'}</span></div>
         <div class="row between"><span class="muted">HIBP-Passwortprüfung</span><span>${env.hibp ? 'an' : 'aus'}</span></div><div class="row between"><span class="muted">Backup-Verschlüsselung</span><span>${env.backup_encrypt ? 'an' : 'aus'}</span></div>
-        <div class="row between"><span class="muted">Backup-Aufbewahrung</span><span>${env.backup_retention_days} Tage</span></div></div></div>`;
+        <div class="row between"><span class="muted">Backup-Aufbewahrung</span><span>${env.backup_retention_days} Tage</span></div>
+        <div class="row between"><span class="muted">Reverse-Proxy vertrauen (TRUST_PROXY)</span><span>${env.trust_proxy ? 'an' : 'aus'}</span></div>
+        ${env.proxy_not_trusted ? '<div class="note">Diese Anfrage kam über einen Proxy, aber TRUST_PROXY ist nicht gesetzt. Dann teilen sich alle Benutzer die IP des Proxys, auch beim Login-Limit und im Audit-Log. Bitte die Proxy-IP in der .env eintragen.</div>' : ''}</div></div>`;
       $('#s-form', el).addEventListener('submit', async (e) => {
         e.preventDefault();
         const body = {};

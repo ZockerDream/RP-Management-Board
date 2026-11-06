@@ -9,6 +9,7 @@ import { HttpError, bad, loadAccess } from '../authz.js';
 import { getSetting } from '../settings.js';
 import { audit } from '../audit.js';
 import { sendMail } from '../mail.js';
+import { accessExpired, dateInZone } from '../periods.js';
 
 const COOKIE = 'bm_refresh';
 
@@ -63,7 +64,7 @@ export default async function routes(app) {
       throw generic;
     }
     if (user.status !== 'active') throw new HttpError(403, 'Konto ist nicht aktiv', 'inactive');
-    if (user.expires_at && new Date(user.expires_at) < new Date()) throw new HttpError(403, 'Konto ist abgelaufen', 'expired');
+    if (accessExpired(user.expires_at, dateInZone(config.tz))) throw new HttpError(403, 'Konto ist abgelaufen', 'expired');
     if (user.totp_enabled) return { mfa_required: true, mfa_token: signMfa(user.id) };
     const tokens = await startSession(req, reply, user);
     await audit({ ...req, user }, 'login', 'user', user.id);
@@ -80,6 +81,7 @@ export default async function routes(app) {
     }
     const user = await one("SELECT * FROM users WHERE id=$1 AND status='active' AND deleted_at IS NULL", [p.sub]);
     if (!user || !user.totp_enabled) throw new HttpError(401, 'Ungültig', 'invalid');
+    if (accessExpired(user.expires_at, dateInZone(config.tz))) throw new HttpError(403, 'Konto ist abgelaufen', 'expired');
     if (user.locked_until && new Date(user.locked_until) > new Date()) throw new HttpError(423, 'Konto vorübergehend gesperrt', 'locked');
     let ok = totpValid(decrypt(user.totp_secret_enc), code);
     if (!ok) {
@@ -95,7 +97,8 @@ export default async function routes(app) {
     return tokens;
   });
 
-  app.post('/auth/refresh', strict, async (req, reply) => {
+  // Ohne Limit: Jedes Neuladen ruft das auf, und das Token ist nicht erratbar
+  app.post('/auth/refresh', async (req, reply) => {
     const old = req.cookies?.[COOKIE];
     if (!old) throw new HttpError(401, 'Keine Sitzung', 'no_session');
     const s = await one('SELECT * FROM sessions WHERE refresh_hash=$1', [sha256(old)]);
@@ -105,7 +108,7 @@ export default async function routes(app) {
       throw new HttpError(401, 'Sitzung ungültig', 'no_session');
     }
     const user = await one("SELECT * FROM users WHERE id=$1 AND status='active' AND deleted_at IS NULL", [s.user_id]);
-    if (!user) throw new HttpError(401, 'Sitzung ungültig', 'no_session');
+    if (!user || accessExpired(user.expires_at, dateInZone(config.tz))) throw new HttpError(401, 'Sitzung ungültig', 'no_session');
     const next = randomToken(48);
     await q('UPDATE sessions SET refresh_hash=$2, last_seen_at=now(), ip=$3 WHERE id=$1', [s.id, sha256(next), req.ip]);
     const days = await getSetting('security.session_days');

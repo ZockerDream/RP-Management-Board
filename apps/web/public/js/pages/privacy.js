@@ -12,9 +12,9 @@ export async function render(view) {
       <div class="legal-card"><h2>Rechtsgrundlagen</h2><p>Art. 6 Abs. 1 lit. b DSGVO (Nutzung der Anwendung), lit. f (Sicherheit, Betrieb, Protokollierung) und lit. a (Einwilligung, z. B. Gravatar).</p></div>
       <div class="legal-card wide"><h2>Verarbeitete Daten</h2><ul>
         <li><b>Konto:</b> Name, E-Mail-Adresse, Passwort (nur als Argon2-Hash), optional 2FA-Geheimnis (verschlüsselt), Rollen und Einstellungen.</li>
-        <li><b>Inhalte, die du erfasst:</b> Konten, Transaktionen, Budgets, Sparziele, Stundenzettel, Objekte (Häuser, Fahrzeuge, Schlüssel, Personen), Kalendereinträge, Teams und Sportergebnisse. Inhalte in Teams sind für deren Mitglieder sichtbar.</li>
+        <li><b>Inhalte, die du erfasst:</b> Konten, Transaktionen, Budgets, Sparziele, Stundenzettel, Objekte (Häuser, Fahrzeuge, Schlüssel, Personen), Kalendereinträge, Notizen, ToDos, Teams und Sportergebnisse. Inhalte in Teams sind für deren Mitglieder sichtbar.</li>
         <li><b>Protokolle:</b> Audit-Log mit Zeitpunkt, Benutzer, Aktion und IP-Adresse (Sicherheit und Nachvollziehbarkeit) sowie technische Serverlogs.</li>
-        <li><b>Fehlermeldungen:</b> Text, den du im Formular „Fehler melden“ eingibst.</li></ul></div>
+        <li><b>Fehlermeldungen:</b> Text, den du im Formular „Fehler melden“ eingibst, und Kommentare zu Tickets. Beides sehen die Administratoren.</li></ul></div>
       <div class="legal-card"><h2>Cookies &amp; lokaler Speicher</h2><p>Es gibt nur technisch notwendige Speicherung: ein Sitzungs-Cookie (<code>bm_refresh</code>, HttpOnly) für die Anmeldung und lokale Browser-Einstellungen (z. B. Design). Kein Tracking, keine Werbung, keine Analyse. Eine Einwilligung ist dafür nicht erforderlich (§ 25 Abs. 2 TDDDG).</p></div>
       <div class="legal-card"><h2>Weitergabe an Dritte</h2><ul>
         <li><b>Gravatar</b> (Automattic): nur wenn du es in den Einstellungen aktivierst; dann wird ein Hash deiner E-Mail-Adresse an gravatar.com gesendet. Standard ist aus.</li>

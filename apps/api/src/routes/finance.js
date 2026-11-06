@@ -4,6 +4,8 @@ import { authz, bad, notFound, forbidden, budgetAccess, accessibleBudgetIds } fr
 import { addDefaultCategories } from '../seed.js';
 import { periodRange, budgetUsed, budgetWatch, toCsv, today, notify } from '../lib.js';
 import { audit } from '../audit.js';
+import { timelineWindow } from '../periods.js';
+import { patchSchema } from '../validation.js';
 
 const money = z.union([z.string(), z.number()]).transform((v) => String(v).replace(',', '.')).refine((v) => /^\d{1,12}(\.\d{1,2})?$/.test(v), 'Ungültiger Betrag');
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -13,7 +15,7 @@ const budgetBody = z.object({
   name: z.string().min(1).max(100),
   type: z.enum(['solo', 'shared']),
   team_id: id.nullish(),
-  currency: z.string().length(3).default('EUR'),
+  currency: z.string().length(3).optional(),
   period_type: z.enum(['daily', 'weekly', 'monthly', 'yearly', 'custom', 'goal']).default('monthly'),
   period_start: date.nullish(),
   period_end: date.nullish(),
@@ -67,7 +69,8 @@ export default async function routes(app) {
         await c.query(
           `INSERT INTO budgets(name,type,owner_user_id,team_id,currency,period_type,period_start,period_end,limit_amount)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-          [b.name, b.type, b.type === 'solo' ? req.user.id : null, b.type === 'shared' ? b.team_id : null, b.currency, b.period_type, b.period_start || null, b.period_end || null, b.limit_amount],
+          // Ohne Angabe gilt die Profilwährung, sonst wäre das Konto nicht als Gehaltskonto wählbar
+          [b.name, b.type, b.type === 'solo' ? req.user.id : null, b.type === 'shared' ? b.team_id : null, b.currency || req.user.currency || 'EUR', b.period_type, b.period_start || null, b.period_end || null, b.limit_amount],
         )
       ).rows[0].id;
       await addDefaultCategories(c, r);
@@ -79,7 +82,10 @@ export default async function routes(app) {
 
   app.patch('/budgets/:id', authz('budget:update'), async (req) => {
     const { budget } = await budgetAccess(req.user.id, req.params.id, true);
-    const b = budgetBody.pick({ name: true, currency: true, period_type: true, period_start: true, period_end: true, limit_amount: true }).partial().extend({ archived: z.boolean().optional() }).parse(req.body);
+    const b = patchSchema(budgetBody.pick({ name: true, currency: true, period_type: true, period_start: true, period_end: true, limit_amount: true })).extend({ archived: z.boolean().optional() }).parse(req.body);
+    if (b.currency && b.currency !== budget.currency && (await one('SELECT 1 FROM users WHERE payroll_budget_id=$1 AND currency<>$2', [budget.id, b.currency]))) {
+      throw bad('Dieses Konto ist ein Gehaltskonto und muss in der Profilwährung bleiben');
+    }
     const keys = Object.keys(b);
     if (keys.length) await q(`UPDATE budgets SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')}, updated_at=now() WHERE id=$1`, [budget.id, ...keys.map((k) => b[k] ?? null)]);
     return { ok: true };
@@ -204,7 +210,7 @@ export default async function routes(app) {
     if (!t) throw notFound();
     if (t.source === 'payroll') throw bad('Automatische Gehaltsbuchungen können nicht geändert werden');
     const { budget } = await budgetAccess(req.user.id, t.budget_id, true);
-    const b = txBody.omit({ budget_id: true }).partial().parse(req.body);
+    const b = patchSchema(txBody.omit({ budget_id: true })).parse(req.body);
     await checkRefs(b, budget);
     const patch = { ...b };
     if (patch.type && patch.type !== 'income') patch.income_kind = 'other';
@@ -351,7 +357,7 @@ export default async function routes(app) {
     const r = await one('SELECT * FROM recurring_rules WHERE id=$1', [req.params.id]);
     if (!r) throw notFound();
     const assetTable = r.source === 'asset' ? await assertAssetRecurringAccess(req, r, true) : null;
-    const b = recBody.omit({ budget_id: true }).partial().parse(req.body);
+    const b = patchSchema(recBody.omit({ budget_id: true })).parse(req.body);
     if (assetTable && b.type && b.type !== 'expense') throw bad('Objektkosten müssen Ausgaben sein');
     const { budget } = await budgetAccess(req.user.id, r.budget_id, true);
     await checkRefs(b, budget);
@@ -416,7 +422,7 @@ export default async function routes(app) {
     const g = await one('SELECT * FROM goals WHERE id=$1', [req.params.id]);
     if (!g) throw notFound();
     await budgetAccess(req.user.id, g.budget_id, true);
-    const b = goalBody.omit({ budget_id: true }).partial().parse(req.body);
+    const b = patchSchema(goalBody.omit({ budget_id: true })).parse(req.body);
     const keys = Object.keys(b);
     if (keys.length) await q(`UPDATE goals SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1`, [g.id, ...keys.map((k) => b[k] ?? null)]);
     return { ok: true };
@@ -466,6 +472,24 @@ export default async function routes(app) {
 
   app.get('/stats/timeline', authz('budget:read'), async (req) => {
     const { f, ids } = await statScope(req);
+    const g = z.object({
+      granularity: z.enum(['day', 'week', 'month']).default('month'),
+      periods: z.coerce.number().int().min(1).max(60).optional(),
+      week_start: z.coerce.number().int().min(0).max(1).default(1),
+    }).parse(req.query);
+    if (g.granularity !== 'month') {
+      const anchor = f.to || today();
+      const window = timelineWindow(g.granularity, anchor, g.periods, g.week_start);
+      if (!window) throw bad('Datum ungültig');
+      return many(
+        `SELECT to_char(b, 'YYYY-MM-DD') AS bucket,
+           COALESCE(sum(t.amount) FILTER (WHERE t.type='income'),0) income, COALESCE(sum(t.amount) FILTER (WHERE t.type='expense'),0) expense
+         FROM generate_series($2::date::timestamp, $3::date::timestamp, make_interval(days => $4::int)) b
+         LEFT JOIN transactions t ON t.budget_id = ANY($1) AND t.booked_at >= b::date AND t.booked_at < b::date + $4::int AND t.booked_at <= $5::date
+         GROUP BY b ORDER BY b`,
+        [ids, window.start, window.end, window.stepDays, anchor],
+      );
+    }
     return many(
       `SELECT to_char(m, 'YYYY-MM') AS month,
          COALESCE(sum(t.amount) FILTER (WHERE t.type='income'),0) income, COALESCE(sum(t.amount) FILTER (WHERE t.type='expense'),0) expense

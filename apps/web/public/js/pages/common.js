@@ -1,5 +1,6 @@
 import { api } from '../api.js';
-import { openForm, todayStr, toast, parseAmount, eur, esc } from '../ui.js';
+import { openForm, todayStr, toast, parseAmount, eur, esc, budgetTag } from '../ui.js';
+import { can } from '../app.js';
 
 export const loadBudgets = () => api.get('/budgets');
 
@@ -48,6 +49,31 @@ export async function txForm(tx, defaults = {}) {
   }
   return p;
 }
+
+// Gehaltskonto: gebucht wird nur auf ein eigenes aktives persönliches Konto in Profilwährung.
+// Andere Konten bleiben mit Begründung sichtbar, damit klar ist, warum sie nicht wählbar sind.
+export function payrollAccountOptions(budgets, me, currency = me.currency || 'EUR') {
+  const blocked = (b) => {
+    if (b.type !== 'solo' || b.owner_user_id !== me.id) return 'Team-Konto';
+    return b.currency === currency ? '' : `in ${b.currency}`;
+  };
+  return [{ v: '', l: 'Kein Konto ausgewählt' }, ...budgets.filter((b) => !b.archived).map((b) => {
+    const reason = blocked(b);
+    return { v: b.id, l: reason ? `${b.name} – nicht wählbar (${reason})` : `${b.name} (${b.currency})`, disabled: Boolean(reason) };
+  })];
+}
+export const payrollAccountHint = (options, currency) => (options.some((o) => o.v && !o.disabled)
+  ? 'Tägliche Basisgutschrift inklusive Wochenende; Auszahlung um 03:45 Uhr. Wählbar sind eigene persönliche Konten in Profilwährung.'
+  : `Du hast noch kein persönliches Konto in ${currency}. Lege es unter „Konten“ an (neue Konten erhalten deine Profilwährung) und wähle es dann hier aus.`);
+
+// Solo oder Team: Teams, in denen die Person schreiben darf; das aktuelle Team bleibt beim Bearbeiten immer wählbar
+export const writableTeams = async () => (can('team:read') ? (await api.get('/teams')).filter((team) => team.role !== 'viewer') : []);
+export function visibilityField(teams, item) {
+  const options = [{ v: '', l: 'Solo (nur für mich)' }, ...teams.map((team) => ({ v: team.id, l: `Team: ${team.name}` }))];
+  if (item?.team_id && !teams.some((team) => team.id === item.team_id)) options.push({ v: item.team_id, l: `Team: ${item.team_name}` });
+  return { name: 'team_id', label: 'Sichtbarkeit', type: 'select', options, value: item?.team_id || '' };
+}
+export const scopeTag = (item) => budgetTag(item.team_id ? 'shared' : 'solo', item.team_name || 'Solo');
 
 export const money = eur;
 export const sumBy = (list, k) => list.reduce((a, x) => a + Number(x[k] || 0), 0);

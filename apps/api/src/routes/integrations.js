@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import { many, one, q, tx } from '../db.js';
-import { requireAuth, adminOnly, bad, notFound } from '../authz.js';
+import { requireAuth, adminOnly, bad, notFound, forbidden } from '../authz.js';
 import { config } from '../config.js';
 import { encrypt, decrypt, randomToken, sha256 } from '../security.js';
+import { notify } from '../lib.js';
+import { audit } from '../audit.js';
 
 const providers = ['google', 'microsoft'];
 const providerSchema = z.enum(providers);
@@ -182,23 +184,91 @@ export default async function routes(app) {
     return { ok: true };
   });
 
+  const withComments = async (tickets) => {
+    if (!tickets.length) return tickets;
+    const comments = await many(
+      `SELECT c.id, c.report_id, c.user_id, COALESCE(u.name,'Gelöschter Benutzer') user_name, c.body, c.created_at
+       FROM bug_report_comments c LEFT JOIN users u ON u.id=c.user_id
+       WHERE c.report_id = ANY($1::bigint[]) ORDER BY c.created_at`,
+      [tickets.map((ticket) => ticket.id)],
+    );
+    return tickets.map((ticket) => ({ ...ticket, comments: comments.filter((comment) => String(comment.report_id) === String(ticket.id)) }));
+  };
+
   app.get('/bug-reports', requireAuth, async (req) => ({
     github_enabled: Boolean(config.githubIssues.token),
-    items: await many(
+    items: await withComments(await many(
       `SELECT id, title, description, steps, github_issue_number, github_url, github_sync_error, created_at
        FROM bug_reports WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50`,
       [req.user.id],
-    ),
+    )),
   }));
 
   app.get('/admin/bug-reports', adminOnly(), async () => ({
-    items: await many(
+    items: await withComments(await many(
       `SELECT br.id, br.title, br.description, br.steps, br.github_issue_number, br.github_url,
          br.github_sync_error, br.created_at, u.name user_name, u.email user_email
        FROM bug_reports br JOIN users u ON u.id=br.user_id
        ORDER BY br.created_at DESC LIMIT 200`,
-    ),
+    )),
   }));
+
+  // Melder bearbeiten ihre eigenen Tickets, Admins alle. Getrennte Pfade, damit die Admin-IP-Allowlist greift.
+  const ticketId = (req) => z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).parse(req.params.id);
+  const ticketScopes = [
+    ['/bug-reports', requireAuth, false, (req) => one('SELECT id,title,user_id FROM bug_reports WHERE id=$1 AND user_id=$2', [ticketId(req), req.user.id])],
+    ['/admin/bug-reports', adminOnly(), true, (req) => one('SELECT id,title,user_id FROM bug_reports WHERE id=$1', [ticketId(req)])],
+  ];
+  const adminIds = async (exceptUserId) => (await many(
+    `SELECT u.id FROM users u
+     WHERE u.status='active' AND u.deleted_at IS NULL AND u.id<>$1 AND EXISTS (
+       SELECT 1 FROM role_permissions rp JOIN permissions p ON p.id=rp.permission_id
+       WHERE p.key='admin:access' AND rp.role_id IN (
+         SELECT role_id FROM user_roles WHERE user_id=u.id
+         UNION SELECT gr.role_id FROM group_roles gr JOIN group_members gm ON gm.group_id=gr.group_id WHERE gm.user_id=u.id))`,
+    [exceptUserId],
+  )).map((row) => row.id);
+
+  for (const [prefix, guard, isAdmin, findTicket] of ticketScopes) {
+    const requireTicket = async (req) => {
+      const ticket = await findTicket(req);
+      if (!ticket) throw notFound();
+      return ticket;
+    };
+
+    app.post(`${prefix}/:id/comments`, guard, async (req) => {
+      const ticket = await requireTicket(req);
+      const { body } = z.object({ body: z.string().trim().min(1).max(5000) }).parse(req.body);
+      const comment = await one(
+        'INSERT INTO bug_report_comments(report_id,user_id,body) VALUES ($1,$2,$3) RETURNING id,report_id,user_id,body,created_at',
+        [ticket.id, req.user.id, body],
+      );
+      const recipients = ticket.user_id === req.user.id ? await adminIds(req.user.id) : [ticket.user_id];
+      await Promise.all(recipients.map((userId) => notify(
+        userId, 'ticket_comment', `Neuer Kommentar zu Ticket #${ticket.id}`, `${req.user.name}: ${body.slice(0, 200)}`,
+        `ticket-comment:${comment.id}`, req.log,
+      )));
+      return { ...comment, user_name: req.user.name };
+    });
+
+    app.delete(`${prefix}/:id/comments/:commentId`, guard, async (req) => {
+      const ticket = await requireTicket(req);
+      const commentId = z.string().uuid().parse(req.params.commentId);
+      const comment = await one('SELECT id,user_id FROM bug_report_comments WHERE id=$1 AND report_id=$2', [commentId, ticket.id]);
+      if (!comment) throw notFound();
+      if (!isAdmin && comment.user_id !== req.user.id) throw forbidden('Du kannst nur eigene Kommentare löschen');
+      await q('DELETE FROM bug_report_comments WHERE id=$1', [comment.id]);
+      await audit(req, 'ticket.comment_deleted', 'bug_report', String(ticket.id));
+      return { ok: true };
+    });
+
+    app.delete(`${prefix}/:id`, guard, async (req) => {
+      const ticket = await requireTicket(req);
+      await q('DELETE FROM bug_reports WHERE id=$1', [ticket.id]);
+      await audit(req, 'ticket.deleted', 'bug_report', String(ticket.id), { title: ticket.title });
+      return { ok: true };
+    });
+  }
 
   app.post('/bug-reports', requireAuth, async (req) => {
     const report = z.object({

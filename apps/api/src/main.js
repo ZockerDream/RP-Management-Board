@@ -13,6 +13,7 @@ import { waitForDb, migrate, pool } from './db.js';
 import { seed } from './seed.js';
 import { HttpError } from './authz.js';
 import { assetVersion, versionIndexHtml } from './static-assets.js';
+import { validationMessage } from './validation.js';
 
 const app = Fastify({
   logger: { level: config.logLevel, redact: ['req.headers.authorization', 'req.headers.cookie'] },
@@ -38,7 +39,8 @@ await app.register(helmet, {
   permissionsPolicy: { directives: { camera: [], microphone: [], geolocation: [] } },
 });
 await app.register(cookie);
-await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute' });
+// Kein allgemeines Limit: Grenzen gelten nur dort, wo Passwörter oder Codes geprüft werden (`config.rateLimit` an der Route)
+await app.register(rateLimit, { global: false });
 await app.register(multipart, { limits: { fileSize: config.maxUploadBytes, files: 1 } });
 const staticRoot = process.env.STATIC_DIR || fileURLToPath(new URL('../../web/public', import.meta.url));
 const version = assetVersion(staticRoot);
@@ -71,25 +73,33 @@ app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, 
 
 app.setErrorHandler((err, req, reply) => {
   if (err instanceof ZodError) {
-    return reply.status(400).send({ error: 'validation', message: err.issues.map((i) => `${i.path.join('.') || 'Eingabe'}: ${i.message}`).join('; ') });
+    return reply.status(400).send({ error: 'validation', message: validationMessage(err.issues) });
   }
   if (err instanceof HttpError) return reply.status(err.status).send({ error: err.code || 'error', message: err.message });
   if (err.statusCode && err.statusCode < 500) return reply.status(err.statusCode).send({ error: err.code || 'error', message: err.message });
-  // Von PostgreSQL abgelehnte Werte (keine gültige UUID, nicht existierendes Datum) sind Eingabefehler
-  if (['22P02', '22007', '22008'].includes(err.code)) return reply.status(400).send({ error: 'validation', message: 'Ungültige Eingabe' });
+  // Von PostgreSQL abgelehnte Werte (keine gültige UUID, nicht existierendes Datum, Null-Byte im Text) sind Eingabefehler
+  if (['22P02', '22007', '22008', '22021'].includes(err.code)) return reply.status(400).send({ error: 'validation', message: 'Ungültige Eingabe' });
   req.log.error({ err }, 'Unbehandelter Fehler');
   return reply.status(500).send({ error: 'internal', message: 'Interner Fehler' });
 });
 app.setNotFoundHandler((req, reply) => reply.status(404).send({ error: 'not_found', message: 'Nicht gefunden' }));
 
-app.get('/health', { config: { rateLimit: false } }, async () => ({ status: 'ok' }));
-app.get('/ready', { config: { rateLimit: false } }, async (req, reply) => {
+app.get('/health', async () => ({ status: 'ok' }));
+app.get('/ready', async (req, reply) => {
   try {
     await pool.query('SELECT 1');
     return { status: 'ready' };
   } catch {
     return reply.status(503).send({ status: 'db_unavailable' });
   }
+});
+
+// Hinter einem Proxy ohne TRUST_PROXY teilen sich alle Benutzer dessen IP, auch beim Login-Limit und im Audit-Log
+let proxyWarned = false;
+app.addHook('onRequest', async (req) => {
+  if (proxyWarned || config.trustProxy || !req.headers['x-forwarded-for']) return;
+  proxyWarned = true;
+  req.log.warn('Anfrage kam über einen Proxy, aber TRUST_PROXY ist nicht gesetzt');
 });
 
 app.addHook('onSend', async (req, reply) => {
@@ -100,7 +110,7 @@ await waitForDb();
 await migrate(app.log);
 await seed(app.log);
 
-const modules = ['auth', 'me', 'finance', 'teams', 'objects', 'calendar', 'admin', 'attachments', 'work', 'integrations', 'spending', 'sport', 'public'];
+const modules = ['auth', 'me', 'finance', 'teams', 'objects', 'calendar', 'admin', 'attachments', 'work', 'integrations', 'spending', 'sport', 'notes', 'todos', 'public'];
 await app.register(
   async (api) => {
     for (const m of modules) await api.register((await import(`./routes/${m}.js`)).default);

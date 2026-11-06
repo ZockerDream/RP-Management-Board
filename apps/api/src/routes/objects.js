@@ -6,6 +6,7 @@ import { addInterval, today } from '../lib.js';
 import { audit } from '../audit.js';
 import { config } from '../config.js';
 import { decrypt, encrypt, totpValid, verifyPassword } from '../security.js';
+import { patchSchema } from '../validation.js';
 
 const money = z.union([z.string(), z.number()]).transform((v) => String(v).replace(',', '.')).refine((v) => /^\d{1,12}(\.\d{1,2})?$/.test(v), 'Ungültiger Betrag');
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -13,6 +14,8 @@ const id = z.string().uuid();
 const str = (n = 200) => z.string().max(n);
 const ownerFields = { scope: z.enum(['personal', 'team']).default('personal'), team_id: id.nullish() };
 const ownerSql = (alias, n = '$1') => `(${alias}.owner_user_id=${n} OR ${alias}.team_id IN (SELECT team_id FROM team_members WHERE user_id=${n}))`;
+// Rolle in den Listen, damit die Oberfläche Aktionen für Viewer ausblenden kann
+const roleSql = (alias) => `CASE WHEN ${alias}.owner_user_id=$1 THEN 'owner' ELSE (SELECT tm.team_role FROM team_members tm WHERE tm.team_id=${alias}.team_id AND tm.user_id=$1) END`;
 
 async function assertOwner(req, row, write = false) {
   if (row.owner_user_id === req.user.id) return;
@@ -43,6 +46,11 @@ const costFields = {
   cost_tracking: z.boolean().optional(),
 };
 
+const keyFields = z.object({
+  code: z.string().min(1).max(30), label: z.string().min(1).max(100), kind: str(40).default('Haustür'), property_id: id.nullish(), vehicle_id: id.nullish(), ...ownerFields,
+  copies: z.number().int().min(1).max(99).default(1), note: str(2000).default(''), ...costFields,
+});
+
 const KINDS = {
   properties: {
     perm: 'property', asset: 'house', label: (r) => r.name,
@@ -62,10 +70,8 @@ const KINDS = {
   },
   keys: {
     perm: 'key', asset: 'key', label: (r) => r.label,
-    schema: z.object({
-      code: z.string().min(1).max(30), label: z.string().min(1).max(100), kind: str(40).default('Haustür'), property_id: id.nullish(), vehicle_id: id.nullish(), ...ownerFields,
-      copies: z.number().int().min(1).max(99).default(1), note: str(2000).default(''), ...costFields,
-    }).refine((v) => v.property_id || v.vehicle_id, 'Haus oder Fahrzeug erforderlich'),
+    base: keyFields,
+    schema: keyFields.refine((v) => v.property_id || v.vehicle_id, 'Haus oder Fahrzeug erforderlich'),
     cols: ['code', 'label', 'kind', 'property_id', 'vehicle_id', 'copies', 'note'],
   },
 };
@@ -142,7 +148,7 @@ async function checkCostBudget(req, b) {
 }
 
 const keyStatusSql = `
-  SELECT k.*, p.name property_name, v.plate vehicle_plate, v.make_model vehicle_name,
+  SELECT k.*, ${roleSql('k')} AS role, p.name property_name, v.plate vehicle_plate, v.make_model vehicle_name,
     (SELECT count(*)::int FROM key_assignments a WHERE a.key_id=k.id AND a.returned_at IS NULL AND a.lost_at IS NULL) issued,
     (SELECT count(*)::int FROM key_assignments a WHERE a.key_id=k.id AND a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at < current_date) overdue,
     (SELECT count(*)::int FROM key_assignments a WHERE a.key_id=k.id AND a.returned_at IS NULL AND a.lost_at IS NOT NULL) lost,
@@ -159,7 +165,7 @@ export default async function routes(app) {
     phone: str(40).default(''), email: z.union([z.string().email(), z.literal('')]).default(''),     active: z.boolean().default(true), note: str(2000).default(''), ...ownerFields,
   });
   app.get('/people', authz('person:read'), async (req) =>
-    many(`SELECT pe.*, (SELECT count(*)::int FROM key_assignments a JOIN keys k ON k.id=a.key_id
+    many(`SELECT pe.*, ${roleSql('pe')} AS role, (SELECT count(*)::int FROM key_assignments a JOIN keys k ON k.id=a.key_id
         WHERE a.person_id=pe.id AND ${ownerSql('k')} AND a.returned_at IS NULL AND a.lost_at IS NULL) keys
       FROM people pe WHERE ${ownerSql('pe')} ORDER BY active DESC, name`, [req.user.id]));
   app.post('/people', authz('person:create'), async (req) => {
@@ -171,7 +177,7 @@ export default async function routes(app) {
     const before = await one('SELECT * FROM people WHERE id=$1', [req.params.id]);
     if (!before) throw notFound();
     await assertOwner(req, before, true);
-    const b = personSchema.partial().parse(req.body);
+    const b = patchSchema(personSchema).parse(req.body);
     const patch = { ...b };
     if (patch.scope) Object.assign(patch, await ownerValues(req, { scope: patch.scope, team_id: patch.team_id }));
     else delete patch.team_id;
@@ -195,7 +201,7 @@ export default async function routes(app) {
     const kind = path;
     app.get(`/${path}`, authz(`${K.perm}:read`), async (req) => {
       if (path === 'keys') return (await many(`${keyStatusSql} WHERE ${ownerSql('k')} ORDER BY k.label`, [req.user.id])).map(withStatus);
-      const rows = await many(`SELECT x.*, b.name cost_budget_name FROM ${table} x LEFT JOIN budgets b ON b.id=x.cost_budget_id WHERE ${ownerSql('x')} ORDER BY ${path === 'vehicles' ? 'x.plate' : 'x.name'}`, [req.user.id]);
+      const rows = await many(`SELECT x.*, ${roleSql('x')} AS role, b.name cost_budget_name FROM ${table} x LEFT JOIN budgets b ON b.id=x.cost_budget_id WHERE ${ownerSql('x')} ORDER BY ${path === 'vehicles' ? 'x.plate' : 'x.name'}`, [req.user.id]);
       if (path === 'properties') return rows.map(({ door_pin_enc, ...property }) => property);
       return rows;
     });
@@ -226,8 +232,7 @@ export default async function routes(app) {
       const before = await one(`SELECT * FROM ${table} WHERE id=$1`, [req.params.id]);
       if (!before) throw notFound();
       await assertOwner(req, before, true);
-      const schema = K.schema._def?.schema ? K.schema._def.schema.partial() : K.schema.partial();
-      const b = schema.parse(req.body);
+      const b = patchSchema(K.base || K.schema).parse(req.body);
       const merged = { ...before, ...b };
       if (merged.property_id) await assertVisible(req, 'properties', merged.property_id);
       if (merged.vehicle_id) await assertVisible(req, 'vehicles', merged.vehicle_id);
@@ -331,7 +336,7 @@ export default async function routes(app) {
   });
   for (const [action, set] of [['return', 'returned_at=now()'], ['lost', 'lost_at=now()']]) {
     app.post(`/assignments/:id/${action}`, authz('key:assign'), async (req) => {
-      const r = await one(`UPDATE key_assignments a SET ${set} FROM keys k WHERE a.key_id=k.id AND a.id=$1 AND ${ownerSql('k', '$2')} AND a.returned_at IS NULL ${action === 'lost' ? 'AND a.lost_at IS NULL' : ''} RETURNING a.key_id`, [req.params.id, req.user.id]);
+      const r = await one(`UPDATE key_assignments a SET ${set} FROM keys k WHERE a.key_id=k.id AND a.id=$1 AND (k.owner_user_id=$2 OR k.team_id IN (SELECT team_id FROM team_members WHERE user_id=$2 AND team_role<>'viewer')) AND a.returned_at IS NULL ${action === 'lost' ? 'AND a.lost_at IS NULL' : ''} RETURNING a.key_id`, [req.params.id, req.user.id]);
       if (!r) throw notFound();
       await audit(req, `key.${action}`, 'key', r.key_id);
       return { ok: true };
