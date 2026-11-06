@@ -38,9 +38,20 @@ const denied = (name, r, allowed = [401, 403, 404]) => check(name, allowed.inclu
 const invalid = (name, r) => check(name, r.status >= 400 && r.status < 500, `status=${r.status} ${JSON.stringify(r.data)?.slice(0, 160)}`);
 
 // ---------- Basis, Header, Statik
-for (const p of ['/health', '/ready', '/', '/js/app.js', '/js/pages/sport.js', '/js/pages/spending.js', '/js/pages/privacy.js', '/css/auth.css']) {
-  check(`static ${p}`, (await fetch(BASE + p)).status === 200);
+for (const p of ['/health', '/ready', '/']) check(`static ${p}`, (await fetch(BASE + p)).status === 200);
+// Versionierte Assets: neues HTML darf nie auf alte Dateien aus einem Cache treffen
+const indexRes = await fetch(`${BASE}/`), indexText = await indexRes.text();
+const assetBase = indexText.match(/src="(assets\/[0-9a-f]{12}\/)js\/app\.js"/)?.[1];
+check('HTML verweist auf versionierte Assets', !!assetBase, indexText.slice(0, 300));
+check('HTML ohne unversionierte Assets', !/(src|href)="(js|css)\//.test(indexText));
+check('HTML wird immer neu geprüft', indexRes.headers.get('cache-control') === 'no-cache', indexRes.headers.get('cache-control'));
+for (const p of ['js/app.js', 'js/theme.js', 'js/pages/sport.js', 'js/pages/spending.js', 'js/pages/privacy.js', 'css/auth.css', 'favicon.svg']) {
+  const res = await fetch(`${BASE}/${assetBase}${p}`);
+  check(`Asset ${p}`, res.status === 200 && /immutable/.test(res.headers.get('cache-control') || ''), `${res.status} ${res.headers.get('cache-control')}`);
 }
+check('Fremde Asset-Version gibt es nicht', (await fetch(`${BASE}/assets/000000000000/js/app.js`)).status === 404);
+check('Unversionierte Datei gibt es nicht', (await fetch(`${BASE}/js/app.js`)).status === 404);
+check('Keine Dotfiles unter Assets', (await fetch(`${BASE}/${assetBase}.env`)).status === 404);
 const rootHeaders = (await fetch(`${BASE}/`)).headers;
 check('CSP-Header', /default-src/.test(rootHeaders.get('content-security-policy') || ''));
 check('kein X-Powered-By', !rootHeaders.get('x-powered-by'));

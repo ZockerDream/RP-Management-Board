@@ -44,6 +44,24 @@ docker compose -p bm-e2e --env-file /tmp/bm-e2e/test.env down -v   # aufräumen
 
 Zwischen den Stufen die API neu starten. `browser.mjs` und `crawl.mjs` setzen die Daten aus `api.mjs` voraus; `crawl.mjs` verändert sie stark, also für einen weiteren Lauf den Stack mit `down -v` neu aufsetzen.
 
+## Update im selben Browser (upgrade.mjs)
+
+Vor jedem Release ab dem zuletzt ausgerollten Stand ausführen. Der Test findet, was frische Testläufe nie sehen: neue Navigation auf altem Code aus dem Browser-Cache.
+
+```bash
+git worktree add /tmp/bm-e2e/old <zuletzt-ausgerollter-commit>
+docker compose -p bm-e2e --env-file /tmp/bm-e2e/test.env -f /tmp/bm-e2e/old/docker-compose.yml up -d --build --wait
+
+# im Playwright-Container wie oben, mit /tmp/bm-e2e/work als /work
+node upgrade.mjs before                     # alte Version benutzen, alles landet im Cache
+
+docker compose -p bm-e2e --env-file /tmp/bm-e2e/test.env up -d --build --wait   # derselbe Befehl wie in update.sh
+
+node upgrade.mjs after                      # normal neu laden, nichts löschen
+```
+
+`after` prüft alle neuen Seiten samt Titel und endet bei Fehlern mit Exit-Code 1. Für einen weiteren Lauf ein neues Browserprofil angeben: `node upgrade.mjs before /work/shots /work/profil2`.
+
 ## Ergebnisse von crawl.mjs
 
 Unter `crawl/` entstehen Screenshots, `findings.txt` und je Rolle eine Liste aller Aktionen.

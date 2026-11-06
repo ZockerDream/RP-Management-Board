@@ -13,3 +13,4 @@ git pull --ff-only
 docker compose up -d --build --wait --wait-timeout 180
 
 echo "Update abgeschlossen. Datenbankmigrationen wurden beim API-Start ausgeführt."
+grep -qs '^IMPRINT_NAME=.' .env-impressum || echo "Hinweis: Das Impressum ist leer. Vorlage: .env-impressum.example, danach: docker compose up -d api" >&2

@@ -5,11 +5,14 @@ import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import { ZodError } from 'zod';
+import fs from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { waitForDb, migrate, pool } from './db.js';
 import { seed } from './seed.js';
 import { HttpError } from './authz.js';
+import { assetVersion, versionIndexHtml } from './static-assets.js';
 
 const app = Fastify({
   logger: { level: config.logLevel, redact: ['req.headers.authorization', 'req.headers.cookie'] },
@@ -37,16 +40,23 @@ await app.register(helmet, {
 await app.register(cookie);
 await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute' });
 await app.register(multipart, { limits: { fileSize: config.maxUploadBytes, files: 1 } });
+const staticRoot = process.env.STATIC_DIR || fileURLToPath(new URL('../../web/public', import.meta.url));
+const version = assetVersion(staticRoot);
+const indexHtml = versionIndexHtml(fs.readFileSync(path.join(staticRoot, 'index.html'), 'utf8'), version);
 await app.register(fastifyStatic, {
-  root: process.env.STATIC_DIR || fileURLToPath(new URL('../../web/public', import.meta.url)),
-  prefix: '/',
+  root: staticRoot,
+  prefix: `/assets/${version}/`,
   wildcard: false,
+  index: false,
   dotfiles: 'ignore',
   cacheControl: false,
-  setHeaders(reply, path) {
-    reply.header('Cache-Control', path.endsWith('.html') ? 'no-cache' : 'public, max-age=300');
+  setHeaders(reply) {
+    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
   },
 });
+for (const url of ['/', '/index.html']) {
+  app.get(url, (req, reply) => reply.header('Cache-Control', 'no-cache').type('text/html; charset=utf-8').send(indexHtml));
+}
 
 app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
   if (!body) return done(null, {});

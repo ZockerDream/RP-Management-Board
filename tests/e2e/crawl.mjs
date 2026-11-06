@@ -1,7 +1,7 @@
 // Klick-Roboter: jede Aktionsart auf jeder Seite/jedem Tab, je Rolle. Zwei Durchläufe: sicher (Bestätigungen abbrechen), dann destruktiv.
 import { chromium } from 'playwright';
 import fs from 'node:fs';
-const BASE = 'http://localhost:18088', OUT = '/work/crawl'; fs.mkdirSync(OUT, { recursive: true });
+const BASE = 'http://localhost:18088', OUT = process.env.CRAWL_OUT || '/work/crawl'; fs.mkdirSync(OUT, { recursive: true });
 const ROLES = { admin: ['admin@e2e.test', 'E2e-Admin-Passw0rd!x'], alice: ['alice@e2e.test', 'alice-Sehr-Sicher-9931!'], carol: ['carol@e2e.test', 'carol-Sehr-Sicher-9931!'] };
 const findings = [], actions = []; let shot = 0, uniq = 0;
 const today = new Date().toISOString().slice(0, 10);
@@ -27,7 +27,7 @@ async function run(role, destructive) {
   const settle = async () => { for (let i = 0; i < 60; i++) { if (await page.evaluate(() => !/Wird geladen/.test(document.querySelector('#view')?.textContent || ''))) break; await page.waitForTimeout(60); } await page.waitForTimeout(200); };
   const login = async () => {
     await page.goto(`${BASE}/#/login`); await page.waitForSelector('#auth:not(.hidden) #login, .app:not(.hidden) #view');
-    if (await page.$('#auth:not(.hidden) #login')) { await page.fill('#login [name=email]', email); await page.fill('#login [name=password]', password); await page.click('#login button[type=submit]'); await page.waitForSelector('.app:not(.hidden) #view', { timeout: 15000 }); }
+    if (await page.$('#auth:not(.hidden) #login')) { await page.waitForTimeout(1500); await page.fill('#login [name=email]', email); await page.fill('#login [name=password]', password); await page.click('#login button[type=submit]'); await page.waitForSelector('.app:not(.hidden) #view', { timeout: 15000 }); }
     await settle();
   };
   const ensure = async () => { if (await page.$('#auth:not(.hidden) #login') || !(await page.$('.app:not(.hidden) #view'))) { find('ABGEMELDET', where, 'Sitzung nach Aktion beendet'); await login(); } };
@@ -42,7 +42,7 @@ async function run(role, destructive) {
     const t = await page.evaluate(() => { const c = document.querySelector('#view')?.cloneNode(true); c?.querySelectorAll('input,select,textarea,script,style,code').forEach((x) => x.remove()); const m = [...document.querySelectorAll('.modal.open')].map((x) => x.innerText).join(' '); return `${c?.innerText || ''} ${m}`; });
     const hit = t.match(/.{0,40}\b(undefined|NaN|\[object Object\]|Invalid Date|null)\b.{0,30}/);
     if (hit) find('TEXTFEHLER', w, hit[0]);
-    const err = await page.evaluate(() => document.querySelector('#view .auth-error')?.textContent || '');
+    const err = await page.evaluate(() => document.querySelector('.app:not(.hidden) #view .auth-error')?.textContent || '');
     if (err) find('SEITENFEHLER', w, err);
     const over = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth); if (over > 1) find('LAYOUT', w, `horizontal ${over}px`);
   };
@@ -51,7 +51,7 @@ async function run(role, destructive) {
       if (!(await f.isVisible()) || await f.isDisabled()) continue;
       const tag = await f.evaluate((e) => e.tagName), type = (await f.getAttribute('type')) || 'text', n = ((await f.getAttribute('name')) || (await f.getAttribute('id')) || '').toLowerCase(), cur = await f.inputValue();
       if (tag === 'SELECT') { if (!cur) { const o = await f.$$eval('option', (x) => x.map((y) => y.value).filter(Boolean)); if (o[0]) await f.selectOption(o[0]); } continue; }
-      if (cur) continue;
+      if (cur || /allowlist|expires_at/.test(n)) continue; // beides würde den Admin aussperren und wird vom Server abgelehnt
       uniq++;
       let v = 'Test Eintrag Nr ' + uniq;
       if (type === 'password' || /password|passwort|current/.test(n)) v = password;
@@ -89,20 +89,23 @@ async function run(role, destructive) {
       if (!destructive) for (const s of selects) for (const o of s.opts) { where = `${loc} select:${s.id}=${o}`; await (await page.$$('#view select'))[s.i]?.selectOption(o).catch(() => {}); await page.waitForTimeout(250); await textCheck(where); actions.push(where); await throttle(); }
       // Aktionen einsammeln, je Art einmal
       await open(hash, tab);
-      const items = await page.evaluate(() => [...document.querySelectorAll('#view button, #view a[href], #view [data-sel], #view input[type=checkbox], #view [data-day]')].map((e, i) => {
+      const collect = () => page.evaluate(() => [...document.querySelectorAll('#view button, #view a[href], #view [data-sel], #view input[type=checkbox], #view [data-day]')].map((e, i) => {
         if (e.offsetParent === null) return null;
         const data = Object.keys(e.dataset).sort().join(',');
         const label = (e.textContent || e.getAttribute('aria-label') || e.title || e.name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
         const generic = data && !['tab'].includes(data);
         return { i, tag: e.tagName, type: e.type, data, label, href: e.getAttribute('href'), id: e.id, key: `${e.tagName}|${e.id}|${data}|${generic || e.id ? '' : label}|${generic ? label.replace(/[\d.,:€ -]+/g, '') : ''}` };
       }).filter(Boolean));
+      const items = await collect();
       for (const it of items) {
         if (it.data === 'tab' || it.data === 'action') continue;
         const key = `${hash}|${tab}|${it.key}`; if (seen.has(key)) continue; seen.add(key);
         where = `${loc} › ${it.label || it.id || it.data || it.tag}`;
         await open(hash, tab); await ensure();
-        const el = page.locator('#view button, #view a[href], #view [data-sel], #view input[type=checkbox], #view [data-day]').nth(it.i);
-        // Index kann sich ändern: Beschriftung prüfen
+        // Die Position kann sich geändert haben, etwa nach gelöschten Zeilen: Element neu suchen
+        const current = (await collect()).find((x) => x.key === it.key);
+        if (!current) { actions.push(`${where} => nicht mehr vorhanden`); continue; }
+        const el = page.locator('#view button, #view a[href], #view [data-sel], #view input[type=checkbox], #view [data-day]').nth(current.i);
         const before = await snap(), dl0 = downloads;
         const isSubmit = it.tag === 'BUTTON' && it.type === 'submit';
         try {

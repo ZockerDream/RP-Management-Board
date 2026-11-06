@@ -19,7 +19,7 @@ Die Anforderungen wurden aus Code, Doku und Git-Historie abgeleitet (Stand 2026-
 - Mit dem Auftraggeber **auf Deutsch** kommunizieren. UI, Hilfe, Fehlermeldungen und Doku sind deutsch (echte Umlaute, Du-Form).
 - Fachbegriffe sauber trennen: **Konto** = Finanzbereich mit Kontostand (Code/DB/API: `budgets`, `budget_id`). **Budget** = Ausgabenlimit pro Zeitraum (`spending_budgets`). Die Namen im Code nicht „korrigieren“.
 - Bei Funktionsänderungen immer mitpflegen: [help.js](apps/web/public/js/pages/help.js), `CONCEPT.md`, `TECHNICAL.md`, `README.md`, bei neuen personenbezogenen Daten auch [privacy.js](apps/web/public/js/pages/privacy.js), und diese Datei.
-- Commit und Push nur auf Anweisung. Hauptbranch ist `develop` (der lokale Branch `main` trackt `origin/develop`); Änderungen über `feature/*`-Branches und Pull Requests. Remote: `git@github.com:ZockerDream/budget-manager.git`.
+- Commit und Push nur auf Anweisung. Hauptbranch ist `develop` (der lokale Branch `main` trackt `origin/develop`); Änderungen über `feature/*`-Branches und Pull Requests, direkt auf `develop` nur auf ausdrückliche Anweisung. Remote: `git@github.com:ZockerDream/budget-manager.git`.
 - `.env` und `.env-impressum` enthalten Secrets bzw. private Daten und werden nie committet. Änderungen nur in `.env.example` / `.env-impressum.example` mit Platzhaltern.
 
 ## Stack
@@ -45,6 +45,9 @@ Node 22, Fastify 5, reines ESM-JavaScript, `zod`, `pg` mit handgeschriebenem SQL
 - **Restore:** `src/cli/backup.js` filtert `pgboss` aus der Inhaltsliste des Dumps. `--exclude-schema` reicht nicht: Es würde das Schema trotzdem droppen; die partitionierten Tabellen scheitern ohnehin an `--clean`.
 - **Datumsangaben** kommen als Strings aus der DB (Typ-Parser in `db.js`); Geldbeträge sind Strings aus `numeric`, nie als Float rechnen.
 - **Globales Rate-Limit:** 300 Anfragen/Minute pro IP, auch für statische Dateien. Automatisierte Tests müssen drosseln oder zwischendurch die API neu starten.
+- **Statische Dateien sind versioniert:** `index.html` kommt immer frisch, JS und CSS laufen unter `/assets/<Inhalts-Hash>/` mit unbegrenztem Cache (`static-assets.js`). Eine feste Adresse wie `/js/app.js` gibt es nicht. In `index.html` relative Pfade (`js/…`, `css/…`) schreiben, der Server schreibt sie beim Start um; neue Asset-Arten dort in `versionIndexHtml` ergänzen. Module immer relativ und ohne Query importieren, sonst entstehen doppelte Instanzen mit getrenntem Zustand.
+- **Mit fester Adresse wären neue Navigation und alter Code gemischt:** Genau das passierte beim Update von Migration 009 auf 013: Alle neuen Seiten leiteten aufs Dashboard um, das Impressum zeigte die alte Seite. Frische Testläufe sehen so etwas nie, deshalb gehört `upgrade.mjs` vor jedes Release.
+- **`.env-impressum` ist nicht in Git:** Sie muss auf jedem Server einzeln existieren und gefüllt sein. Das Update überträgt sie nicht; `update.sh` warnt, wenn das Impressum leer ist.
 - **Laufende Instanz:** Vor Tests prüfen, welchen Code die Container wirklich enthalten; das Image wird nicht automatisch neu gebaut.
 - **Admin-IP-Allowlist:** Wird nur gespeichert, wenn die eigene IP enthalten ist. Ausgesperrt? Direkt in der DB: `DELETE FROM settings WHERE key='security.admin_ip_allowlist'`.
 - **Letzter Admin:** Status, Rollen und Ablaufdatum des letzten aktiven Admins sind per `lastAdminGuard` geschützt; neue Felder, die den Zugang entziehen können, dort mit absichern.
@@ -61,8 +64,9 @@ Nie gegen die laufende Instanz `budget-manager` testen, dort liegen echte Daten.
 | `auth.mjs` | Refresh-Rotation, 2FA, Recovery-Codes, Passwort, Reset, Einladung |
 | `browser.mjs` | Geführte Abläufe im Browser, Mobilbreite, Konsole |
 | `crawl.mjs` | Klickt jede Aktionsart auf jeder Seite als Viewer, Owner, Admin, danach destruktiv |
+| `upgrade.mjs` | Update von einem alten Stand im selben Browserprofil, ohne Cache-Löschen |
 
-Zusätzlich vor einem Release von Hand: Migrationen auf einer Wegwerf-Kopie des aktuellen Stands, alle Worker-Jobs mit Daten (`runJob`), Restore bei laufendem Stack und in eine leere DB. Der Test-Stack braucht ein eigenes `APP_VERSION`, sonst wird das produktive Image-Tag überschrieben.
+Zusätzlich vor einem Release: `upgrade.mjs` ab dem zuletzt ausgerollten Stand, Migrationen auf einer Wegwerf-Kopie des aktuellen Stands, alle Worker-Jobs mit Daten (`runJob`), Restore bei laufendem Stack und in eine leere DB. Der Test-Stack braucht ein eigenes `APP_VERSION`, sonst wird das produktive Image-Tag überschrieben.
 
 Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeingaben, nicht konfiguriertes OAuth, QR-Scan ohne `BarcodeDetector` in Headless-Chromium, deaktivierte Blätter-Knöpfe und neu gerenderte Kalender-Elemente sind normal. Verdachtsfälle gezielt nachprüfen; nur 5xx, JS-Fehler und Textfehler sind immer echte Fehler.
 

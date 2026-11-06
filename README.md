@@ -14,7 +14,7 @@ Nur `api` veröffentlicht **einen** Port (`HTTP_PORT`, Standard 8080, plain HTTP
 
 ## Installation
 
-Voraussetzungen: Docker ≥ 24 mit Compose v2. Ein Reverse-Proxy ist optional.
+Voraussetzungen: Docker ≥ 24 mit Compose ≥ 2.24. Ein Reverse-Proxy ist optional.
 
 ```bash
 git clone <repository-url>
@@ -81,7 +81,7 @@ Im Projektverzeichnis genügt:
 ./scripts/update.sh
 ```
 
-Das Skript aktualisiert den ausgecheckten Branch per Fast-Forward, baut die Images neu, startet die Services und wartet auf deren Healthchecks. Es bricht ab, wenn lokale Änderungen vorhanden sind. Datenbankmigrationen laufen beim API-Start automatisch; ein manueller Migrationsschritt ist nicht erforderlich und die Docker-Volumes bleiben erhalten. Das Update setzt alle Gravatar-Einstellungen einmalig auf „aus“ (Migration 013). Bei Problemen helfen `docker compose logs -f api worker`. Vor größeren Updates empfiehlt sich ein Backup.
+Das Skript aktualisiert den ausgecheckten Branch per Fast-Forward, baut die Images neu, startet die Services und wartet auf deren Healthchecks. Es bricht ab, wenn lokale Änderungen vorhanden sind. Datenbankmigrationen laufen beim API-Start automatisch; ein manueller Migrationsschritt ist nicht erforderlich und die Docker-Volumes bleiben erhalten. Das Update setzt alle Gravatar-Einstellungen einmalig auf „aus“ (Migration 013). Browser und Proxys bekommen die neue Version automatisch, Cache-Löschen ist nicht nötig; bereits offene Tabs einmal neu laden. `.env-impressum` ist nicht in Git und wird vom Update nicht angelegt; das Skript weist darauf hin, wenn das Impressum leer ist. Bei Problemen helfen `docker compose logs -f api worker`. Vor größeren Updates empfiehlt sich ein Backup.
 
 ### Backup & Restore
 

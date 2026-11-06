@@ -172,6 +172,19 @@ const parseHash = () => {
   return { page: path.split('/')[0] || '', params: new URLSearchParams(qs) };
 };
 
+// Ein Tab von vor einem Update findet die Dateien seiner Version nicht mehr; einmal neu laden holt den aktuellen Stand.
+function reloadIfOutdated(error) {
+  if (!/dynamically imported module|importing a module script/i.test(error?.message || '')) return false;
+  try {
+    if (Date.now() - Number(sessionStorage.getItem('bm-reload') || 0) < 30000) return false;
+    sessionStorage.setItem('bm-reload', String(Date.now()));
+  } catch {
+    return false;
+  }
+  location.reload();
+  return true;
+}
+
 let gen = 0;
 export async function route() {
   const { page, params } = parseHash();
@@ -179,8 +192,13 @@ export async function route() {
     if (!state.me) {
       authEl.classList.remove('hidden');
       appEl.classList.add('hidden');
-      const mod = await PAGES[page].load();
-      return mod.render(authEl, params);
+      try {
+        const mod = await PAGES[page].load();
+        return await mod.render(authEl, params);
+      } catch (e) {
+        if (!reloadIfOutdated(e)) toast(e.message, true);
+        return undefined;
+      }
     }
   }
   if (['reset', 'invite'].includes(page)) return tokenScreen(page, params.get('token') || '');
@@ -209,7 +227,7 @@ export async function route() {
     view.innerHTML = '';
     await mod.render(view, params);
   } catch (e) {
-    if (my === gen) view.innerHTML = `<div class="card"><p class="auth-error">${esc(e.message)}</p></div>`;
+    if (my === gen && !reloadIfOutdated(e)) view.innerHTML = `<div class="card"><p class="auth-error">${esc(e.message)}</p></div>`;
   }
 }
 

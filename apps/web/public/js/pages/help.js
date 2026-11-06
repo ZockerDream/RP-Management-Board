@@ -78,6 +78,10 @@ const sections = [
     text: 'In „Teams“ lädst du Mitglieder ein und vergibst Rollen. Owner dürfen alles, Editoren buchen und bearbeiten, Viewer sehen nur und tragen Sportergebnisse ein. Ein Team braucht immer mindestens einen Owner; als letzter Owner kannst du es erst verlassen, wenn du die Rolle weitergegeben hast. Mit „Verlassen“ verlässt du ein Team selbst.',
   },
   {
+    title: 'Häufige Fragen: Eine Seite wirkt nach einem Update veraltet',
+    text: 'Lade die Seite einmal neu (F5). Cache löschen ist nicht nötig. Ein Tab, der während eines Updates offen war, aktualisiert sich normalerweise beim nächsten Seitenwechsel von selbst.',
+  },
+  {
     title: 'Häufige Fragen: Warum fehlt eine Buchung im Saldo?',
     text: 'Dashboard und Kontostand zeigen nur, was heute wirklich auf dem Konto ist: Einnahmen minus Ausgaben bis zum heutigen Tag. Eine Buchung mit Datum in der Zukunft zählt erst ab diesem Datum, steht aber schon unter „Transaktionen“. Einzahlungen auf ein Sparziel ändern den Saldo nicht, denn das Geld bleibt auf dem Konto und ist nur für das Ziel vorgemerkt.',
   },

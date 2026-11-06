@@ -11,7 +11,7 @@ Die Oberfläche verwendet den Begriff „Konto“. API-Routen und Tabellen heiß
 | Datenbank | PostgreSQL 16 | `numeric` für Geld, CHECK-Constraints, `jsonb` |
 | Backend | Node.js 22, Fastify 5, ESM-JavaScript | Validierung mit `zod`, SQL handgeschrieben über `pg` |
 | Migrationen | Nummerierte SQL-Dateien | Laufen beim API-Start, je Datei in einer Transaktion, mit Advisory-Lock |
-| Frontend | Vanilla-JS-Module ohne Build | Statisch aus `apps/web/public`, Hash-Router, Seiten per dynamischem `import()` |
+| Frontend | Vanilla-JS-Module ohne Build | Statisch aus `apps/web/public`, versioniert unter `/assets/<Hash>/`, Hash-Router, Seiten per dynamischem `import()` |
 | Diagramme, Kalender | Eigene Module | `charts.js` (SVG), `calendar.js` |
 | Jobs | `pg-boss` im Service `worker` | Keine zusätzliche Redis-Abhängigkeit |
 | Auth | Argon2, JWT + Refresh-Token, TOTP (`otplib`) | siehe 6 |
@@ -32,7 +32,7 @@ budget-manager/
     │   └── src/
     │       ├── main.js, worker.js, jobs.js, config.js, db.js, seed.js, settings.js
     │       ├── authz.js, security.js, audit.js, mail.js, lib.js, backup.js
-    │       ├── payroll.js, work-hours.js, cli/backup.js
+    │       ├── payroll.js, work-hours.js, static-assets.js, cli/backup.js
     │       └── routes/          # admin attachments auth calendar finance integrations
     │                            # me objects public spending sport teams work
     └── web/public/
@@ -43,7 +43,9 @@ budget-manager/
 
 ## 3. Deployment
 
-Der Service `api` liefert SPA und REST-API am selben Ursprung aus und veröffentlicht allein den App-Port. `worker` nutzt dasselbe Image ohne Port, `db` hängt nur im internen Netz. Container laufen mit `read_only`, `cap_drop: ALL`, `no-new-privileges` und Healthchecks. `uploads` und `backups` sind Volumes. Das Impressum kommt per `env_file` aus `.env-impressum` (optional, nicht im Repository, nicht im Image).
+Der Service `api` liefert SPA und REST-API am selben Ursprung aus und veröffentlicht allein den App-Port. `worker` nutzt dasselbe Image ohne Port, `db` hängt nur im internen Netz. Container laufen mit `read_only`, `cap_drop: ALL`, `no-new-privileges` und Healthchecks. `uploads` und `backups` sind Volumes. Das Impressum kommt per `env_file` aus `.env-impressum` (optional, nicht im Repository, nicht im Image; muss auf jedem Server einzeln gepflegt werden).
+
+**Auslieferung statischer Dateien:** Beim Start berechnet die API einen Hash über alle Dateien in `apps/web/public` und schreibt die Pfade in `index.html` auf `assets/<Hash>/…` um. `/` und `/index.html` werden mit `no-cache` ausgeliefert, alles unter `/assets/<Hash>/` mit `max-age=31536000, immutable`. Nach einem Update ändern sich damit alle Adressen; neues HTML trifft nie auf altes JS oder CSS, auch nicht über Browser-Cache oder Proxy. Relative Modul-Imports bleiben automatisch in derselben Version. Ein Tab von vor einem Update findet nachzuladende Seiten nicht mehr (404) und lädt einmal neu (`reloadIfOutdated` in `app.js`, höchstens einmal in 30 Sekunden).
 
 ## 4. Datenmodell
 
@@ -183,7 +185,7 @@ Der Server liefert für `[from, to]` die Vereinigung aus eigenen Terminen und ab
 - **Health:** `/health` (Liveness), `/ready` (DB erreichbar).
 - **Logging:** JSON auf stdout, keine Passwörter oder Tokens.
 - **Backups:** verschlüsselter Dump; Wiederherstellung per `src/cli/backup.js restore` ohne das Schema `pgboss`, danach `docker compose restart api worker`.
-- **Updates:** `./scripts/update.sh`; Migrationen vorwärtskompatibel halten.
+- **Updates:** `./scripts/update.sh`; Migrationen vorwärtskompatibel halten. Kein Cache-Löschen nötig, siehe Abschnitt 3.
 - **Tests:** `npm test` in `apps/api` (Unit). End-to-End immer in einem eigenen Compose-Projekt mit eigenen Volumes und eigenem `APP_VERSION`, nie gegen die produktive Instanz; siehe [tests/e2e/README.md](tests/e2e/README.md).
 
 ## 10. Grenzen

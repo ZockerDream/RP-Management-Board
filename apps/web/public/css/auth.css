@@ -56,4 +56,5 @@
 .legal-card dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
 .legal-card dt { color: var(--muted); }
 .legal-card dd { margin: 0; overflow-wrap: anywhere; }
+.legal-card a { color: var(--primary); overflow-wrap: anywhere; }
 .legal-foot { margin-top: 26px; color: var(--muted); font-size: 12px; }
