@@ -1,6 +1,6 @@
-# Budget Manager – Technische Sicht
+# RP-Management-Board – Technische Sicht
 
-Ergänzt [CONCEPT.md](CONCEPT.md) und beschreibt den implementierten Stand (Migration 015).
+Ergänzt [CONCEPT.md](CONCEPT.md) und beschreibt den implementierten Stand (Migration 016).
 
 Die Oberfläche verwendet den Begriff „Konto“. API-Routen und Tabellen heißen aus Kompatibilitätsgründen weiterhin `/budgets`, `budgets` und `budget_id`. Das Ausgabenlimit „Budget“ der Oberfläche heißt technisch `spending_budgets`.
 
@@ -21,7 +21,7 @@ Die Oberfläche verwendet den Begriff „Konto“. API-Routen und Tabellen heiß
 ## 2. Repository-Struktur
 
 ```
-budget-manager/
+RP-Management-Board/
 ├── docker-compose.yml, .env.example, .env-impressum.example
 ├── AGENTS.md, CLAUDE.md, CONCEPT.md, README.md, TECHNICAL.md
 ├── scripts/                 # gen-secrets.sh, update.sh

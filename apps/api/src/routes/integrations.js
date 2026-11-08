@@ -290,7 +290,7 @@ export default async function routes(app) {
       headers: { authorization: `Bearer ${config.githubIssues.token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', 'content-type': 'application/json' },
       body: JSON.stringify({
         title: report.title,
-        body: `Interne Ticket-ID: ${ticket.id}\n\n${report.description}\n\n${report.steps ? `### Reproduktionsschritte\n${report.steps}\n\n` : ''}---\nGemeldet über Budget Manager.`,
+        body: `Interne Ticket-ID: ${ticket.id}\n\n${report.description}\n\n${report.steps ? `### Reproduktionsschritte\n${report.steps}\n\n` : ''}---\nGemeldet über RP-Management-Board.`,
       }),
       signal: AbortSignal.timeout(15000),
     });

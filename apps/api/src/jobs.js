@@ -231,7 +231,7 @@ export async function reportsRun(log) {
       [r.owner_id, from, t],
     );
     const text = `Bericht ${r.kind} (${from} – ${t})\n\n${rows.map((x) => `${x.name}: ${x.total} €`).join('\n') || 'Keine Ausgaben im Zeitraum.'}\n`;
-    for (const to of new Set([r.email, ...r.recipients])) await sendMail({ to, subject: `Budget Manager – ${r.kind}-Bericht`, text, log });
+    for (const to of new Set([r.email, ...r.recipients])) await sendMail({ to, subject: `RP-Management-Board – ${r.kind}-Bericht`, text, log });
     await q('UPDATE saved_reports SET last_run=$2 WHERE id=$1', [r.id, t]);
     n++;
   }

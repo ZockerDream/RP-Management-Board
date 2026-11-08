@@ -7,7 +7,7 @@ export const DEFAULTS = {
   'security.session_days': 14,
   'security.force_2fa': false,
   'security.admin_ip_allowlist': '',
-  'general.app_name': 'Budget Manager',
+  'general.app_name': 'RP-Management-Board',
   'general.maintenance': false,
   'general.maintenance_message': 'Wartungsarbeiten – bitte später erneut versuchen.',
   'general.registration': false,

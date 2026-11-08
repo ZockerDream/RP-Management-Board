@@ -1,4 +1,4 @@
-# Budget Manager – Konzept
+# RP-Management-Board – Konzept
 
 Stand: entspricht der implementierten Anwendung. Die technische Umsetzung steht in [TECHNICAL.md](TECHNICAL.md).
 

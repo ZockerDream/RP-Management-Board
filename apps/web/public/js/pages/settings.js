@@ -174,7 +174,7 @@ export async function render(view) {
           onSubmit: async (v) => { const r = await api.post('/me/api-keys', { name: v.name.trim(), scope: v.scope }); await showSecret('API-Schlüssel', 'Wird nur einmal angezeigt:', r.token); } });
         show();
       } else if (g('[data-kdel]') && (await confirmBox('API-Schlüssel widerrufen', 'Der Schlüssel funktioniert danach nicht mehr.', 'Widerrufen'))) { await api.del(`/me/api-keys/${g('[data-kdel]').dataset.kdel}`); show(); }
-      else if (g('#x-json')) download('budget-manager-export.json', JSON.stringify(await api.get('/me/export'), null, 2), 'application/json');
+      else if (g('#x-json')) download('rp-management-board-export.json', JSON.stringify(await api.get('/me/export'), null, 2), 'application/json');
     } catch (x) { toast(x.message, true); }
   });
 

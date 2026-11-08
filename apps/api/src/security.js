@@ -41,7 +41,7 @@ export function verifyJwt(token, typ) {
 
 authenticator.options = { window: 1 };
 export const newTotpSecret = () => authenticator.generateSecret();
-export const totpUri = (email, secret) => authenticator.keyuri(email, 'Budget Manager', secret);
+export const totpUri = (email, secret) => authenticator.keyuri(email, 'RP-Management-Board', secret);
 export const totpValid = (secret, code) => {
   try {
     return authenticator.check(String(code).replace(/\s/g, ''), secret);
