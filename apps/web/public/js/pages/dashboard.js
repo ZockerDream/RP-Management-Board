@@ -98,7 +98,7 @@ export async function render(view) {
     }
     upcoming.sort((a, b) => a.occurrence.localeCompare(b.occurrence) || (a.start || '').localeCompare(b.start || ''));
     const vehicleStatus = { available: ['ok', 'Verfügbar'], in_use: ['warn', 'Im Einsatz'], workshop: ['bad', 'Werkstatt'], retired: ['sys', 'Ausgemustert'] };
-    const eventTypes = { finance: 'Zahlung', vehicle: 'Fahrzeug', key: 'Schlüssel', house: 'Wartung', team: 'Team', personal: 'Privat' };
+    const eventTypes = { finance: 'Zahlung', vehicle: 'Fahrzeug', key: 'Schlüssel', house: 'Wartung', license: 'Lizenz', training: 'Schulung', team: 'Team', personal: 'Privat' };
     const vehicleItems = vehicles.slice(0, 5);
     $('#d-body').innerHTML = `
       <div class="grid cols-4">

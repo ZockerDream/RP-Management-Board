@@ -42,7 +42,7 @@ docker run --rm --network host -v /tmp/bm-e2e/work:/work -w /work mcr.microsoft.
 docker compose -p bm-e2e --env-file /tmp/bm-e2e/test.env down -v   # aufräumen
 ```
 
-`api.mjs` startet die Jobs `payroll.run` und `todos.remind` per `docker exec` im Worker-Container und setzt für das Gehaltsbeispiel ein Startdatum direkt in der Datenbank, braucht also Docker auf dem Host. Mit `MAILPIT=http://localhost:18025` prüft es zusätzlich den Mailversand über einen Mailpit-Container, sonst entfällt dieser Teil. Zwischen den Stufen die API neu starten. `browser.mjs` und `crawl.mjs` setzen die Daten aus `api.mjs` voraus; `crawl.mjs` verändert sie stark, also für einen weiteren Lauf den Stack mit `down -v` neu aufsetzen.
+`api.mjs` startet die Jobs `payroll.run`, `todos.remind` und `reminders` per `docker exec` im Worker-Container und setzt für das Gehaltsbeispiel ein Startdatum und für die Nachtschicht die Startzeit eines Timers direkt in der Datenbank, braucht also Docker auf dem Host. Der Gehaltslauf bucht den Vortag erst ab 03:45 Uhr; die Prüfung „wartet auf das Ausstempeln“ läuft deshalb nur zwischen 03:45 und 23:00 Uhr (Europe/Berlin). Mit `MAILPIT=http://localhost:18025` prüft es zusätzlich den Mailversand über einen Mailpit-Container, sonst entfällt dieser Teil. Zwischen den Stufen die API neu starten. `browser.mjs` und `crawl.mjs` setzen die Daten aus `api.mjs` voraus; `crawl.mjs` verändert sie stark, also für einen weiteren Lauf den Stack mit `down -v` neu aufsetzen.
 
 ## Zweiter Stack neben einem benutzten Test-Stack
 

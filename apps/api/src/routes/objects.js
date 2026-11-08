@@ -158,6 +158,17 @@ const keyStatusSql = `
   LEFT JOIN vehicles v ON v.id=k.vehicle_id AND (v.owner_user_id=$1 OR v.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1))`;
 const withStatus = (k) => ({ ...k, status: k.lost > 0 ? 'lost' : k.overdue > 0 ? 'overdue' : k.issued > 0 ? 'out' : 'available' });
 
+// Unterlagen zu einer Person: Sie bleiben vollständig, deshalb lässt sich die Person weder löschen noch verschieben
+async function personRecords(personId) {
+  const r = await one(
+    `SELECT EXISTS (SELECT 1 FROM case_file_people WHERE person_id=$1) OR EXISTS (SELECT 1 FROM case_file_entries WHERE person_id=$1) files,
+            EXISTS (SELECT 1 FROM licenses WHERE person_id=$1) licenses, EXISTS (SELECT 1 FROM training_records WHERE person_id=$1) trainings`,
+    [personId],
+  );
+  return [r.files && 'Akten', r.licenses && 'Lizenzen', r.trainings && 'Schulungsnachweise'].filter(Boolean);
+}
+const personHasRecords = async (personId) => (await personRecords(personId)).length > 0;
+
 export default async function routes(app) {
   // ---- Personen
   const personSchema = z.object({
@@ -179,8 +190,12 @@ export default async function routes(app) {
     await assertOwner(req, before, true);
     const b = patchSchema(personSchema).parse(req.body);
     const patch = { ...b };
-    if (patch.scope) Object.assign(patch, await ownerValues(req, { scope: patch.scope, team_id: patch.team_id }));
-    else delete patch.team_id;
+    if (patch.scope) {
+      Object.assign(patch, await ownerValues(req, { scope: patch.scope, team_id: patch.team_id }));
+      // Akten, Lizenzen und Nachweise gehören zum Bereich der Person; ein Wechsel würde sie für die Beteiligten unsichtbar machen
+      const moved = patch.team_id !== before.team_id || patch.owner_user_id !== before.owner_user_id;
+      if (moved && await personHasRecords(before.id)) throw bad('Person hat Akten, Lizenzen oder Schulungsnachweise und kann die Sichtbarkeit nicht wechseln');
+    } else delete patch.team_id;
     delete patch.scope;
     const keys = Object.keys(patch);
     if (keys.length) await q(`UPDATE people SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1`, [req.params.id, ...keys.map((key) => patch[key])]);
@@ -191,6 +206,8 @@ export default async function routes(app) {
     if (!person) throw notFound();
     await assertOwner(req, person, true);
     if (await one('SELECT 1 FROM key_assignments WHERE person_id=$1 AND returned_at IS NULL', [req.params.id])) throw bad('Person hat noch Schlüssel – zuerst zurücknehmen');
+    const linked = await personRecords(req.params.id);
+    if (linked.length) throw bad(`Person hat noch ${linked.join(', ')} – deaktiviere sie stattdessen`);
     await q('DELETE FROM people WHERE id=$1', [req.params.id]);
     return { ok: true };
   });

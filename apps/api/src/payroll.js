@@ -13,6 +13,24 @@ export function nextDate(date) {
   return formatDate(value);
 }
 
+export function previousDate(date) {
+  const value = parseDate(date);
+  value.setUTCDate(value.getUTCDate() - 1);
+  return formatDate(value);
+}
+
+export const PAYROLL_TIME = '03:45';
+
+// Letzter Tag, den der Gehaltslauf abrechnet: ab 03:45 Uhr der Vortag. Der Lauf prüft stündlich.
+// Ist noch eine Schicht offen (laufender Timer), wartet ihr Starttag, bis ausgestempelt ist; sonst fehlten ihre Stunden,
+// und bei einer Nacht von Sonntag auf Montag wäre die Woche schon abgeschlossen.
+export function payrollCutoff({ date, time, openShiftDate = null }) {
+  const yesterday = previousDate(date);
+  let last = time >= PAYROLL_TIME ? yesterday : previousDate(yesterday);
+  if (openShiftDate && openShiftDate <= last) last = previousDate(openShiftDate);
+  return last;
+}
+
 // Festgehalt für den Tag, dazu je Bonusstunde ein Prozentsatz des Festgehalts
 export function calculateDailyPayroll({ dailySalary, bonusPercent, bonusHours }) {
   const baseCents = Math.round(dailySalary * 100);

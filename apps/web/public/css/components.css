@@ -230,3 +230,27 @@ label.field > :is(input, select) { margin-top: 6px; color: var(--text); font-siz
 .modal-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 #toasts { position: fixed; right: 20px; bottom: 20px; z-index: 60; display: flex; flex-direction: column; gap: 10px; }
 .toast { background: var(--text); color: var(--bg); padding: 12px 18px; border-radius: 12px; box-shadow: var(--shadow); animation: pop .2s ease; font-weight: 500; }
+
+/* Dokumentationen, Akten und Personenübersicht */
+.docs-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 900px) { .docs-layout { grid-template-columns: minmax(0, 1fr); } }
+button.list-item { width: 100%; background: none; border: 0; border-bottom: 1px solid var(--border); text-align: left; font: inherit; color: inherit; cursor: pointer; }
+button.list-item:hover { background: var(--surface-2); }
+.doc-scope { display: block; margin: 14px 0 2px; text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }
+.doc-cat-row { display: flex; align-items: center; gap: 4px; }
+.doc-cat { padding: 9px 8px; border-radius: var(--radius-sm); }
+.doc-cat.on { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+.doc-body { line-height: 1.6; overflow-wrap: anywhere; }
+.doc-body h2 { font-size: 20px; margin: 22px 0 8px; }
+.doc-body h3 { font-size: 17px; margin: 18px 0 6px; }
+.doc-body h4 { font-size: 15px; margin: 14px 0 4px; }
+.doc-body p { margin: 8px 0; }
+.doc-body ul, .doc-body ol { padding-left: 22px; margin: 8px 0; }
+.doc-body blockquote { border-left: 3px solid var(--primary); margin: 10px 0; padding: 4px 12px; color: var(--muted); }
+.doc-body hr { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
+.doc-body code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: .92em; }
+.doc-body a { color: var(--primary); }
+.case-entry { padding: 12px 0; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.case-entry .memo-body { max-height: none; }
+.person-record h3 { margin: 18px 0 2px; font-size: 15px; }
+.person-record a { color: var(--text); font-weight: 600; }

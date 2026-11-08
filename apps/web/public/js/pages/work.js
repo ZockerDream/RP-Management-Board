@@ -37,14 +37,14 @@ async function entryForm(entry, projects) {
       { name: 'project_id', label: 'Projekt / Kunde', type: 'select', options: [{ v: '', l: '– Ohne Projekt –' }, ...projectOptions.map((p) => ({ v: p.id, l: `${p.name}${p.team_name ? ` · ${p.team_name}` : ''}` }))], value: entry?.project_id || '' },
       { name: 'hours', label: 'Arbeitsstunden', type: 'number', min: 0.01, max: 24, step: 0.01, value: entry?.hours || '', required: true },
       { name: 'started_at', label: 'Beginn (optional)', type: 'time', value: entry?.started_at?.slice(0, 5) || '' },
-      { name: 'ended_at', label: 'Ende (optional)', type: 'time', value: entry?.ended_at?.slice(0, 5) || '' },
+      { name: 'ended_at', label: 'Ende (optional)', type: 'time', value: entry?.ended_at?.slice(0, 5) || '', help: 'Ende vor Beginn heißt über Mitternacht: Die Stunden werden auf beide Tage aufgeteilt.' },
       { name: 'break_minutes', label: 'Pause in Minuten', type: 'number', min: 0, max: 1440, value: entry?.break_minutes || 0 },
       { name: 'note', label: 'Notiz', type: 'textarea', value: entry?.note || '', full: true },
     ],
     onSubmit: async (v) => {
       const body = { work_date: v.work_date, hours: Number(v.hours), project_id: v.project_id || null, started_at: v.started_at || null, ended_at: v.ended_at || null, break_minutes: Number(v.break_minutes) || 0, note: v.note };
-      if (entry) await api.patch(`/work-hours/${entry.id}`, body);
-      else await api.post('/work-hours', body);
+      const result = entry ? await api.patch(`/work-hours/${entry.id}`, body) : await api.post('/work-hours', body);
+      if (result?.entries > 1) toast('Über Mitternacht: auf zwei Tage aufgeteilt');
     },
   });
 }
@@ -63,7 +63,7 @@ export async function render(view) {
       <div class="toolbar" style="gap:8px;flex-wrap:wrap"><select id="timer-project"><option value="">Ohne Projekt</option></select>
       <input id="timer-note" maxlength="500" placeholder="Notiz (optional)" style="flex:1;min-width:180px">
       <b id="timer-clock" class="value">00:00:00</b><button class="btn" id="timer-start">Einstempeln</button>
-      <button class="btn ghost" id="timer-pause" hidden>Pause</button><button class="btn ghost" id="timer-stop" hidden>Ausstempeln</button></div>
+      <button class="btn ghost" id="timer-pause" hidden>Pause</button><button class="btn ghost" id="timer-stop" hidden>Ausstempeln</button><button class="btn ghost" id="timer-discard" hidden>Verwerfen</button></div>
       <small id="timer-hint" class="muted"></small></div>
     <div class="grid cols-5" id="work-kpis">
       <div class="card kpi"><span class="label">Arbeitsstunden</span><span class="value" id="work-kpi-hours">–</span></div>
@@ -97,10 +97,11 @@ export async function render(view) {
     $('#timer-pause').hidden = !running;
     $('#timer-pause').textContent = timer?.paused_at ? 'Fortsetzen' : 'Pause';
     $('#timer-stop').hidden = !running;
+    $('#timer-discard').hidden = !running;
     $('#timer-clock').textContent = new Date(elapsedSeconds() * 1000).toISOString().slice(11, 19);
     $('#timer-hint').textContent = running
       ? `Gestartet: ${new Date(timer.started_at).toLocaleString('de-DE')}${timer.project_name ? ` · ${timer.project_name}` : ''}`
-      : 'Pausen werden nicht als Arbeitszeit gezählt.';
+      : 'Pausen werden nicht als Arbeitszeit gezählt. Über Mitternacht entsteht je Kalendertag ein Eintrag.';
   }
   async function loadProjects() {
     projects = await api.get('/work-projects');
@@ -248,10 +249,14 @@ export async function render(view) {
         await api.post(`/work-hours/timer/${timer.paused_at ? 'resume' : 'pause'}`);
         await loadTimer();
       } else if (target.id === 'timer-stop') {
-        await api.post('/work-hours/timer/stop');
+        const result = await api.post('/work-hours/timer/stop');
+        if (result?.entries > 1) toast(`Über Mitternacht: ${result.entries} Einträge, einer je Kalendertag`);
         await loadTimer();
         await load();
         await loadTeamHours();
+      } else if (target.id === 'timer-discard' && await confirmBox('Timer verwerfen', 'Der Timer wird beendet, ohne einen Eintrag anzulegen. Erfasse die Zeit danach bei Bedarf manuell.', 'Verwerfen')) {
+        await api.del('/work-hours/timer');
+        await loadTimer();
       } else if (target.dataset.edit) {
         const entry = entries.find((item) => item.id === target.dataset.edit) || teamEntries.get(target.dataset.edit);
         if (entry && await entryForm(entry, projects)) {

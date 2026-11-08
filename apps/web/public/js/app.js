@@ -34,6 +34,10 @@ const PAGES = {
   calendar: { perm: 'calendar:read', load: () => import('./pages/calendar.js') },
   notes: { perm: null, load: () => import('./pages/notes.js') },
   todos: { perm: null, load: () => import('./pages/todos.js') },
+  casefiles: { perm: 'casefile:read', load: () => import('./pages/casefiles.js') },
+  trainings: { perm: 'training:read', load: () => import('./pages/trainings.js') },
+  licenses: { perm: 'license:read', load: () => import('./pages/licenses.js') },
+  docs: { perm: 'doc:read', load: () => import('./pages/docs.js') },
   'assets-vehicles': { perm: 'vehicle:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'vehicles') })) },
   'assets-properties': { perm: 'property:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'properties') })) },
   'assets-people': { perm: 'person:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'people') })) },
@@ -264,6 +268,12 @@ export async function reloadMe() {
     n.classList.toggle('hidden', !!p && !can(p));
   });
   $$('[data-admin-only]').forEach((n) => n.classList.toggle('hidden', !can('admin:access')));
+  // Abschnittsüberschrift ohne sichtbaren Eintrag ausblenden
+  $$('.sidebar .nav-label').forEach((label) => {
+    const items = [];
+    for (let n = label.nextElementSibling; n && !n.classList.contains('nav-label'); n = n.nextElementSibling) if (n.classList.contains('nav')) items.push(n);
+    label.classList.toggle('hidden', items.length > 0 && items.every((n) => n.classList.contains('hidden')));
+  });
 }
 
 async function boot() {
