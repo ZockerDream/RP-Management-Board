@@ -19,11 +19,11 @@ const sections = [
   },
   {
     title: 'Stundenzettel',
-    text: 'Unter „Stundenzettel“ kannst du mit „Einstempeln“ eine Zeiterfassung starten, pausieren und mit „Ausstempeln“ beenden. Pausen werden nicht als Arbeitszeit gezählt. Die Tages-, Wochen- und Monatsansicht zeigt erfasste Zeiten; Monatsübersicht und PDF enthalten Arbeitszeit, Sollzeit und Überstundensaldo. Die wöchentliche Sollzeit stellst du im Profil ein. Einzelne Einträge lassen sich manuell ergänzen, bearbeiten oder löschen. Projekte können privat oder im Team geführt werden.',
+    text: 'Unter „Stundenzettel“ kannst du mit „Einstempeln“ eine Zeiterfassung starten, pausieren und mit „Ausstempeln“ beenden. Pausen werden nicht als Arbeitszeit gezählt. Die Tages-, Wochen- und Monatsansicht zeigt erfasste Zeiten; Monatsübersicht und PDF enthalten Arbeitszeit, Sollzeit und Überstundensaldo. Die wöchentliche Sollzeit stellst du im Profil ein. Einzelne Einträge lassen sich manuell ergänzen, bearbeiten oder löschen. Projekte können privat oder im Team geführt werden. Geht eine Schicht über Mitternacht, zählen die Stunden an dem Kalendertag, an dem du sie gearbeitet hast: Aus 22:00 bis 02:00 werden zwei Einträge, 22:00–00:00 und 00:00–02:00. Bei manuellen Einträgen genügt ein Ende vor dem Beginn; Stunden und Pause werden nach der Dauer vor und nach Mitternacht aufgeteilt. Ein Timer, der länger als 24 Stunden läuft, lässt sich nicht mehr ausstempeln. Verwirf ihn dann und erfasse die Zeit manuell.',
   },
   {
     title: 'Gehalt: Festgehalt und Bonus',
-    text: 'Unter „Stundenzettel → Gehalt einstellen“ oder im Profil trägst du Festgehalt pro Tag, Wochen-Sollzeit und Bonus ein und wählst ein persönliches Konto für die Gehaltsgutschrift. Das Festgehalt wird jeden Tag gegen 03:45 Uhr für den Vortag gutgeschrieben, auch am Wochenende und unabhängig von deinen Stunden. Sobald du das Wochen-Soll (Montag bis Sonntag) erreicht hast, gibt es für jede weitere Stunde zusätzlich den Bonus, einen Prozentsatz des Festgehalts. Beispiel mit 1.669 Festgehalt, 13 Stunden Soll und 17 % Bonus: Bei 8 Stunden in der Woche gibt es täglich nur die 1.669. Erreichst du das Soll am Dienstag, bringt ab dann jede weitere Stunde 283,73 extra. Erreichst du es erst am Samstag, zählen nur noch die restlichen Stunden von Samstag und Sonntag. Montags beginnt die Zählung neu. Stunden, die du später für dieselbe Woche nachträgst, kommen mit der nächsten Gutschrift dazu; eine abgeschlossene Woche wird nicht nachberechnet. Die erste Gutschrift erscheint frühestens am Folgetag.',
+    text: 'Unter „Stundenzettel → Gehalt einstellen“ oder im Profil trägst du Festgehalt pro Tag, Wochen-Sollzeit und Bonus ein und wählst ein persönliches Konto für die Gehaltsgutschrift. Das Festgehalt wird jeden Tag gegen 03:45 Uhr für den Vortag gutgeschrieben, auch am Wochenende und unabhängig von deinen Stunden. Sobald du das Wochen-Soll (Montag bis Sonntag) erreicht hast, gibt es für jede weitere Stunde zusätzlich den Bonus, einen Prozentsatz des Festgehalts. Beispiel mit 1.669 Festgehalt, 13 Stunden Soll und 17 % Bonus: Bei 8 Stunden in der Woche gibt es täglich nur die 1.669. Erreichst du das Soll am Dienstag, bringt ab dann jede weitere Stunde 283,73 extra. Erreichst du es erst am Samstag, zählen nur noch die restlichen Stunden von Samstag und Sonntag. Montags beginnt die Zählung neu. Stunden, die du später für dieselbe Woche nachträgst, kommen mit der nächsten Gutschrift dazu; eine abgeschlossene Woche wird nicht nachberechnet. Bei einer Nachtschicht zählen die Stunden nach Mitternacht zum neuen Tag, in der Nacht von Sonntag auf Montag also schon zur neuen Woche. Bist du um 03:45 Uhr noch eingestempelt, wartet die Gutschrift für den Tag, an dem die Schicht begann, bis du ausstempelst, und folgt spätestens eine Stunde danach. Die erste Gutschrift erscheint frühestens am Folgetag.',
   },
   {
     title: 'Sport: Strecken und Bestenliste',
@@ -36,6 +36,26 @@ const sections = [
   {
     title: 'ToDos und Deadlines',
     text: 'Unter „ToDos“ legst du Aufgaben für dich (Solo) oder ein Team an, auf Wunsch mit Deadline, und hakst sie per Kästchen ab. Zu offenen ToDos mit Deadline erscheint eine Benachrichtigung in der Glocke: einen Tag vorher, am Fälligkeitstag und einmal, wenn das ToDo überfällig ist. Team-ToDos erinnern alle Teammitglieder. Unter „Einstellungen → Benachrichtigungen“ kannst du das bei „ToDo-Deadlines“ abschalten oder zusätzlich per E-Mail bekommen. Team-Owner und -Editoren dürfen Team-ToDos ändern und abhaken, Viewer sie sehen.',
+  },
+  {
+    title: 'Akten',
+    text: 'Unter „Akten“ führst du Vorgänge, solo oder im Team. Jede Akte hat ein Aktenzeichen (leer gelassen wird es automatisch vergeben, z. B. 2026-0001), einen Titel, den Sachverhalt und einen Status: offen, ruhend oder abgeschlossen. In der Akte beteiligst du Personen mit einer Rolle wie Zeuge oder Beschuldigter, schreibst Einträge mit Datum und Art und lädst Anhänge hoch (PDF, PNG, JPEG). Ein Eintrag kann eine beteiligte Person betreffen und erscheint dann auch in ihrer Übersicht. Beteiligen lassen sich nur Personen aus demselben Bereich: im Team die Team-Personen, solo deine eigenen. Team-Owner und -Editoren bearbeiten Team-Akten, Viewer lesen sie. Jede Änderung steht im Audit-Log.',
+  },
+  {
+    title: 'Lizenzen',
+    text: 'Unter „Lizenzen → Lizenzarten“ legst du zuerst Arten wie Führerschein oder Waffenschein an, optional mit einer Standard-Gültigkeit in Monaten. Danach stellst du Lizenzen an Personen aus: mit Nummer, Aussteller, Ausstellungsdatum und Ablauf. Lässt du „Gültig bis“ leer, gilt die Standard-Gültigkeit der Art; „Unbefristet“ setzt keinen Ablauf. Über „Bearbeiten“ sperrst oder entziehst du eine Lizenz mit Begründung, „Verlängern“ verlängert um die Standard-Gültigkeit. 30 Tage vor dem Ablauf und noch einmal danach erinnert die Glocke; das stellst du unter „Einstellungen → Benachrichtigungen“ bei „Lizenzen laufen ab“ ein. Der Ablauf erscheint auch im Kalender.',
+  },
+  {
+    title: 'Schulungen',
+    text: 'Unter „Schulungen“ legst du eine Schulung mit Beschreibung und optionaler Gültigkeit in Monaten an. In der Schulung planst du Termine und trägst Teilnehmer ein: Benutzer (im Team alle Mitglieder) oder Personen. Mit „Ergebnis erfassen“ setzt du bestanden, nicht bestanden oder nicht erschienen. Ein bestandener Nachweis gilt ab dem Abschlussdatum so lange wie die Schulung vorgibt, sonst unbefristet. Die „Übersicht“ zeigt, wer welche Schulung hat und was bald abläuft. Termine und Abläufe stehen im Kalender; 30 Tage vor dem Ablauf erinnert die Glocke.',
+  },
+  {
+    title: 'Dokumentationen',
+    text: 'Unter „Dokumentationen“ sammelst du Nachschlagewerke wie Gesetze oder Funktionen. Kategorien legst du selbst an, solo oder für ein Team, und ordnest sie über die Reihenfolge. Seiten unterstützen einfache Formatierung: # Überschrift, **fett**, *kursiv*, - Listen, 1. nummerierte Listen, > Zitate, --- Trennlinien und Links wie [Text](https://…). Die Suche durchsucht Titel und Text aller Seiten, die du sehen darfst. Team-Owner und -Editoren schreiben, Viewer lesen. Eine Kategorie lässt sich erst löschen, wenn sie leer ist.',
+  },
+  {
+    title: 'Personenübersicht',
+    text: 'Unter „Personen“ öffnet „Übersicht“ alles zu einer Person auf einen Blick: Akten, an denen sie beteiligt ist, Einträge zu ihr, Lizenzen und Schulungen, jeweils soweit deine Rechte reichen. Eine Person mit Akten, Lizenzen oder Schulungsnachweisen lässt sich nicht löschen und nicht zwischen Team und privat verschieben, damit diese Unterlagen vollständig und für die Beteiligten sichtbar bleiben; setze sie stattdessen auf inaktiv.',
   },
   {
     title: 'Fahrzeuge und Häuser',
@@ -83,7 +103,7 @@ const sections = [
   },
   {
     title: 'Häufige Fragen: Warum habe ich noch kein Gehalt erhalten?',
-    text: 'Prüfe unter „Stundenzettel → Gehalt einstellen“, ob ein Konto für die Gehaltsgutschrift gewählt und ein Festgehalt eingetragen ist. Die Gutschrift erfolgt immer nachts für den Vortag, also frühestens am Tag nach dem Einrichten.',
+    text: 'Prüfe unter „Stundenzettel → Gehalt einstellen“, ob ein Konto für die Gehaltsgutschrift gewählt und ein Festgehalt eingetragen ist. Die Gutschrift erfolgt immer nachts für den Vortag, also frühestens am Tag nach dem Einrichten. Läuft um 03:45 Uhr noch dein Timer, wartet die Gutschrift, bis du ausstempelst.',
   },
   {
     title: 'Häufige Fragen: Warum kann ich kein Gehaltskonto auswählen?',

@@ -322,7 +322,10 @@ for (const [work_date, hours] of Object.entries(workedHours)) ok(`Stunden ${work
 runJob('payroll.run');
 const salaryRows = () => psql(`SELECT payroll_date||'|'||base_amount||'|'||overtime_hours||'|'||overtime_pay FROM payroll_payments WHERE user_id='${uB.id}' ORDER BY payroll_date`).split('\n').map((line) => { const [date, base, hours, pay] = line.split('|'); return { date, base, hours: Number(hours), pay }; });
 const paidBefore = salaryRows();
-const expectedDays = Math.round((Date.parse(`${dayAt(-1)}T00:00:00Z`) - Date.parse(`${week1}T00:00:00Z`)) / 86400000) + 1;
+// Gebucht wird der Vortag ab 03:45 Uhr; davor erst bis vorgestern
+const berlinTime = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
+const payrollLastDay = berlinTime >= '03:45' ? dayAt(-1) : dayAt(-2);
+const expectedDays = Math.round((Date.parse(`${payrollLastDay}T00:00:00Z`) - Date.parse(`${week1}T00:00:00Z`)) / 86400000) + 1;
 check('Für jeden Tag genau eine Zahlung', paidBefore.length === expectedDays, `${paidBefore.length} statt ${expectedDays}`);
 check('Festgehalt jeden Tag 1.669', paidBefore.every((row) => row.base === '1669.00'), JSON.stringify(paidBefore.filter((row) => row.base !== '1669.00')));
 const bonusIn = (monday) => paidBefore.filter((row) => row.date >= monday && row.date <= plusDays(monday, 6) && row.hours > 0).map((row) => `${row.date}:${row.hours}:${row.pay}`).join();
@@ -347,6 +350,56 @@ check('Monats-PDF mit Gehalt', salaryPdf.status === 200 && salaryPdf.buf.slice(0
 invalid('Festgehalt negativ', await bob.patch('/me', { daily_salary: -1 }));
 invalid('Bonus zu hoch', await bob.patch('/me', { hourly_bonus_percent: 1001 }));
 invalid('Festgehalt mit drei Nachkommastellen', await bob.patch('/me', { daily_salary: 1.234 }));
+// ---------- Nachtschicht: Stunden zählen an dem Kalendertag, an dem sie gearbeitet wurden
+const nightDate = dayAt(-3);
+const nightEntry = ok('Manuelle Nachtschicht', await bob.post('/work-hours', { work_date: nightDate, hours: 4, started_at: '22:00', ended_at: '02:00', break_minutes: 30, note: 'Nacht E2E' }));
+check('Nachtschicht wird auf zwei Tage aufgeteilt', nightEntry.entries === 2, JSON.stringify(nightEntry));
+const nightRows = () => psql(`SELECT work_date||'|'||hours||'|'||started_at||'|'||ended_at||'|'||break_minutes FROM work_entries WHERE user_id='${uB.id}' AND note='Nacht E2E' ORDER BY work_date, started_at`);
+check('Ein Eintrag je Kalendertag', nightRows() === `${nightDate}|2.00|22:00:00|00:00:00|15\n${plusDays(nightDate, 1)}|2.00|00:00:00|02:00:00|15`, nightRows());
+const untilMidnight = ok('Schicht bis Mitternacht', await bob.post('/work-hours', { work_date: nightDate, hours: 2, started_at: '22:00', ended_at: '00:00' }));
+check('Bis Mitternacht bleibt ein Eintrag', untilMidnight.entries === 1, JSON.stringify(untilMidnight));
+invalid('Uhrzeit 25:00', await bob.post('/work-hours', { work_date: nightDate, hours: 1, started_at: '25:00' }));
+const dayShift = ok('Tagesschicht', await bob.post('/work-hours', { work_date: nightDate, hours: 3, started_at: '10:00', ended_at: '13:00', note: 'Umbau E2E' }));
+const movedShift = ok('Tagesschicht auf Nacht ändern', await bob.patch(`/work-hours/${dayShift.id}`, { started_at: '23:00', ended_at: '02:00' }));
+check('Bearbeiten teilt an Mitternacht', movedShift.entries === 2, JSON.stringify(movedShift));
+const movedRows = psql(`SELECT work_date||'|'||hours FROM work_entries WHERE user_id='${uB.id}' AND note='Umbau E2E' ORDER BY work_date`);
+check('Bearbeitete Schicht: 1 + 2 Stunden', movedRows === `${nightDate}|1.00\n${plusDays(nightDate, 1)}|2.00`, movedRows);
+// Älterer Eintrag über Mitternacht (vor der Regel): Notiz ändern teilt ihn nicht, sonst wanderten Stunden in eine andere Woche
+const legacyId = psql(`INSERT INTO work_entries(user_id, work_date, hours, started_at, ended_at, note) VALUES ('${uB.id}', '${plusDays(nightDate, -7)}', 4, '22:00', '02:00', 'Alt E2E') RETURNING id`).split('\n')[0];
+const legacyEdit = ok('Notiz eines alten Nacht-Eintrags ändern', await bob.patch(`/work-hours/${legacyId}`, { work_date: plusDays(nightDate, -7), hours: 4, started_at: '22:00', ended_at: '02:00', break_minutes: 0, note: 'Alt E2E geändert' }));
+check('Alter Eintrag bleibt ungeteilt', legacyEdit.entries === 1 && psql(`SELECT count(*)||'|'||sum(hours) FROM work_entries WHERE user_id='${uB.id}' AND note LIKE 'Alt E2E%'`) === '1|4.00', JSON.stringify(legacyEdit));
+
+// Timer über Mitternacht: Start gestern 23:30 Uhr Ortszeit, direkt in der Datenbank zurückgesetzt
+const setTimerStart = (sql) => psql(`UPDATE work_timers SET started_at=${sql} WHERE user_id='${uB.id}'`);
+const yesterdayPaid = () => psql(`SELECT count(*) FROM payroll_payments WHERE user_id='${uB.id}' AND payroll_date='${dayAt(-1)}'`);
+ok('Timer für die Nacht', await bob.post('/work-hours/timer/start', { note: 'Timer E2E' }));
+setTimerStart(`('${dayAt(-1)} 23:30'::timestamp AT TIME ZONE 'Europe/Berlin')`);
+// Prüfbar nur, wenn der Vortag schon fällig ist (ab 03:45) und der Timer noch als offene Schicht gilt (jünger als 24 Stunden)
+if (berlinTime >= '03:45' && berlinTime < '23:00') {
+  psql(`DELETE FROM transactions WHERE id IN (SELECT transaction_id FROM payroll_payments WHERE user_id='${uB.id}' AND payroll_date='${dayAt(-1)}')`);
+  psql(`DELETE FROM payroll_payments WHERE user_id='${uB.id}' AND payroll_date='${dayAt(-1)}'`);
+  runJob('payroll.run');
+  check('Gehaltslauf wartet auf das Ausstempeln', yesterdayPaid() === '0', yesterdayPaid());
+}
+const timerStop = ok('Ausstempeln nach Mitternacht', await bob.post('/work-hours/timer/stop'));
+check('Timer legt je Kalendertag einen Eintrag an', timerStop.entries === 2, JSON.stringify(timerStop));
+const timerRows = psql(`SELECT work_date||'|'||started_at||'|'||ended_at FROM work_entries WHERE user_id='${uB.id}' AND note='Timer E2E' ORDER BY work_date`).split('\n');
+check('Timer-Teil vor Mitternacht', timerRows[0] === `${dayAt(-1)}|23:30:00|00:00:00`, timerRows.join(' / '));
+check('Timer-Teil nach Mitternacht', timerRows[1]?.startsWith(`${dayAt(0)}|00:00:00|`), timerRows.join(' / '));
+if (berlinTime >= '03:45' && berlinTime < '23:00') {
+  runJob('payroll.run');
+  check('Nach dem Ausstempeln wird der Vortag gebucht', yesterdayPaid() === '1', yesterdayPaid());
+}
+// Vergessener Timer: länger als 24 Stunden lässt er sich nicht stoppen, aber verwerfen
+ok('Timer vergessen', await bob.post('/work-hours/timer/start', { note: 'Vergessen E2E' }));
+setTimerStart("now() - interval '25 hours'");
+const tooLong = await bob.post('/work-hours/timer/stop');
+check('Timer über 24 Stunden wird abgelehnt', tooLong.status === 400 && /24 Stunden/.test(tooLong.data?.message), JSON.stringify(tooLong.data));
+denied('Fremder verwirft keinen Timer', await dave.del('/work-hours/timer'), [400]);
+ok('Timer verwerfen', await bob.del('/work-hours/timer'));
+check('Verwerfen legt keinen Eintrag an', psql(`SELECT count(*) FROM work_entries WHERE user_id='${uB.id}' AND note='Vergessen E2E'`) === '0');
+invalid('Ohne Timer nichts zu verwerfen', await bob.del('/work-hours/timer'));
+
 ok('Gehaltskonto von Bob lösen', await bob.patch('/me', { payroll_budget_id: null }));
 
 // ---------- Objekte
@@ -604,6 +657,144 @@ check('Export ohne Notizen anderer', !expNew.notes.some((n) => n.id === noteTeam
 ok('Team-ToDo für die Browser-Tests', await bob.post('/todos', { title: 'Team-Protokoll', due_date: dayAt(5), team_id: team.id }));
 const jobNames = (await admin.get('/admin/system')).data.jobs.map((job) => job.name);
 check('Job erscheint in der Systemübersicht', jobNames.includes('todos.remind'), jobNames.join());
+
+// ---------- Akten, Lizenzen, Schulungen, Dokumentationen (Alice Owner, Bob Editor, Carol Viewer, Dave fremd)
+const upload = async (who, path, content, name, type) => {
+  const form = new FormData();
+  form.append('file', new Blob([content], { type }), name);
+  const res = await fetch(`${BASE}/api${path}`, { method: 'POST', headers: { authorization: `Bearer ${who.token.t}` }, body: form });
+  if (res.status >= 500) fives.push(`POST ${path} -> ${res.status}`);
+  return { status: res.status, data: await res.json().catch(() => null) };
+};
+const orgPerson = ok('Team-Person', await alice.post('/people', { name: 'Max Muster', kind: 'external', email: '', scope: 'team', team_id: team.id }));
+const orgPerson2 = ok('Zweite Team-Person', await bob.post('/people', { name: 'Erika Beispiel', kind: 'external', email: '', scope: 'team', team_id: team.id }));
+const privatePerson = ok('Private Person', await alice.post('/people', { name: 'Paula Privat', kind: 'family', email: '' }));
+
+const caseFile = ok('Akte anlegen', await bob.post('/case-files', { title: 'Einbruch Lager', description: 'Sachverhalt', team_id: team.id, people: [{ person_id: orgPerson.id, role: 'Beschuldigter' }] }));
+check('Aktenzeichen automatisch', /^\d{4}-0001$/.test(caseFile.file_number), caseFile.file_number);
+const caseFile2 = ok('Zweite Akte', await alice.post('/case-files', { title: 'Zweite Akte', team_id: team.id }));
+check('Aktenzeichen fortlaufend', /^\d{4}-0002$/.test(caseFile2.file_number), caseFile2.file_number);
+invalid('Aktenzeichen doppelt', await alice.post('/case-files', { title: 'Dritte', team_id: team.id, file_number: caseFile.file_number }));
+invalid('Private Person in Team-Akte', await alice.post('/case-files', { title: 'X', team_id: team.id, people: [{ person_id: privatePerson.id }] }));
+invalid('Akte ohne Titel', await alice.post('/case-files', { title: '', team_id: team.id }));
+denied('Viewer legt keine Akte an', await carol.post('/case-files', { title: 'X', team_id: team.id }));
+check('Viewer sieht Team-Akte', (await carol.get('/case-files')).data.some((f) => f.id === caseFile.id && f.role === 'viewer'));
+denied('Fremder öffnet Akte nicht', await dave.get(`/case-files/${caseFile.id}`));
+check('Fremder sieht Akte nicht in der Liste', !(await dave.get('/case-files')).data.some((f) => f.id === caseFile.id));
+denied('Viewer ändert Akte nicht', await carol.patch(`/case-files/${caseFile.id}`, { title: 'Geändert' }));
+denied('Fremder löscht Akte nicht', await dave.del(`/case-files/${caseFile.id}`));
+ok('Person beteiligen', await bob.post(`/case-files/${caseFile.id}/people`, { person_id: orgPerson2.id, role: 'Zeuge' }));
+const daveFile = ok('Fremder legt eigene Akte an', await dave.post('/case-files', { title: 'Daves Akte' }));
+invalid('Fremde Person in eigener Akte', await dave.post(`/case-files/${daveFile.id}/people`, { person_id: orgPerson.id }));
+const caseEntry = ok('Eintrag', await bob.post(`/case-files/${caseFile.id}/entries`, { kind: 'Vermerk', body: 'Zeuge befragt', person_id: orgPerson2.id }));
+invalid('Eintrag zu unbeteiligter Person', await bob.post(`/case-files/${caseFile.id}/entries`, { body: 'x', person_id: privatePerson.id }));
+invalid('Leerer Eintrag', await bob.post(`/case-files/${caseFile.id}/entries`, { body: '' }));
+denied('Viewer schreibt keinen Eintrag', await carol.post(`/case-files/${caseFile.id}/entries`, { body: 'x' }));
+denied('Fremder ändert keinen Eintrag', await dave.patch(`/case-file-entries/${caseEntry.id}`, { body: 'x' }));
+ok('Eintrag bearbeiten', await bob.patch(`/case-file-entries/${caseEntry.id}`, { body: 'Zeuge ausführlich befragt' }));
+const pdfBytes = Buffer.from('%PDF-1.4\n% e2e\n');
+const caseAttachment = ok('Anhang hochladen', await upload(bob, `/case-files/${caseFile.id}/attachments`, pdfBytes, 'protokoll.pdf', 'application/pdf'));
+invalid('Dateiinhalt passt nicht zum Typ', await upload(bob, `/case-files/${caseFile.id}/attachments`, Buffer.from('kein pdf'), 'x.pdf', 'application/pdf'));
+invalid('Dateityp nicht erlaubt', await upload(bob, `/case-files/${caseFile.id}/attachments`, Buffer.from('<svg/>'), 'x.svg', 'image/svg+xml'));
+denied('Viewer lädt nichts hoch', await upload(carol, `/case-files/${caseFile.id}/attachments`, pdfBytes, 'x.pdf', 'application/pdf'));
+const downloaded = await carol.raw(`/case-file-attachments/${caseAttachment.id}`);
+check('Viewer lädt Anhang herunter', downloaded.status === 200 && downloaded.buf.slice(0, 4).toString() === '%PDF');
+denied('Fremder lädt Anhang nicht', await dave.get(`/case-file-attachments/${caseAttachment.id}`));
+const caseDetail = ok('Akte im Detail', await carol.get(`/case-files/${caseFile.id}`));
+check('Detail mit Personen, Einträgen, Anhängen', caseDetail.people.length === 2 && caseDetail.entries[0]?.person_name === 'Erika Beispiel' && caseDetail.attachments.length === 1, JSON.stringify(caseDetail).slice(0, 240));
+ok('Akte abschließen', await bob.patch(`/case-files/${caseFile.id}`, { status: 'closed' }));
+check('Abschlussdatum gesetzt', (await bob.get(`/case-files/${caseFile.id}`)).data.closed_on === dayAt(0));
+invalid('Abschluss vor Eröffnung', await bob.patch(`/case-files/${caseFile.id}`, { closed_on: '2000-01-01' }));
+check('Suche nach beteiligter Person', (await alice.get('/case-files?q=Erika')).data.some((f) => f.id === caseFile.id));
+check('Filter nach Status', (await alice.get('/case-files?status=open')).data.every((f) => f.status === 'open'));
+invalid('Person mit Akte lässt sich nicht löschen', await alice.del(`/people/${orgPerson2.id}`));
+ok('Person aus Akte entfernen', await bob.del(`/case-files/${caseFile.id}/people/${orgPerson2.id}`));
+check('Eintrag bleibt ohne Personenbezug', (await bob.get(`/case-files/${caseFile.id}`)).data.entries[0]?.person_id === null);
+ok('Akte löschen', await alice.del(`/case-files/${caseFile2.id}`));
+
+const licType = ok('Lizenzart', await alice.post('/license-types', { name: 'Waffenschein', validity_months: 12, team_id: team.id }));
+denied('Viewer legt keine Lizenzart an', await carol.post('/license-types', { name: 'X', team_id: team.id }));
+invalid('Gültigkeit 0 Monate', await alice.post('/license-types', { name: 'X', validity_months: 0 }));
+const license = ok('Lizenz ausstellen', await bob.post('/licenses', { type_id: licType.id, person_id: orgPerson.id, number: 'WS-1', issued_on: dayAt(-360) }));
+check('Standard-Gültigkeit ergibt Ablauf in Kürze', license.valid_until >= dayAt(0) && license.valid_until <= dayAt(10), license.valid_until);
+check('Lizenz läuft bald ab', (await carol.get('/licenses')).data.find((l) => l.id === license.id)?.state === 'expiring');
+invalid('Private Person für Team-Lizenzart', await bob.post('/licenses', { type_id: licType.id, person_id: privatePerson.id }));
+invalid('Gültig bis vor Ausstellung', await bob.post('/licenses', { type_id: licType.id, person_id: orgPerson.id, issued_on: '2026-05-01', valid_until: '2026-04-01' }));
+const unlimitedLicense = ok('Unbefristete Lizenz', await bob.post('/licenses', { type_id: licType.id, person_id: orgPerson2.id, valid_until: null }));
+check('Unbefristet bleibt ohne Ablauf', unlimitedLicense.valid_until === null);
+denied('Viewer ändert Lizenz nicht', await carol.patch(`/licenses/${license.id}`, { status: 'revoked' }));
+denied('Fremder nutzt fremde Lizenzart nicht', await dave.post('/licenses', { type_id: licType.id, person_id: orgPerson.id }));
+check('Fremder sieht keine Lizenzen', !(await dave.get('/licenses')).data.some((l) => l.id === license.id));
+runJob('reminders');
+check('Erinnerung an ablaufende Lizenz', psql(`SELECT count(*) FROM notifications WHERE user_id='${uC.id}' AND kind='license_expiry'`) === '1');
+const renewed = ok('Lizenz verlängern', await bob.post(`/licenses/${license.id}/renew`));
+check('Verlängert ab bisherigem Ablauf', renewed.valid_until > license.valid_until && renewed.valid_until > dayAt(300), renewed.valid_until);
+ok('Lizenz entziehen', await bob.patch(`/licenses/${license.id}`, { status: 'revoked', status_reason: 'Missbrauch' }));
+invalid('Entzogene Lizenz nicht verlängern', await bob.post(`/licenses/${license.id}/renew`));
+check('Filter: entzogen mit Begründung', (await alice.get('/licenses?state=revoked')).data.some((l) => l.id === license.id && l.status_reason === 'Missbrauch'));
+invalid('Lizenzart mit Lizenzen nicht löschen', await alice.del(`/license-types/${licType.id}`));
+
+const training = ok('Schulung', await alice.post('/trainings', { name: 'Erste Hilfe', validity_months: 24, team_id: team.id }));
+const trainingSession = ok('Termin', await bob.post(`/trainings/${training.id}/sessions`, { session_date: dayAt(-1), start_time: '18:00', end_time: '20:00', location: 'Wache' }));
+invalid('Termin endet vor Beginn', await bob.post(`/trainings/${training.id}/sessions`, { session_date: dayAt(1), start_time: '20:00', end_time: '18:00' }));
+const userRecord = ok('Benutzer eintragen', await bob.post(`/trainings/${training.id}/records`, { session_id: trainingSession.id, user_id: uC.id }));
+invalid('Doppelt für denselben Termin', await bob.post(`/trainings/${training.id}/records`, { session_id: trainingSession.id, user_id: uC.id }));
+invalid('Fremder Benutzer als Teilnehmer', await bob.post(`/trainings/${training.id}/records`, { user_id: uD.id }));
+invalid('Benutzer und Person zugleich', await bob.post(`/trainings/${training.id}/records`, { user_id: uC.id, person_id: orgPerson.id }));
+invalid('Private Person in Team-Schulung', await bob.post(`/trainings/${training.id}/records`, { person_id: privatePerson.id }));
+const personRecord = ok('Person bestanden', await bob.post(`/trainings/${training.id}/records`, { session_id: trainingSession.id, person_id: orgPerson.id, result: 'passed' }));
+check('Gültig 24 Monate ab Termin', personRecord.valid_until?.slice(0, 4) === String(Number(dayAt(-1).slice(0, 4)) + 2), personRecord.valid_until);
+ok('Ergebnis erfassen', await bob.patch(`/training-records/${userRecord.id}`, { result: 'passed', valid_until: dayAt(10) }));
+const trainingDetail = ok('Schulung im Detail', await carol.get(`/trainings/${training.id}`));
+check('Abschlussdatum vom Termin', trainingDetail.records.find((r) => r.id === userRecord.id)?.completed_on === dayAt(-1));
+denied('Viewer trägt nicht ein', await carol.post(`/trainings/${training.id}/records`, { user_id: uC.id }));
+denied('Fremder öffnet Schulung nicht', await dave.get(`/trainings/${training.id}`));
+denied('Fremder ändert Nachweis nicht', await dave.patch(`/training-records/${userRecord.id}`, { result: 'failed' }));
+const candidates = ok('Wählbare Teilnehmer', await bob.get(`/trainings/${training.id}/candidates`));
+check('Teilnehmer: Mitglieder und Team-Personen', candidates.users.some((u) => u.id === uC.id) && candidates.people.some((p) => p.id === orgPerson.id) && !candidates.people.some((p) => p.id === privatePerson.id));
+const trainingOverview = ok('Schulungsübersicht', await alice.get('/trainings/overview'));
+check('Übersicht nennt Nachweise', trainingOverview.some((r) => r.training_id === training.id && r.participant === 'Max Muster' && r.state === 'valid')
+  && trainingOverview.some((r) => r.training_id === training.id && r.user_id === uC.id && r.state === 'expiring'));
+runJob('reminders');
+check('Erinnerung an ablaufenden Nachweis', psql(`SELECT count(*) FROM notifications WHERE user_id='${uA.id}' AND kind='training_expiry'`) === '1');
+const orgCalendar = ok('Kalender mit Schulung und Lizenz', await carol.get(`/calendar?from=${dayAt(-5)}&to=${dayAt(400)}`));
+check('Kalender zeigt Schulungstermin', orgCalendar.some((e) => e.type === 'training' && e.title === 'Schulung: Erste Hilfe' && e.start === '18:00'));
+check('Kalender zeigt Ablauf des Nachweises', orgCalendar.some((e) => e.type === 'training' && e.date === dayAt(10)));
+
+const personOverview = ok('Personenübersicht', await carol.get(`/people/${orgPerson.id}/record`));
+check('Personenübersicht vollständig', personOverview.case_files.length === 1 && personOverview.licenses.length === 1 && personOverview.trainings.length === 1, JSON.stringify(personOverview).slice(0, 240));
+denied('Fremder sieht Personenübersicht nicht', await dave.get(`/people/${orgPerson.id}/record`));
+
+const docCategory = ok('Doku-Kategorie', await alice.post('/doc-categories', { name: 'Gesetze', team_id: team.id }));
+denied('Viewer legt keine Kategorie an', await carol.post('/doc-categories', { name: 'X', team_id: team.id }));
+const docPage = ok('Doku-Seite', await bob.post('/doc-pages', { category_id: docCategory.id, title: 'StVO § 1', body: '# Grundregel\nDie Teilnahme am Straßenverkehr erfordert **ständige Vorsicht**.' }));
+check('Suche findet Text mit Ausschnitt', (await carol.get('/doc-pages?q=Vorsicht')).data.some((p) => p.id === docPage.id && /Vorsicht/.test(p.excerpt)));
+denied('Viewer ändert Seite nicht', await carol.patch(`/doc-pages/${docPage.id}`, { title: 'x' }));
+denied('Fremder liest Seite nicht', await dave.get(`/doc-pages/${docPage.id}`));
+check('Fremder sieht Kategorie nicht', !(await dave.get('/doc-categories')).data.some((c) => c.id === docCategory.id));
+const privateCategory = ok('Private Kategorie', await alice.post('/doc-categories', { name: 'Eigene Notizen' }));
+invalid('Seite nicht in anderen Bereich verschieben', await alice.patch(`/doc-pages/${docPage.id}`, { category_id: privateCategory.id }));
+invalid('Kategorie mit Seiten nicht löschen', await alice.del(`/doc-categories/${docCategory.id}`));
+ok('Seite bearbeiten', await bob.patch(`/doc-pages/${docPage.id}`, { body: 'Neu' }));
+check('Änderung gespeichert', (await carol.get(`/doc-pages/${docPage.id}`)).data.body === 'Neu');
+ok('Seite löschen', await bob.del(`/doc-pages/${docPage.id}`));
+ok('Leere Kategorie löschen', await alice.del(`/doc-categories/${docCategory.id}`));
+
+// Ein ganzes Team lässt sich mit Personen, Akten, Lizenzen und Nachweisen löschen
+const dropTeam = ok('Team zum Löschen', await alice.post('/teams', { name: 'E2E Löschteam' }));
+const dropPerson = ok('Person im Löschteam', await alice.post('/people', { name: 'Lotte Löschbar', kind: 'external', email: '', scope: 'team', team_id: dropTeam.id }));
+const dropFile = ok('Akte im Löschteam', await alice.post('/case-files', { title: 'Löschakte', team_id: dropTeam.id, people: [{ person_id: dropPerson.id }] }));
+ok('Eintrag zur Person', await alice.post(`/case-files/${dropFile.id}/entries`, { body: 'Vermerk', person_id: dropPerson.id }));
+const dropType = ok('Lizenzart im Löschteam', await alice.post('/license-types', { name: 'Angelschein', team_id: dropTeam.id }));
+ok('Lizenz im Löschteam', await alice.post('/licenses', { type_id: dropType.id, person_id: dropPerson.id }));
+const dropTraining = ok('Schulung im Löschteam', await alice.post('/trainings', { name: 'Löschkurs', team_id: dropTeam.id }));
+ok('Nachweis im Löschteam', await alice.post(`/trainings/${dropTraining.id}/records`, { person_id: dropPerson.id, result: 'passed' }));
+invalid('Person mit Unterlagen wechselt die Sichtbarkeit nicht', await alice.patch(`/people/${dropPerson.id}`, { scope: 'personal' }));
+const movable = ok('Person ohne Unterlagen', await alice.post('/people', { name: 'Moritz Mobil', kind: 'external', email: '', scope: 'team', team_id: dropTeam.id }));
+ok('Person ohne Unterlagen wechselt die Sichtbarkeit', await alice.patch(`/people/${movable.id}`, { scope: 'personal' }));
+check('Gewechselte Person ist privat', psql(`SELECT (team_id IS NULL AND owner_user_id='${uA.id}')::text FROM people WHERE id='${movable.id}'`) === 'true');
+ok('Team mit Unterlagen löschen', await alice.del(`/teams/${dropTeam.id}`));
+check('Unterlagen des Teams sind weg', psql(`SELECT (SELECT count(*) FROM people WHERE id='${dropPerson.id}') + (SELECT count(*) FROM case_files WHERE id='${dropFile.id}') + (SELECT count(*) FROM licenses WHERE person_id='${dropPerson.id}') + (SELECT count(*) FROM training_records WHERE person_id='${dropPerson.id}')`) === '0');
 
 // ---------- Admin
 for (const p of ['/admin/overview', '/admin/users', '/admin/roles', '/admin/groups', '/admin/teams', '/admin/settings', '/admin/system', '/admin/audit?limit=10', '/admin/api-keys', '/admin/webhooks', '/admin/backups']) ok(`GET ${p}`, await admin.get(p));

@@ -24,6 +24,12 @@ const LABELS = {
   service_due_km: 'Service bei km', service_interval_km: 'Service-Intervall', sport_type: 'Sportart', start: 'Beginn', start_date: 'Startdatum', started_at: 'Beginn',
   status: 'Status', steps: 'Reproduktionsschritte', tags: 'Tags', target_amount: 'Zielbetrag', target_date: 'Zieldatum', team_id: 'Team', team_role: 'Teamrolle', title: 'Titel',
   to: 'Bis', type: 'Typ', url: 'URL', vehicle_id: 'Fahrzeug', week_start: 'Wochenstart', weekly_work_hours: 'Wochen-Soll', work_date: 'Datum',
+  // Akten, Lizenzen, Schulungen, Dokumentationen
+  case_file_id: 'Akte', closed_on: 'Abgeschlossen am', completed_on: 'Abgeschlossen am', end_time: 'Ende', entry_date: 'Datum', file_number: 'Aktenzeichen',
+  instructor: 'Ausbilder', issued_on: 'Ausgestellt am', issuer: 'Ausgestellt von', location: 'Ort', number: 'Nummer', opened_on: 'Eröffnet am',
+  people: 'Personen', pinned: 'Angeheftet', q: 'Suche', result: 'Ergebnis', role: 'Rolle', session_date: 'Datum', session_id: 'Termin', sort: 'Reihenfolge',
+  start_time: 'Beginn', state: 'Zustand', status_reason: 'Begründung', type_id: 'Lizenzart', user_id: 'Benutzer', valid_until: 'Gültig bis',
+  validity_months: 'Gültigkeit',
 };
 
 function subject(path) {

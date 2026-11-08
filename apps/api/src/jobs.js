@@ -4,7 +4,8 @@ import { nthOccurrence, today, ymd, notify, budgetWatch, addInterval } from './l
 import { sendMail } from './mail.js';
 import { runBackup, pruneBackups } from './backup.js';
 import { getSetting } from './settings.js';
-import { planPayroll, mondayOf, nextDate } from './payroll.js';
+import { planPayroll, mondayOf, nextDate, payrollCutoff } from './payroll.js';
+import { localDateTime } from './work-split.js';
 import { todoStage, dateInZone } from './periods.js';
 
 const localDate = (date = new Date()) => dateInZone(config.tz, date);
@@ -16,34 +17,41 @@ function previousDate(date) {
 }
 
 export async function payrollRun(log) {
-  const yesterday = previousDate(localDate());
+  const now = localDateTime(Date.now(), config.tz);
+  const cutoff = payrollCutoff(now);
+  // Offene Schicht: Timer, der vor weniger als 24 Stunden gestartet wurde. Ältere Timer gelten als vergessen und halten nichts auf.
   const users = await many(
     `SELECT u.id, u.weekly_work_hours, u.daily_salary, u.hourly_bonus_percent,
-            u.payroll_budget_id, u.payroll_start_date, b.currency
+            u.payroll_budget_id, u.payroll_start_date, b.currency,
+            CASE WHEN w.started_at > now() - interval '24 hours' THEN to_char(w.started_at AT TIME ZONE $2, 'YYYY-MM-DD') END open_shift_date
      FROM users u JOIN budgets b ON b.id=u.payroll_budget_id
+       LEFT JOIN work_timers w ON w.user_id=u.id
      WHERE u.status='active' AND u.deleted_at IS NULL AND u.payroll_start_date <= $1
        AND b.type='solo' AND b.owner_user_id=u.id AND b.archived=false
      ORDER BY u.id`,
-    [yesterday],
+    [cutoff, config.tz],
   );
   let processed = 0;
+  let waiting = 0;
   for (const user of users) {
+    const lastDate = payrollCutoff({ ...now, openShiftDate: user.open_shift_date });
+    if (lastDate < cutoff) waiting++;
     const firstDate = String(user.payroll_start_date).slice(0, 10);
     const hoursFrom = mondayOf(firstDate);
     const workDays = await many(
       `SELECT work_date, sum(hours) hours FROM work_entries
        WHERE user_id=$1 AND work_date BETWEEN $2 AND $3
        GROUP BY work_date ORDER BY work_date`,
-      [user.id, hoursFrom, yesterday],
+      [user.id, hoursFrom, lastDate],
     );
     const hoursByDate = new Map(workDays.map((row) => [String(row.work_date).slice(0, 10), Number(row.hours)]));
     const paidBonusHours = new Map((await many(
       'SELECT payroll_date, overtime_hours FROM payroll_payments WHERE user_id=$1 AND payroll_date BETWEEN $2 AND $3',
-      [user.id, firstDate, yesterday],
+      [user.id, firstDate, lastDate],
     )).map((row) => [String(row.payroll_date).slice(0, 10), Number(row.overtime_hours)]));
     const payments = planPayroll({
       firstDate,
-      lastDate: yesterday,
+      lastDate,
       weeklyTarget: Number(user.weekly_work_hours),
       dailySalary: Number(user.daily_salary),
       bonusPercent: Number(user.hourly_bonus_percent),
@@ -78,7 +86,7 @@ export async function payrollRun(log) {
       processed++;
     }
   }
-  log.info(`Gehaltsbuchungen für ${yesterday}: ${processed}`);
+  log.info(`Gehaltsbuchungen bis ${cutoff}: ${processed}${waiting ? `, ${waiting} warten auf das Ausstempeln` : ''}`);
   return `${processed} tägliche Gehaltsbuchungen`;
 }
 
@@ -181,6 +189,33 @@ export async function reminders(log) {
       await notify(userId, 'key_overdue', `Schlüssel-Rückgabe: ${a.label}`, body, `key:${a.id}:${userId}`);
     }
   }
+  const scopeUsers = async (row) => (row.owner_user_id
+    ? [row.owner_user_id]
+    : (await many('SELECT user_id FROM team_members WHERE team_id=$1', [row.team_id])).map((member) => member.user_id));
+  const expiryText = (date) => (date < t ? `abgelaufen am ${date}` : `läuft am ${date} ab`);
+  // Lizenzen: 30 Tage vorher und noch einmal nach dem Ablauf
+  for (const l of await many(`SELECT l.id, l.valid_until, lt.name type_name, lt.owner_user_id, lt.team_id, pe.name person
+    FROM licenses l JOIN license_types lt ON lt.id=l.type_id JOIN people pe ON pe.id=l.person_id
+    WHERE l.status='valid' AND l.valid_until IS NOT NULL AND l.valid_until <= $1`, [kitSoon])) {
+    const stage = l.valid_until < t ? 'expired' : 'soon';
+    for (const userId of await scopeUsers(l)) {
+      await notify(userId, 'license_expiry', `Lizenz: ${l.type_name} von ${l.person}`, expiryText(l.valid_until), `lic:${l.id}:${l.valid_until}:${stage}`);
+    }
+  }
+  // Schulungen: nur der neueste bestandene Nachweis je Teilnehmer zählt; eine Wiederholung beendet die Erinnerung
+  for (const r of await many(`SELECT * FROM (
+      SELECT DISTINCT ON (r.training_id, COALESCE(r.user_id, r.person_id)) r.id, r.valid_until, tr.name, tr.owner_user_id, tr.team_id,
+        COALESCE(u.name, pe.name) participant
+      FROM training_records r JOIN trainings tr ON tr.id=r.training_id
+        LEFT JOIN users u ON u.id=r.user_id LEFT JOIN people pe ON pe.id=r.person_id
+      WHERE r.result='passed' AND tr.active
+      ORDER BY r.training_id, COALESCE(r.user_id, r.person_id), r.completed_on DESC NULLS LAST, r.created_at DESC
+    ) latest WHERE valid_until IS NOT NULL AND valid_until <= $1`, [kitSoon])) {
+    const stage = r.valid_until < t ? 'expired' : 'soon';
+    for (const userId of await scopeUsers(r)) {
+      await notify(userId, 'training_expiry', `Schulung: ${r.name} – ${r.participant}`, expiryText(r.valid_until), `training:${r.id}:${r.valid_until}:${stage}`);
+    }
+  }
   return `${sent} Erinnerungen`;
 }
 
@@ -256,7 +291,8 @@ export async function retention() {
 }
 
 export const JOBS = {
-  'payroll.run': { cron: '45 3 * * *', fn: payrollRun },
+  // Stündlich: Gebucht wird der Vortag ab 03:45 Uhr; wartet ein Tag auf das Ausstempeln, folgt er spätestens eine Stunde danach
+  'payroll.run': { cron: '45 * * * *', fn: payrollRun },
   'recurring.run': { cron: '*/15 * * * *', fn: recurringRun },
   reminders: { cron: '0 7 * * *', fn: reminders },
   // Stündlich, damit auch ein heute angelegtes ToDo noch erinnert; nachts bleibt es still

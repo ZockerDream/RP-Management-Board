@@ -78,6 +78,25 @@ export async function buildFeed(userId, from, to) {
     WHERE (k.owner_user_id=$1 OR k.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1)) AND a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at IS NOT NULL`, [userId])) {
     out.push(ro(`key:${a.id}`, 'key', `Rückgabe: ${a.label}`, a.due_at, { note: a.person || '' }));
   }
+  const visible = (alias) => `(${alias}.owner_user_id=$1 OR ${alias}.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1))`;
+  for (const l of await many(`SELECT l.id, l.valid_until, lt.name, pe.name person FROM licenses l JOIN license_types lt ON lt.id=l.type_id
+    LEFT JOIN people pe ON pe.id=l.person_id AND ${visible('pe')}
+    WHERE ${visible('lt')} AND l.status='valid' AND l.valid_until BETWEEN $2 AND $3`, [userId, from, to])) {
+    out.push(ro(`lic:${l.id}`, 'license', `Lizenz läuft ab: ${l.name}`, l.valid_until, { note: l.person || '' }));
+  }
+  for (const s of await many(`SELECT s.id, s.session_date, s.start_time, s.end_time, s.location, tr.name FROM training_sessions s JOIN trainings tr ON tr.id=s.training_id
+    WHERE ${visible('tr')} AND s.session_date BETWEEN $2 AND $3`, [userId, from, to])) {
+    out.push(ro(`trs:${s.id}`, 'training', `Schulung: ${s.name}`, s.session_date, {
+      start: s.start_time?.slice(0, 5) || null, end: s.end_time?.slice(0, 5) || null, allDay: !s.start_time, note: s.location,
+    }));
+  }
+  for (const r of await many(`SELECT r.id, r.valid_until, tr.name, COALESCE(u.name, pe.name) participant FROM training_records r JOIN trainings tr ON tr.id=r.training_id
+    LEFT JOIN users u ON u.id=r.user_id LEFT JOIN people pe ON pe.id=r.person_id AND ${visible('pe')}
+    WHERE ${visible('tr')} AND tr.active AND r.result='passed' AND r.valid_until BETWEEN $2 AND $3
+      AND NOT EXISTS (SELECT 1 FROM training_records n WHERE n.training_id=r.training_id AND n.result='passed'
+        AND COALESCE(n.user_id, n.person_id)=COALESCE(r.user_id, r.person_id) AND n.completed_on > r.completed_on)`, [userId, from, to])) {
+    out.push(ro(`trv:${r.id}`, 'training', `Schulung läuft ab: ${r.name}`, r.valid_until, { note: r.participant || '' }));
+  }
   for (const g of await many('SELECT id, name, target_date FROM goals WHERE target_date IS NOT NULL AND budget_id = ANY($1)', [ids])) {
     out.push(ro(`goal:${g.id}`, 'finance', `Sparziel: ${g.name}`, g.target_date));
   }

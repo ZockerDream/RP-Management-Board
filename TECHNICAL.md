@@ -32,12 +32,13 @@ RP-Management-Board/
     │   └── src/
     │       ├── main.js, worker.js, jobs.js, config.js, db.js, seed.js, settings.js
     │       ├── authz.js, security.js, audit.js, mail.js, lib.js, backup.js
-    │       ├── payroll.js, work-hours.js, periods.js, validation.js, static-assets.js, cli/backup.js
-    │       └── routes/          # admin attachments auth calendar finance integrations
-    │                            # me notes objects public spending sport teams todos work
+    │       ├── payroll.js, work-hours.js, work-split.js, periods.js, validation.js, static-assets.js, cli/backup.js
+    │       ├── records.js, uploads.js
+    │       └── routes/          # admin attachments auth calendar casefiles docs finance integrations
+    │                            # licenses me notes objects public spending sport teams todos trainings work
     └── web/public/
         ├── index.html, favicon.svg, css/
-        └── js/                  # api app calendar charts md5 recurrence theme ui
+        └── js/                  # api app calendar charts markdown md5 recurrence theme ui
             └── pages/           # eine Datei je Seite
 ```
 
@@ -85,7 +86,9 @@ work_entries(id, user_id, project_id, work_date, hours, started_at, ended_at, br
 work_timers
 payroll_payments(user_id, payroll_date, base_amount, overtime_hours, overtime_pay, …)   -- pro Tag eindeutig
 ```
-`payroll.run` schreibt täglich um 03:45 Uhr für den Vortag gut, frühestens ab `payroll_start_date`: jeden Tag `daily_salary`, unabhängig von den Stunden. Stunden über dem Wochen-Soll (Montag bis Sonntag) bringen zusätzlich je Stunde `daily_salary × hourly_bonus_percent / 100`. Die Regeln stehen allein in `planPayroll` (`payroll.js`). Innerhalb einer Woche zählt `Stunden über dem Soll − bereits vergütete Stunden`, nachgetragene Stunden kommen also mit der nächsten Gutschrift dazu; abgeschlossene Wochen bleiben unangetastet, damit ein geändertes Soll alte Wochen nicht neu bewertet. Fehlende Tage werden nachgeholt; `payroll_payments` macht den Lauf idempotent. `users.hourly_rate` ist seit Migration 015 ungenutzt; die Migration hat daraus `daily_salary` berechnet. Monats-Soll = Wochen-Soll × Kalendertage / 7. Der Monatsbericht zeigt tatsächlich gebuchte Beträge.
+`payroll.run` läuft stündlich und schreibt ab 03:45 Uhr den Vortag gut (`payrollCutoff`), frühestens ab `payroll_start_date`: jeden Tag `daily_salary`, unabhängig von den Stunden. Stunden über dem Wochen-Soll (Montag bis Sonntag) bringen zusätzlich je Stunde `daily_salary × hourly_bonus_percent / 100`. Die Regeln stehen allein in `planPayroll` (`payroll.js`). Innerhalb einer Woche zählt `Stunden über dem Soll − bereits vergütete Stunden`, nachgetragene Stunden kommen also mit der nächsten Gutschrift dazu; abgeschlossene Wochen bleiben unangetastet, damit ein geändertes Soll alte Wochen nicht neu bewertet. Fehlende Tage werden nachgeholt; `payroll_payments` macht den Lauf idempotent. `users.hourly_rate` ist seit Migration 015 ungenutzt; die Migration hat daraus `daily_salary` berechnet. Monats-Soll = Wochen-Soll × Kalendertage / 7. Der Monatsbericht zeigt tatsächlich gebuchte Beträge.
+
+Schichten über Mitternacht: Ein Eintrag gehört immer zu genau einem Kalendertag. `work-split.js` teilt Timer (`splitTimer`, an Mitternacht in `TZ`, Sommer-/Winterzeit beachtet) und manuelle Einträge oder Bearbeitungen (`splitManualEntry`, Ende vor Beginn) in einen Eintrag je Tag. Manuell werden Stunden und Pause nach der Dauer vor und nach Mitternacht verteilt; beim Timer wird eine laufende Pause genau dort abgezogen, wo sie lag, frühere Pausen (nur als Summe bekannt) anteilig. `apportion` rundet kumulativ, die Summe bleibt exakt. Ende `00:00` heißt „bis Mitternacht“ und bleibt ein Eintrag. Läuft ein Timer, der vor weniger als 24 Stunden gestartet wurde, rechnet `payroll.run` nur bis zum Tag vor seinem Start ab; der Starttag folgt spätestens eine Stunde nach dem Ausstempeln. Timer über 24 Stunden Nettozeit lassen sich nicht stoppen (`DELETE /work-hours/timer` verwirft sie), vergessene Timer halten den Gehaltslauf also höchstens einen Tag auf. Einträge von vor dieser Regel wurden nicht umgerechnet; beim Bearbeiten teilt `PATCH /work-hours/:id` nur, wenn sich Datum, Zeiten, Stunden oder Pause ändern, damit eine geänderte Notiz keine Stunden in eine andere Woche verschiebt.
 
 ### 4.4 Sport
 ```
@@ -121,6 +124,20 @@ notes(id, owner_user_id, team_id, title, body, pinned, created_by, updated_by, c
 todos(id, owner_user_id, team_id, title, note, due_date, done_at, done_by, last_reminder, created_by, created_at, updated_at)
 bug_report_comments(id, report_id, user_id, body, created_at)
 ```
+### 4.8 Akten, Lizenzen, Schulungen, Dokumentationen (Migration 017)
+```
+case_files(id, owner_user_id, team_id, file_number, title, description, status[open|dormant|closed], opened_on, closed_on, …)   -- Aktenzeichen eindeutig je Bereich
+case_file_people(case_file_id, person_id, role), case_file_entries(id, case_file_id, entry_date, kind, body, person_id, …)
+case_file_attachments(id, case_file_id, storage_key, original_name, mime, size, sha256, uploaded_by)
+license_types(id, owner_user_id, team_id, name, description, validity_months)
+licenses(id, type_id, person_id, number, issued_on, valid_until, issuer, status[valid|suspended|revoked], status_reason, note)
+trainings(id, owner_user_id, team_id, name, description, validity_months, active)
+training_sessions(id, training_id, session_date, start_time, end_time, location, instructor, note)
+training_records(id, training_id, session_id, user_id | person_id, result[registered|passed|failed|absent], completed_on, valid_until, instructor, note)
+doc_categories(id, owner_user_id, team_id, name, sort), doc_pages(id, category_id, title, body, pinned, created_by, updated_by, …)
+```
+Bereich (`owner_user_id` xor `team_id`) haben nur die Kopftabellen; Einträge, Lizenzen, Termine, Nachweise und Seiten erben ihn. Er wird beim Anlegen gesetzt und bleibt fest. Zugriff: Katalogrecht (`casefile|license|training|doc:read|create|update|delete`) und `recordRole`/`recordOwner`. Personen und Teilnehmer müssen im selben Bereich liegen (`assertPersonInScope`, `assertUserInScope` in `records.js`); Personennamen werden nur über `personJoin` gezeigt, also nur bei Zugriff auf die Person. `DELETE /people/:id` lehnt Personen mit Akten, Lizenzen oder Nachweisen ab, und solche Personen wechseln auch nicht den Bereich. Die Fremdschlüssel auf `people` kaskadieren trotzdem (Einträge: `SET NULL`), denn beim Löschen eines Teams prüft PostgreSQL die Verweise schon in der kaskadierenden Teil-Löschung der Personen, bevor die Akten des Teams entfernt sind. Anhänge laufen wie Belege über `uploads.js` (PDF, PNG, JPEG, Magic Bytes, Größenlimit); beim Löschen einer Akte werden die Dateien entfernt. Zustände `expiring` (≤ 30 Tage) und `expired` werden beim Abruf berechnet. Dokumentationen rendert das Frontend mit `markdown.js`: erst alles maskieren, dann wenige Auszeichnungen, Links nur `http(s)`.
+
 Bei `notes` und `todos` ist genau eines von `owner_user_id` und `team_id` gesetzt. Rechte hängen an Eigentum und Teamrolle (`recordRole`, `recordOwner` in `authz.js`), nicht am RBAC-Katalog; Viewer erhalten beim Ändern 403, Fremde 404. Listen liefern `role`, damit die Oberfläche Aktionen für Viewer ausblendet. `todos.last_reminder` hält `<Deadline>:<Stufe>` der letzten Erinnerung. Tickets löschen die Kommentare per Kaskade.
 
 ## 5. API (REST unter `/api`)
@@ -133,10 +150,14 @@ Bei `notes` und `todos` ist genau eines von `owner_user_id` und `team_id` gesetz
 | Teams | `/teams`, `/teams/:id/members`, `/teams/:id/invitations/:iid` |
 | Finanzen | `/budgets`, `/budgets/:id/categories`, `/categories/:id`, `/transactions`, `/transactions/export.csv`, `/recurring`, `/goals`, `/spending-budgets` |
 | Auswertung | `/stats/overview`, `/stats/by-category`, `/stats/timeline?granularity=day\|week\|month&periods=&week_start=&to=`, `/reports/costs`, `/reports/saved`. Standard `month` liefert `month`, sonst `bucket` (Tag bzw. Wochenbeginn) |
-| Zeiterfassung | `/work-projects`, `/work-hours`, `/work-hours/timer/*`, `/work-hours/monthly`, `/work-hours/monthly.pdf`, `/work-hours/export.csv`, `/work-hours/team/*` |
+| Zeiterfassung | `/work-projects`, `/work-hours`, `/work-hours/timer/*`, `DELETE /work-hours/timer` (verwerfen), `/work-hours/monthly`, `/work-hours/monthly.pdf`, `/work-hours/export.csv`, `/work-hours/team/*` |
 | Sport | `GET/POST /sport/routes`, `PATCH/DELETE /sport/routes/:id`, `POST /sport/routes/:id/scores`, `DELETE /sport/scores/:id` |
 | Notizblock, ToDos | `GET/POST /notes`, `PATCH/DELETE /notes/:id`, `GET/POST /todos`, `PATCH/DELETE /todos/:id` (mit `done`) |
 | Tickets | `GET/POST /bug-reports`, `DELETE /bug-reports/:id`, `POST /bug-reports/:id/comments`, `DELETE /bug-reports/:id/comments/:commentId`; dieselben unter `/admin/bug-reports` für alle Tickets. Getrennte Pfade, damit die Admin-IP-Allowlist greift |
+| Akten | `GET/POST /case-files` (`?status=&q=`), `GET/PATCH/DELETE /case-files/:id`, `POST /case-files/:id/people`, `DELETE /case-files/:id/people/:personId`, `POST /case-files/:id/entries`, `PATCH/DELETE /case-file-entries/:id`, `POST /case-files/:id/attachments`, `GET/DELETE /case-file-attachments/:id`, `GET /people/:id/record` (Personenübersicht) |
+| Lizenzen | `GET/POST /license-types`, `PATCH/DELETE /license-types/:id`, `GET/POST /licenses` (`?state=&type_id=&person_id=&q=`), `PATCH/DELETE /licenses/:id`, `POST /licenses/:id/renew` |
+| Schulungen | `GET/POST /trainings`, `GET /trainings/overview`, `GET/PATCH/DELETE /trainings/:id`, `GET /trainings/:id/candidates`, `POST /trainings/:id/sessions`, `PATCH/DELETE /training-sessions/:id`, `POST /trainings/:id/records`, `PATCH/DELETE /training-records/:id` |
+| Dokumentationen | `GET/POST /doc-categories`, `PATCH/DELETE /doc-categories/:id`, `GET/POST /doc-pages` (`?category_id=&q=`), `GET/PATCH/DELETE /doc-pages/:id` |
 | Objekte | `/people`, `/properties`, `/properties/:id/pin`, `/vehicles`, `/keys`, `/keys/:id/assign`, `/keys/:id/qr`, `/assignments/:id/return`, `/assignments/:id/lost`, `/assets/overview`, `/assets/costs`, `/assets/log` |
 | Kalender | `GET /calendar?from=&to=`, `POST/PUT/DELETE /calendar/events`, `GET /calendar/ical/:token.ics` |
 | Sonstiges | `/integrations/:provider/*`, `/attachments/:id`, `GET /public/imprint` |
@@ -168,8 +189,8 @@ Beim Speichern von Haus, Fahrzeug oder Schlüssel in einer Transaktion:
 | Job | Takt | Aufgabe |
 |---|---|---|
 | `recurring.run` | alle 15 Minuten | Fällige Daueraufträge buchen, `next_run` fortschreiben |
-| `payroll.run` | täglich 03:45, auch beim Worker-Start und beim Setzen des Gehaltskontos | Festgehalt und Bonus buchen |
-| `reminders` | täglich 07:00 | Benachrichtigungen zu Terminen, Service, Verbandskasten, Schlüsselrückgaben |
+| `payroll.run` | stündlich zur Minute 45, auch beim Worker-Start und beim Setzen des Gehaltskontos | Festgehalt und Bonus buchen; der Vortag ab 03:45, ein Tag mit offener Schicht nach dem Ausstempeln |
+| `reminders` | täglich 07:00 | Benachrichtigungen zu Terminen, Service, Verbandskasten, Schlüsselrückgaben, ablaufenden Lizenzen (`license_expiry`) und Schulungsnachweisen (`training_expiry`, nur der neueste je Teilnehmer): 30 Tage vorher und nach dem Ablauf |
 | `todos.remind` | stündlich 07:05–20:05 | ToDo-Deadlines: morgen, heute, überfällig. Stündlich, damit auch ein heute angelegtes ToDo noch erinnert; nachts still. `last_reminder` verhindert Wiederholungen, auch nachdem alte Benachrichtigungen bereinigt wurden |
 | `reports.run` | täglich 06:00 | Fällige geplante Berichte versenden |
 | `backup` | täglich `BACKUP_HOUR` | `pg_dump`, verschlüsseln, Aufbewahrung bereinigen |
@@ -187,9 +208,9 @@ Der Server liefert für `[from, to]` die Vereinigung aus eigenen Terminen und ab
 
 ## 8. Frontend
 
-- Routen in `PAGES` (`app.js`), jeweils mit optionalem Recht. Seiten: `dashboard`, `transactions`, `work`, `budgets`, `spending`, `recurring`, `goals`, `reports`, `teams`, `calendar`, `notes`, `todos`, `sport-run|swim|bike`, `assets-vehicles|properties|people|keys|manage`, `admin-users|server|tickets`, `help`, `bug-report`, `settings`, `impressum`, `datenschutz`. Alias: `assets`, `admin`.
+- Routen in `PAGES` (`app.js`), jeweils mit optionalem Recht. Seiten: `dashboard`, `transactions`, `work`, `budgets`, `spending`, `recurring`, `goals`, `reports`, `teams`, `calendar`, `notes`, `todos`, `sport-run|swim|bike`, `assets-vehicles|properties|people|keys|manage`, `casefiles`, `trainings`, `licenses`, `docs` (Direktlinks `?id=` bzw. `?page=`), `admin-users|server|tickets`, `help`, `bug-report`, `settings`, `impressum`, `datenschutz`. Alias: `assets`, `admin`.
 - Bei jedem Seitenwechsel wird `#view` ersetzt; Listener an `view` stapeln sich daher nicht.
-- Navigation wird anhand der Rechte aus `/me` ausgeblendet; das Backend prüft unabhängig davon.
+- Navigation wird anhand der Rechte aus `/me` ausgeblendet, Abschnittsüberschriften ohne sichtbaren Eintrag ebenso; das Backend prüft unabhängig davon.
 - Theme: `data-theme` und `data-accent` auf `<html>` steuern CSS-Variablen.
 - Geldbeträge werden als Strings geführt und erst zur Anzeige formatiert.
 
@@ -203,4 +224,4 @@ Der Server liefert für `[from, to]` die Vereinigung aus eigenen Terminen und ab
 
 ## 10. Grenzen
 
-Eine Installation pro Organisation, `worker` einmal betreiben, ein Host. Offene Punkte stehen in [CONCEPT.md](CONCEPT.md), Abschnitt 13.
+Eine Installation pro Organisation, `worker` einmal betreiben, ein Host. Offene Punkte stehen in [CONCEPT.md](CONCEPT.md), Abschnitt 14.

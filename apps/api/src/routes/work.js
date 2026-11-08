@@ -7,6 +7,9 @@ import { config } from '../config.js';
 import { calculateWorkCompensation } from '../work-hours.js';
 import { calculateDailyPayroll } from '../payroll.js';
 import { patchSchema } from '../validation.js';
+import { splitManualEntry, splitTimer, MAX_TIMER_SECONDS } from '../work-split.js';
+
+const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Uhrzeit im Format HH:MM');
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const parsed = new Date(`${value}T00:00:00Z`);
@@ -18,8 +21,8 @@ const entryBody = z.object({
   hours: z.number().positive().max(24).refine((value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-8, 'Maximal zwei Nachkommastellen'),
   note: z.string().max(500).default(''),
   project_id: z.string().uuid().nullish(),
-  started_at: z.string().regex(/^\d{2}:\d{2}$/).nullish(),
-  ended_at: z.string().regex(/^\d{2}:\d{2}$/).nullish(),
+  started_at: time.nullish(),
+  ended_at: time.nullish(),
   break_minutes: z.number().int().min(0).max(1440).default(0),
 });
 
@@ -38,6 +41,18 @@ export default async function routes(app) {
     const membership = await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [teamId, userId]);
     if (!membership) throw notFound('Team nicht gefunden');
     if (membership.team_role === 'viewer') throw forbidden('Nur Team-Owner und Editoren können Arbeitszeiten verwalten');
+  }
+
+  // Schichten über Mitternacht werden zu einem Eintrag je Kalendertag
+  async function insertEntries(client, userId, entry) {
+    const ids = [];
+    for (const part of splitManualEntry(entry)) {
+      ids.push((await client.query(
+        'INSERT INTO work_entries(user_id, work_date, hours, note, project_id, started_at, ended_at, break_minutes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
+        [userId, part.work_date, part.hours, part.note, part.project_id || null, part.started_at || null, part.ended_at || null, part.break_minutes],
+      )).rows[0].id);
+    }
+    return ids;
   }
 
   async function workEntryAccess(userId, entryId) {
@@ -127,20 +142,26 @@ export default async function routes(app) {
     const pauseSeconds = timer.paused_seconds + currentPause;
     const elapsed = Math.floor((stoppedAt.getTime() - new Date(timer.started_at).getTime()) / 1000) - pauseSeconds;
     if (elapsed < 60) throw bad('Die erfasste Zeit muss mindestens eine Minute betragen');
-    const localParts = (value) => {
-      const parts = new Intl.DateTimeFormat('en-CA', { timeZone: config.tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(value);
-      return Object.fromEntries(parts.map((part) => [part.type, part.value]));
-    };
-    const start = localParts(new Date(timer.started_at));
-    const end = localParts(stoppedAt);
-    const hours = Math.round(elapsed / 36) / 100;
-    const entry = (await client.query(
-      'INSERT INTO work_entries(user_id,project_id,work_date,hours,note,started_at,ended_at,break_minutes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
-      [req.user.id, timer.project_id, `${start.year}-${start.month}-${start.day}`, hours, timer.note, `${start.hour}:${start.minute}`, `${end.hour}:${end.minute}`, Math.round(pauseSeconds / 60)],
-    )).rows[0];
+    if (elapsed > MAX_TIMER_SECONDS) throw bad('Der Timer läuft seit mehr als 24 Stunden. Verwirf ihn und erfasse die Zeit manuell.');
+    // Über Mitternacht: ein Eintrag je Kalendertag, damit die Stunden in der richtigen Woche zählen
+    const parts = splitTimer({ startedAt: timer.started_at, stoppedAt, pausedSeconds: timer.paused_seconds, pausedAt: timer.paused_at, timeZone: config.tz });
+    const ids = [];
+    for (const part of parts) {
+      ids.push((await client.query(
+        'INSERT INTO work_entries(user_id,project_id,work_date,hours,note,started_at,ended_at,break_minutes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
+        [req.user.id, timer.project_id, part.work_date, part.hours, timer.note, part.started_at, part.ended_at, part.break_minutes],
+      )).rows[0].id);
+    }
     await client.query('DELETE FROM work_timers WHERE user_id=$1', [req.user.id]);
-    return entry;
+    return { id: ids[0], entries: ids.length };
   }));
+
+  // Vergessener Timer: verwerfen, ohne einen Eintrag anzulegen
+  app.delete('/work-hours/timer', requireAuth, async (req) => {
+    const result = await q('DELETE FROM work_timers WHERE user_id=$1', [req.user.id]);
+    if (!result.rowCount) throw bad('Es läuft kein Timer');
+    return { ok: true };
+  });
 
   app.get('/work-hours', requireAuth, async (req) => {
     const filter = z.object({ from: date.optional(), to: date.optional() }).parse(req.query);
@@ -306,25 +327,36 @@ export default async function routes(app) {
   app.post('/work-hours', requireAuth, async (req) => {
     const entry = entryBody.parse(req.body);
     if (entry.project_id) await projectAccess(req.user.id, entry.project_id, true);
-    return one(
-      'INSERT INTO work_entries(user_id, work_date, hours, note, project_id, started_at, ended_at, break_minutes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
-      [req.user.id, entry.work_date, entry.hours, entry.note, entry.project_id || null, entry.started_at || null, entry.ended_at || null, entry.break_minutes],
-    );
+    const ids = await tx((client) => insertEntries(client, req.user.id, entry));
+    return { id: ids[0], entries: ids.length };
   });
 
   app.patch('/work-hours/:id', requireAuth, async (req) => {
     const existing = await workEntryAccess(req.user.id, req.params.id);
     const entry = patchSchema(entryBody).parse(req.body);
     if (entry.project_id) await projectAccess(existing.user_id, entry.project_id, existing.user_id === req.user.id);
-    const keys = Object.keys(entry);
-    if (!keys.length) return { ok: true };
-    const values = keys.map((key) => entry[key]);
-    const result = await q(
-      `UPDATE work_entries SET ${keys.map((key, index) => `${key}=$${index + 2}`).join(',')}, updated_at=now() WHERE id=$1 AND user_id=$${keys.length + 2}`,
-      [existing.id, ...values, existing.user_id],
-    );
-    if (!result.rowCount) throw notFound();
-    return { ok: true };
+    if (!Object.keys(entry).length) return { ok: true };
+    return tx(async (client) => {
+      const current = (await client.query('SELECT * FROM work_entries WHERE id=$1 AND user_id=$2 FOR UPDATE', [existing.id, existing.user_id])).rows[0];
+      if (!current) throw notFound();
+      const timing = {
+        work_date: current.work_date, hours: Number(current.hours), break_minutes: current.break_minutes,
+        started_at: current.started_at?.slice(0, 5) ?? null, ended_at: current.ended_at?.slice(0, 5) ?? null,
+      };
+      const merged = { ...current, ...timing, ...entry };
+      // Geht der Eintrag jetzt über Mitternacht, bleibt dieser Eintrag beim ersten Tag; der Rest wird ein Eintrag am Folgetag.
+      // Nur wenn sich Datum, Zeiten, Stunden oder Pause ändern: Ältere Einträge über Mitternacht bleiben beim Ändern der Notiz,
+      // sonst rutschten Stunden still in eine andere, womöglich noch offene Woche.
+      const timingChanged = Object.keys(timing).some((key) => key in entry && String(entry[key] ?? '') !== String(timing[key] ?? ''));
+      const [first, ...rest] = timingChanged ? splitManualEntry(merged) : [merged];
+      await client.query(
+        `UPDATE work_entries SET work_date=$2, hours=$3, note=$4, project_id=$5, started_at=$6, ended_at=$7, break_minutes=$8, updated_at=now()
+         WHERE id=$1`,
+        [current.id, first.work_date, first.hours, first.note, first.project_id || null, first.started_at || null, first.ended_at || null, first.break_minutes],
+      );
+      for (const part of rest) await insertEntries(client, current.user_id, part);
+      return { ok: true, entries: 1 + rest.length };
+    });
   });
 
   app.delete('/work-hours/:id', requireAuth, async (req) => {

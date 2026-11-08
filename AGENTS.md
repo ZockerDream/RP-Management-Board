@@ -10,9 +10,9 @@ Diese Datei gilt für jede KI, die an diesem Projekt weiterarbeitet (`CLAUDE.md`
 4. Die Punkte unter „Offene Punkte“ am Ende kennen, bevor du dort etwas änderst oder neu erfindest.
 5. Vor dem Abschluss einer Änderung: Tests laufen lassen (siehe „Testen“) und Doku mitpflegen. Ergebnisse ehrlich berichten, auch Fehlschläge und Nicht-Getestetes.
 
-Selbst gehostete deutschsprachige Web-App: Finanzen, Zeiterfassung, Sport, Objekte (Fahrzeuge, Häuser, Personen, Schlüssel), Teams, Kalender und Administration. Betrieb per Docker Compose.
+Selbst gehostete deutschsprachige Web-App: Finanzen, Zeiterfassung, Sport, Objekte (Fahrzeuge, Häuser, Personen, Schlüssel), Akten, Schulungen, Lizenzen, Dokumentationen, Teams, Kalender und Administration. Betrieb per Docker Compose.
 
-Die Anforderungen wurden aus Code, Doku und Git-Historie abgeleitet (Stand 2026-11-08, Migration 016); die frühen Originalgespräche mit dem Auftraggeber lagen nicht vor. Im Zweifel beim Auftraggeber nachfragen und hier ergänzen. Fachliche Details: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Betrieb: [README.md](README.md).
+Die Anforderungen wurden aus Code, Doku und Git-Historie abgeleitet (Stand 2026-11-08, Migration 016); die frühen Originalgespräche mit dem Auftraggeber lagen nicht vor. Akten, Schulungen, Lizenzen, Dokumentationen und die Nachtschicht-Regel (Migration 017) hat der Auftraggeber am 2026-11-08 direkt entschieden. Im Zweifel beim Auftraggeber nachfragen und hier ergänzen. Fachliche Details: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Betrieb: [README.md](README.md).
 
 ## Arbeitsweise
 
@@ -61,6 +61,10 @@ Node 22, Fastify 5, reines ESM-JavaScript, `zod`, `pg` mit handgeschriebenem SQL
 - **TRUST_PROXY:** Hinter einem Proxy ohne diese Einstellung teilen sich alle Benutzer dessen IP, auch beim Login-Limit und im Audit-Log. Die App warnt dann im Log und unter *Server-Management → Sicherheit & Einstellungen*.
 - **Letzter Admin:** Status, Rollen und Ablaufdatum des letzten aktiven Admins sind per `lastAdminGuard` geschützt; neue Felder, die den Zugang entziehen können, dort mit absichern.
 - **Kalender rendert beim Filtern neu:** Element-Referenzen in Tests werden dabei ungültig; Elemente jedes Mal neu suchen.
+- **Ein Arbeitszeit-Eintrag gehört genau einem Kalendertag.** Neue Wege, Einträge anzulegen oder zu ändern, müssen über `splitManualEntry`/`splitTimer` (`work-split.js`) gehen; sonst zählen Stunden nach Mitternacht in der falschen Woche.
+- **Gehaltslauf stündlich, Stichtag 03:45:** `payroll.run` bucht vor 03:45 Uhr nur bis vorgestern. Tests, die den Job aufrufen, müssen das berücksichtigen (`api.mjs` tut es); der Teil „wartet auf das Ausstempeln“ läuft nur zwischen 03:45 und 23:00.
+- **Personen sind Bezugspunkt für Akten, Lizenzen und Schulungsnachweise:** `DELETE /people/:id` lehnt solche Personen ab, und sie wechseln nicht den Bereich (`personRecords` in `objects.js`); neue Tabellen mit Personenbezug dort mit prüfen. Die Fremdschlüssel selbst müssen kaskadieren: Beim Löschen eines Teams prüft PostgreSQL Verweise ohne `ON DELETE` schon in der kaskadierenden Teil-Löschung der Personen, das ergab einen 500er.
+- **Bereich fest, Personen im selben Bereich:** Akten, Lizenzarten, Schulungen und Doku-Kategorien wechseln nach dem Anlegen nicht zwischen Solo und Team; Personen und Teilnehmer müssen zum selben Team bzw. derselben Person gehören (`records.js`).
 
 ## Testen
 
@@ -84,7 +88,7 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 ### Allgemein
 - Einziger Einstieg ist `api` auf einem Port (UI und API, gleicher Ursprung). Kein mitgelieferter Reverse-Proxy; `db` nur im internen Netz.
 - App-Name zentral in den Einstellungen änderbar; wirkt in Seitenleiste, Login, Titel und Rechtsseiten.
-- Navigation: **Finanzen** (Dashboard, Transaktionen, Stundenzettel, Konten, Budgets, Daueraufträge, Sparziele, Berichte), **Zusammenarbeit** (Teams, Kalender, Notizblock, ToDos), **Sport** (Laufen, Schwimmen, Biken), **Object Management** (Fahrzeuge, Häuser, Personen, Schlüssel, Verwaltung), **Administration** (User-Management, Server-Management, Tickets – nur Admins; Hilfe und Fehler melden für alle), dazu Impressum und Datenschutz.
+- Navigation: **Finanzen** (Dashboard, Transaktionen, Stundenzettel, Konten, Budgets, Daueraufträge, Sparziele, Berichte), **Zusammenarbeit** (Teams, Kalender, Notizblock, ToDos), **Sport** (Laufen, Schwimmen, Biken), **Object Management** (Fahrzeuge, Häuser, Personen, Schlüssel, Verwaltung), **Organisation** (Akten, Schulungen, Lizenzen, Dokumentationen), **Administration** (User-Management, Server-Management, Tickets – nur Admins; Hilfe und Fehler melden für alle), dazu Impressum und Datenschutz.
 - Alte Links (`#/assets?tab=…`, `#/admin`, QR-Codes) müssen weiter funktionieren.
 
 ### Konten und Buchungen
@@ -106,6 +110,7 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 - KPI „Wochen-Soll“. Monats-Soll = Wochen-Soll × Kalendertage / 7. PDF und CSV.
 - Das Gehaltskonto ist auf dem Stundenzettel („Gehalt einstellen“) und im Profil wählbar. Nicht wählbare Konten stehen mit Begründung in der Liste; fehlt ein passendes Konto, sagt ein Hinweis, was zu tun ist.
 - **Gehaltsregel des Auftraggebers** (Beispiel: 1.669 Festgehalt pro Tag, 13 Stunden Wochen-Soll, 17 % Bonus): Das Festgehalt wird jeden Tag um 03:45 für den Vortag gebucht, inklusive Wochenende und unabhängig von den Stunden, auf ein eigenes persönliches Konto. Nur Stunden über dem Wochen-Soll (Mo–So) bringen zusätzlich je Stunde den Bonus, einen Prozentsatz des Festgehalts (17 % von 1.669 = 283,73). Woche 1, Soll nicht erreicht: täglich nur Festgehalt. Woche 2, Soll am Dienstag erreicht: ab dann jede weitere Stunde mit Bonus. Woche 3, Soll am Samstag erreicht: nur der Rest von Samstag und Sonntag. Montags beginnt die Zählung neu.
+- **Nachtschicht (Entscheidung des Auftraggebers):** Stunden zählen an dem Kalendertag, an dem gearbeitet wurde. Timer und manuelle Einträge werden an Mitternacht in einen Eintrag je Tag geteilt; in der Nacht von Sonntag auf Montag gehören die Stunden nach 0 Uhr zur neuen Woche. Läuft um 03:45 noch ein Timer (jünger als 24 Stunden), wartet die Gutschrift seines Starttags bis zum Ausstempeln und folgt spätestens eine Stunde danach. Timer über 24 Stunden lassen sich nur verwerfen.
 - Nachgetragene Stunden derselben Woche kommen mit der nächsten Gutschrift dazu; abgeschlossene Wochen werden nicht nachberechnet, sonst würde ein geändertes Wochen-Soll alte Wochen neu bewerten. Stunden über dem Wochen-Soll (Mo–So) zusätzlich mit Stundenlohn plus Zuschlag. Idempotent, Ausfälle werden nachgeholt.
 - Team-Owner und -Editoren sehen und bearbeiten Zeiten und Mitarbeitereinstellungen ihres Teams.
 
@@ -118,8 +123,15 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 - Tür-PINs verschlüsselt, nie in Listen, nur nach Passwort und ggf. 2FA sichtbar, jeder Zugriff im Audit-Log.
 - „Verwaltung“ bündelt Übersicht, Kosten, Protokoll und Auditlog (nur mit `audit:read`). Keine Versicherungsangabe an Fahrzeugen.
 
+### Akten, Schulungen, Lizenzen, Dokumentationen (Entscheidungen des Auftraggebers vom 2026-11-08)
+- Alle vier solo oder pro Team, Bereich beim Anlegen fest. Team-Owner und -Editoren ändern, Viewer lesen, Fremde sehen nichts; zusätzlich Katalogrechte `casefile`, `training`, `license`, `doc`.
+- **Akten:** Fall- bzw. Vorgangsakten mit Aktenzeichen (automatisch `Jahr-Nummer`), Status offen/ruhend/abgeschlossen, beteiligten Personen mit Rolle, chronologischen Einträgen und Anhängen. Auf jeder Person zeigt die „Übersicht“ alle Akten und Einträge zu ihr, dazu Lizenzen und Schulungen.
+- **Lizenzen für Personen:** frei anlegbare Lizenzarten mit Standard-Gültigkeit; Lizenz mit Nummer, Aussteller, Ausstellung, Ablauf, Status gültig/gesperrt/entzogen mit Begründung; Erinnerung 30 Tage vorher und nach Ablauf.
+- **Schulungen, Teilnahme und Nachweis:** Termine, Teilnehmer (Benutzer oder Personen), Ergebnis, Gültigkeit mit Erinnerung, Übersicht wer was hat. Keine Lerninhalte mit Test.
+- **Dokumentationen:** Wiki mit selbst angelegten Kategorien (z. B. Gesetze, Funktionen), einfache Formatierung, Suche.
+
 ### Kalender und Benachrichtigungen
-- Monat, Woche, Tag, Agenda; eigene Termine plus abgeleitete (Zahlungen, Service, Schlüsselfristen, Wartung, Feiertage); iCal-Abo. Glocke mit Zähler. Täglicher Job erinnert an Termine, Service, Verbandskasten und Schlüsselrückgaben.
+- Monat, Woche, Tag, Agenda; eigene Termine plus abgeleitete (Zahlungen, Service, Schlüsselfristen, Wartung, Schulungstermine, Ablauf von Lizenzen und Schulungsnachweisen, Feiertage); iCal-Abo. Glocke mit Zähler. Täglicher Job erinnert an Termine, Service, Verbandskasten, Schlüsselrückgaben, ablaufende Lizenzen und Schulungsnachweise.
 
 ### Notizblock und ToDos
 - Beide solo oder pro Team. Team-Owner und -Editoren ändern, Viewer lesen nur und sehen keine Aktionen; Fremde sehen nichts.
@@ -137,6 +149,6 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 
 ## Offene Punkte
 
-- **Stunden für abgeschlossene Wochen** bringen keinen Bonus mehr. Das betrifft auch eine Nachtschicht von Sonntag auf Montag, die erst nach 03:45 ausgestempelt wird, weil der Eintrag am Starttag hängt.
+- **Stunden für abgeschlossene Wochen**, die nachgetragen werden, bringen keinen Bonus mehr. Nachtschichten sind davon seit Migration 017 nicht mehr betroffen. Einträge über Mitternacht von vor dieser Regel wurden nicht umgerechnet.
 - **Beträge** erscheinen überall in der Profilwährung, auch bei Konten in anderer Währung; umgerechnet wird nichts.
 - Nicht enthalten: SSO/OIDC, LDAP, Bankanbindung, MT940, S3/SFTP-Backupziele, E-Mail-Bestätigung bei Registrierung, Restore in der Oberfläche.

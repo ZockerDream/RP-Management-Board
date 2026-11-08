@@ -10,6 +10,29 @@ const PKIND = { employee: 'Mitarbeiter', external: 'Extern', family: 'Familie' }
 const INTERVAL = { once: 'Einmalig', daily: 'Täglich', weekly: 'Wöchentlich', monthly: 'Monatlich', yearly: 'Jährlich', custom: 'Benutzerdefiniert (Tage)' };
 const INTERVAL_UNITS = { daily: 'Tage', weekly: 'Wochen', monthly: 'Monate', yearly: 'Jahre', custom: 'Tage' };
 const EVENT = { issued: 'Ausgegeben', returned: 'Zurückgegeben', lost: 'Als verloren gemeldet' };
+const CASE_STATUS = { open: 'Offen', dormant: 'Ruhend', closed: 'Abgeschlossen' };
+const LICENSE_STATUS = { valid: 'Gültig', suspended: 'Gesperrt', revoked: 'Entzogen' };
+const TRAINING_RESULT = { registered: 'Angemeldet', passed: 'Bestanden', failed: 'Nicht bestanden', absent: 'Nicht erschienen' };
+
+// Personenübersicht: Akten, Einträge, Lizenzen und Schulungen zu einer Person, soweit die eigenen Rechte reichen
+async function showPersonRecord(personId) {
+  const r = await api.get(`/people/${personId}/record`);
+  const section = (title, list, row, none) => (list === null ? '' : `<h3>${title}</h3>${list.length ? list.map(row).join('') : `<p class="muted">${none}</p>`}`);
+  const item = (main, sub, href) => `<div class="list-item"><div class="grow">${href ? `<a href="${href}">${main}</a>` : main}<small>${sub}</small></div></div>`;
+  const expired = (date) => date && date < todayStr();
+  const html = [
+    `<p class="muted">${esc([PKIND[r.person.kind], r.person.function, r.person.active ? '' : 'inaktiv'].filter(Boolean).join(' · '))}</p>`,
+    section('Akten', r.case_files, (c) => item(`<b>${esc(c.file_number)}</b> ${esc(c.title)}`, `${CASE_STATUS[c.status]}${c.role ? ` · ${esc(c.role)}` : ''} · eröffnet ${fdate(c.opened_on)}`, `#/casefiles?id=${c.id}`), 'An keiner Akte beteiligt.'),
+    section('Einträge zur Person', r.entries, (e) => item(`<b>${fdate(e.entry_date)}</b> ${esc(e.kind || 'Eintrag')}`, `${esc(e.file_number)} · ${esc(e.body.length > 140 ? `${e.body.slice(0, 140)}…` : e.body)}`, `#/casefiles?id=${e.case_file_id}`), 'Keine Einträge.'),
+    section('Lizenzen', r.licenses, (l) => item(`<b>${esc(l.type_name)}</b>${l.number ? ` ${esc(l.number)}` : ''}`, `${LICENSE_STATUS[l.status]}${l.status === 'valid' && expired(l.valid_until) ? ' · abgelaufen' : ''} · ${l.valid_until ? `gültig bis ${fdate(l.valid_until)}` : 'unbefristet'}${l.status_reason ? ` · ${esc(l.status_reason)}` : ''}`, '#/licenses'), 'Keine Lizenzen.'),
+    section('Schulungen', r.trainings, (t) => item(`<b>${esc(t.training_name)}</b>`, `${TRAINING_RESULT[t.result]}${t.completed_on ? ` am ${fdate(t.completed_on)}` : t.session_date ? ` für ${fdate(t.session_date)}` : ''}${t.result === 'passed' ? ` · ${t.valid_until ? `${expired(t.valid_until) ? 'abgelaufen' : 'gültig bis'} ${fdate(t.valid_until)}` : 'unbefristet'}` : ''}`, null), 'Keine Schulungen.'),
+  ].join('');
+  const done = openForm({ title: r.person.name, wide: true, submit: 'Schließen', fields: [{ type: 'html', html: `<div class="person-record">${html}</div>` }], onSubmit: async () => true });
+  // Ein Link führt auf eine andere Seite: das Fenster schließt sich dabei
+  const modal = $('#modals .modal:last-child');
+  modal?.addEventListener('click', (event) => { if (event.target.closest('a[href^="#/"]')) $('[data-x]', modal).click(); });
+  await done;
+}
 const ASSET_TYPE = { house: 'Haus', vehicle: 'Fahrzeug', key: 'Schlüssel' };
 
 const costFields = (o, budgets) => [
@@ -221,7 +244,7 @@ export async function render(view, params, section) {
     },
     async people(el) {
       await fetchAll();
-      el.innerHTML = `<div class="card">${D.people.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Art</th><th>Funktion</th><th>Kontakt</th><th>Schlüssel</th><th>Status</th><th></th></tr></thead><tbody>${D.people.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td>${PKIND[p.kind]}</td><td>${esc(p.function)}</td><td>${esc(p.email || p.phone || '–')}</td><td>${p.keys}</td><td><span class="tag ${p.active ? 'ok' : 'warn'}">${p.active ? 'Aktiv' : 'Inaktiv'}</span></td><td style="white-space:nowrap">${actions(p, 'person')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Personen.')}</div>`;
+      el.innerHTML = `<div class="card">${D.people.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Art</th><th>Funktion</th><th>Kontakt</th><th>Schlüssel</th><th>Status</th><th></th></tr></thead><tbody>${D.people.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td>${PKIND[p.kind]}</td><td>${esc(p.function)}</td><td>${esc(p.email || p.phone || '–')}</td><td>${p.keys}</td><td><span class="tag ${p.active ? 'ok' : 'warn'}">${p.active ? 'Aktiv' : 'Inaktiv'}</span></td><td style="white-space:nowrap"><button class="btn ghost sm" data-record="${p.id}">Übersicht</button> ${actions(p, 'person')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Personen.')}</div>`;
     },
     async costs(el) {
       const c = await api.get('/assets/costs');
@@ -363,6 +386,7 @@ export async function render(view, params, section) {
       else if (g('[data-reveal-pin]')) await pinAccess(g('[data-reveal-pin]').dataset.revealPin, true);
       else if (g('[data-set-pin]')) { await pinAccess(g('[data-set-pin]').dataset.setPin, false); show('properties'); }
       else if (g('[data-qr]')) await showKeyQr(g('[data-qr]').dataset.qr);
+      else if (g('[data-record]')) await showPersonRecord(g('[data-record]').dataset.record);
       else if (g('#scan-keys')) await scanKeyQr();
       else if (g('#a-csv')) await api.download('/admin/audit/export.csv', 'audit.csv');
       if (changed) show();

@@ -24,6 +24,10 @@ Webanwendung zur Verwaltung persönlicher und geteilter Konten, kombiniert mit Z
 | Sport | Laufen, Schwimmen, Biken | Strecken des Teams mit gemeinsamer Bestenliste |
 | Object Management | Fahrzeuge, Häuser, Personen, Schlüssel | Je eine eigene Seite |
 | | Verwaltung | Übersicht, Kosten, Protokoll, Auditlog |
+| Organisation | Akten | Vorgänge mit Aktenzeichen, beteiligten Personen, Einträgen und Anhängen |
+| | Schulungen | Schulungen mit Terminen, Teilnahme, Ergebnis und Nachweis; Übersicht, wer was hat |
+| | Lizenzen | Lizenzarten und Lizenzen von Personen mit Gültigkeit, Sperre und Entzug |
+| | Dokumentationen | Nachschlagewerke wie Gesetze und Funktionen in selbst angelegten Kategorien |
 | Administration | User-Management | Benutzer, Rollen & Rechte, Gruppen, Teams (nur Admins) |
 | | Server-Management | Übersicht, Sicherheit & Einstellungen, System & Backups, Integrationen, Audit-Log (nur Admins) |
 | | Tickets | Gemeldete Fehler (nur Admins) |
@@ -77,7 +81,7 @@ Vorlagen Monatsübersicht, Kategorien-Analyse, Objektkosten; Export; geplante Be
 Teams mit Mitgliedern und Teamrollen (Owner, Editor, Viewer), Einladung per E-Mail, geteilte Konten, teamweit sichtbare Objekte und Sportstrecken. Team-Owner und -Editoren können die Arbeitszeiten aller Teammitglieder einsehen und bearbeiten sowie Mitarbeitereinstellungen verwalten.
 
 ### 4.9 Zeiterfassung und Stundenzettel
-Arbeitszeit kann unabhängig von Projekten per Start-/Pause-/Stopp-Timer oder manuell erfasst werden; Projektzeiten bleiben separat zugeordnet. Monatliche Stundenzettel zeigen allgemeine und projektbezogene Einträge getrennt sowie Gesamtstunden, Sollzeit, Überstunden und gutgeschriebene Vergütung. Das Monats-Soll ist Wochen-Soll × Kalendertage / 7. Pro Mitarbeiter gelten Festgehalt pro Tag, Wochen-Sollzeit und Bonus in Prozent des Festgehalts. Das Festgehalt wird unabhängig von den Stunden täglich einschließlich Wochenende um 03:45 Uhr für den Vortag auf ein eigenes persönliches Konto gebucht. Nur Stunden über dem Wochen-Soll (Montag bis Sonntag) bringen je Stunde zusätzlich den Bonus; montags beginnt die Zählung neu. Beispiel mit 1.669 Festgehalt, 13 Stunden Soll und 17 %: Bei 8 Stunden gibt es täglich 1.669, bei 15 Stunden kommen 2 × 283,73 dazu. Nachgetragene Stunden derselben Woche kommen mit der nächsten Gutschrift dazu; abgeschlossene Wochen werden nicht nachberechnet. Das Gehaltskonto wählt jeder Mitarbeiter selbst, auf dem Stundenzettel unter „Gehalt einstellen“ oder im Profil. Wählbar sind eigene persönliche Konten in Profilwährung; Team-Konten und Konten in anderer Währung stehen mit Begründung in der Liste, fehlt ein passendes Konto, nennt ein Hinweis den nächsten Schritt.
+Arbeitszeit kann unabhängig von Projekten per Start-/Pause-/Stopp-Timer oder manuell erfasst werden; Projektzeiten bleiben separat zugeordnet. Monatliche Stundenzettel zeigen allgemeine und projektbezogene Einträge getrennt sowie Gesamtstunden, Sollzeit, Überstunden und gutgeschriebene Vergütung. Das Monats-Soll ist Wochen-Soll × Kalendertage / 7. Pro Mitarbeiter gelten Festgehalt pro Tag, Wochen-Sollzeit und Bonus in Prozent des Festgehalts. Das Festgehalt wird unabhängig von den Stunden täglich einschließlich Wochenende um 03:45 Uhr für den Vortag auf ein eigenes persönliches Konto gebucht. Nur Stunden über dem Wochen-Soll (Montag bis Sonntag) bringen je Stunde zusätzlich den Bonus; montags beginnt die Zählung neu. Beispiel mit 1.669 Festgehalt, 13 Stunden Soll und 17 %: Bei 8 Stunden gibt es täglich 1.669, bei 15 Stunden kommen 2 × 283,73 dazu. Nachgetragene Stunden derselben Woche kommen mit der nächsten Gutschrift dazu; abgeschlossene Wochen werden nicht nachberechnet. Schichten über Mitternacht zählen am Kalendertag, an dem gearbeitet wurde: Timer und manuelle Einträge werden an Mitternacht in einen Eintrag je Tag geteilt (manuell: Ende vor Beginn; Stunden und Pause anteilig nach Dauer; beim Timer zählt eine laufende Pause genau, frühere Pausen anteilig). In der Nacht von Sonntag auf Montag gehören die Stunden nach Mitternacht damit zur neuen Woche. Der Gehaltslauf prüft stündlich und bucht den Vortag ab 03:45 Uhr; läuft dann noch ein Timer, der vor weniger als 24 Stunden gestartet wurde, wartet sein Starttag bis zum Ausstempeln. Timer über 24 Stunden lassen sich nicht ausstempeln, nur verwerfen. Das Gehaltskonto wählt jeder Mitarbeiter selbst, auf dem Stundenzettel unter „Gehalt einstellen“ oder im Profil. Wählbar sind eigene persönliche Konten in Profilwährung; Team-Konten und Konten in anderer Währung stehen mit Begründung in der Liste, fehlt ein passendes Konto, nennt ein Hinweis den nächsten Schritt.
 
 ## 5. Sport
 
@@ -95,7 +99,7 @@ Jeder Datensatz ist privat oder pro Datensatz einem Team freigegeben.
 
 1. **Fahrzeuge** – Marke/Modell, Kennzeichen, Besitzer, Service-Termin und/oder -Kilometerstand, Verbandskasten-Ablaufdatum, Status (verfügbar, im Einsatz, Werkstatt, außer Betrieb) und zugeordnete Schlüssel. Eine Versicherungsangabe gibt es nicht.
 2. **Häuser** – Name, Typ (Wohnhaus, Büro, Lager, Ferienobjekt), Adresse, verantwortliche Person, Wartung, verschlüsselter Tür-PIN (Anzeige nach Passwort-/2FA-Bestätigung und protokolliert), Notizen und zugeordnete Schlüssel.
-3. **Personen** – Mitarbeitende, Externe und Familie, auch ohne Panel-Zugang. Dient dem Nachverfolgen, wer was hat.
+3. **Personen** – Mitarbeitende, Externe und Familie, auch ohne Panel-Zugang. Dient dem Nachverfolgen, wer was hat. Die „Übersicht“ einer Person zeigt ihre Akten, Einträge, Lizenzen und Schulungen, soweit die eigenen Rechte reichen. Personen mit Akten, Lizenzen oder Schulungsnachweisen lassen sich nicht löschen und nicht in einen anderen Bereich verschieben, nur deaktivieren. Wird ein ganzes Team gelöscht, gehen seine Personen samt Unterlagen mit.
 4. **Schlüssel** – gehört zu einem Haus oder Fahrzeug, hat eine frei eingebbare Art und eine Anzahl Kopien. Inventur zeigt Gesamtbestand, Ausgaben und Verluste; QR-Codes öffnen den Schlüssel. Ausgabe und Rückgabe mit Datum, Person, Quittierung und optionaler Rückgabefrist. Status: ausgegeben, im Safe, überfällig, verloren.
 5. **Verwaltung** – Übersicht (KPIs, Handlungsbedarf), Kosten, Protokoll je Schlüssel und Auditlog (mit Recht `audit:read`).
 6. **Optionaler Preis & Kontoverfolgung** – Haus, Fahrzeug und Schlüssel haben ein optionales Preisfeld: Betrag, Intervall (einmalig, täglich, wöchentlich, monatlich, jährlich oder benutzerdefinierte Tage), Abstand, Konto, Kategorie, Schalter „im Tracking“. Mit Preis erzeugt das System bei „einmalig“ genau eine Buchung, sonst einen Dauerauftrag; Preisänderungen aktualisieren den Auftrag statt Duplikate zu erzeugen.
@@ -104,8 +108,8 @@ Jeder Datensatz ist privat oder pro Datensatz einem Team freigegeben.
 
 Ansichten Monat, Woche, Tag und Agenda, Navigation vor/zurück/heute.
 
-- **Automatische Termine** (abgeleitet, nur lesbar): Daueraufträge und Zahlungen, Service der Fahrzeuge, Rückgabefristen von Schlüsseln, Wartungen von Häusern, Feiertage.
-- **Erinnerungen:** Ein täglicher Job weist auf Termine, Fahrzeug-Service, Verbandskasten und Schlüsselrückgaben hin; sie erscheinen als Benachrichtigung in der Glocke.
+- **Automatische Termine** (abgeleitet, nur lesbar): Daueraufträge und Zahlungen, Service der Fahrzeuge, Rückgabefristen von Schlüsseln, Wartungen von Häusern, Schulungstermine, Ablauf von Lizenzen und Schulungsnachweisen, Feiertage.
+- **Erinnerungen:** Ein täglicher Job weist auf Termine, Fahrzeug-Service, Verbandskasten, Schlüsselrückgaben sowie ablaufende Lizenzen und Schulungsnachweise hin (30 Tage vorher und nach dem Ablauf); sie erscheinen als Benachrichtigung in der Glocke.
 - **Eigene Termine:** Team oder Privat, ganztägig oder mit Beginn/Ende, Wiederholung mit Abstand, Erinnerung (1/3/7/14 Tage vorher), optionaler Betrag, Notiz. Monats- und Jahresserien fallen in kürzeren Zeiträumen auf den letzten gültigen Tag.
 - **iCal-Abo** zum Einbinden in externe Kalender; Google und Microsoft können lesend importiert werden.
 
@@ -117,7 +121,16 @@ Beide gehören entweder einer Person (Solo) oder einem Team. Team-Owner und -Edi
 - **ToDos:** Aufgabe, Notiz, optionale Deadline, abhaken mit Name und Zeitpunkt. Die Liste gruppiert nach Überfällig, Heute, Demnächst, Ohne Deadline und Erledigt.
 - **Benachrichtigungen:** Zu offenen ToDos mit Deadline erscheint einen Tag vorher, am Fälligkeitstag und einmal bei Überfälligkeit eine Meldung in der Glocke. Team-ToDos erreichen alle Teammitglieder. Art `todo_due`, in den Einstellungen abschaltbar und optional per E-Mail.
 
-## 9. Benutzer-Einstellungen
+## 9. Akten, Schulungen, Lizenzen und Dokumentationen
+
+Alle vier gehören einer Person (Solo) oder einem Team; die Sichtbarkeit wird beim Anlegen gewählt und bleibt danach fest. Team-Owner und -Editoren ändern, Viewer lesen, Fremde sehen nichts. Zusätzlich gelten die Rechte `casefile:*`, `training:*`, `license:*` und `doc:*` (Systemrollen Admin und User haben sie). Personen, Teilnehmer und Lizenzinhaber müssen zum selben Bereich gehören: im Team die Team-Personen und -Mitglieder, solo die eigenen Personen und man selbst. Änderungen stehen im Audit-Log.
+
+- **Akten:** Aktenzeichen (frei oder automatisch `Jahr-laufende Nummer`, eindeutig je Bereich), Titel, Sachverhalt, Status offen, ruhend oder abgeschlossen mit Eröffnungs- und Abschlussdatum. Beteiligte Personen mit Rolle, chronologische Einträge mit Datum, Art und optional betroffener Person, Anhänge (PDF, PNG, JPEG wie bei Belegen). Wird eine Person aus der Akte entfernt, bleiben ihre Einträge ohne Personenbezug erhalten. Suche über Aktenzeichen, Titel, Sachverhalt und beteiligte Personen.
+- **Lizenzen:** Frei anlegbare Lizenzarten mit optionaler Standard-Gültigkeit in Monaten. Eine Lizenz gehört einer Person und hat Nummer, Aussteller, Ausstellungsdatum, Ablauf (leer: Standard-Gültigkeit, auch unbefristet möglich) und Status gültig, gesperrt oder entzogen mit Begründung. Angezeigt wird zusätzlich „läuft bald ab“ (30 Tage) und „abgelaufen“. Verlängern rechnet die Standard-Gültigkeit ab dem bisherigen Ablauf oder ab heute. Benachrichtigungsart `license_expiry`.
+- **Schulungen:** Name, Beschreibung, optionale Gültigkeit in Monaten, aktiv oder inaktiv. Termine mit Datum, Zeit, Ort und Ausbilder. Teilnehmer sind Benutzer oder Personen, je Termin höchstens einmal; Ergebnis angemeldet, bestanden, nicht bestanden oder nicht erschienen. Ein bestandener Nachweis gilt ab dem Abschlussdatum (leer: Termin oder heute) für die Gültigkeit der Schulung. Die Übersicht zeigt je Teilnehmer und Schulung den neuesten bestandenen Nachweis. Benachrichtigungsart `training_expiry`, nur für den jeweils neuesten Nachweis.
+- **Dokumentationen:** Kategorien legen die Benutzer selbst an (z. B. Gesetze, Funktionen) und sortieren sie. Seiten mit Titel und Text in einfacher Formatierung (Überschriften, fett, kursiv, Listen, Zitate, Trennlinien, http(s)-Links), anheftbar, durchsuchbar über Titel und Text. Seiten lassen sich nur innerhalb ihres Bereichs verschieben; eine Kategorie lässt sich erst löschen, wenn sie leer ist.
+
+## 10. Benutzer-Einstellungen
 
 | Tab | Inhalt |
 |---|---|
@@ -128,20 +141,20 @@ Beide gehören entweder einer Person (Solo) oder einem Team. Team-Owner und -Edi
 | Sitzungen | Aktive Sitzungen ansehen und beenden |
 | API & Kalender | API-Schlüssel, iCal-Abo, Google-/Microsoft-Verbindung |
 
-## 10. Datenschutz und Rechtliches
+## 11. Datenschutz und Rechtliches
 
 - **Impressum:** Angaben aus der Datei `.env-impressum`; leere Felder werden ausgeblendet.
 - **Datenschutzerklärung:** öffentliche Seite mit Verantwortlichem, Rechtsgrundlagen, Daten, Cookies, Dritten, Speicherdauer und Betroffenenrechten.
 - **Gravatar:** nur nach aktiver Einwilligung, Standard aus. Bestehende Einstellungen wurden per Migration zurückgesetzt.
 - Nur technisch notwendige Speicherung, kein Tracking.
 
-## 11. Design
+## 12. Design
 
 - Schlicht und flach, wenige Icons, modulare Karten, SVG-Diagramme.
 - Sechs Akzentfarben (Indigo, Smaragd, Ozean, Rosé, Bernstein, Mono), jeweils hell und dunkel; optional folgt der Modus dem System.
 - Bedienbar bis 390 px Breite; breite Tabellen scrollen innerhalb ihrer Karte.
 
-## 12. Architektur
+## 13. Architektur
 
 ```
 Browser ──HTTP(S)──> api (SPA + REST API)
@@ -151,8 +164,9 @@ Browser ──HTTP(S)──> api (SPA + REST API)
 
 Ein vorhandener Betreiber-Proxy kann optional TLS terminieren; er ist nicht Bestandteil des Repositories. Details stehen in [TECHNICAL.md](TECHNICAL.md).
 
-## 13. Offene Punkte
+## 14. Offene Punkte
 
-- Stunden für abgeschlossene Wochen bringen keinen Bonus mehr, auch nicht bei einer Nachtschicht von Sonntag auf Montag, die erst nach 03:45 ausgestempelt wird.
+- Stunden, die für eine abgeschlossene Woche nachgetragen werden, bringen keinen Bonus mehr.
+- Arbeitszeiten, die vor der Aufteilung an Mitternacht erfasst wurden, bleiben unverändert am Starttag.
 - Beträge erscheinen überall in der Profilwährung, auch bei Konten in anderer Währung; umgerechnet wird nichts.
 - Nicht enthalten: SSO/OIDC, LDAP, Bankanbindung, MT940, S3/SFTP-Backupziele, E-Mail-Bestätigung bei Registrierung, Restore in der Oberfläche.

@@ -203,7 +203,17 @@ export default async function routes(app) {
       many('SELECT id,title,description,steps,github_url,created_at FROM bug_reports WHERE user_id=$1 ORDER BY created_at', [req.user.id]),
       many('SELECT report_id,body,created_at FROM bug_report_comments WHERE user_id=$1 ORDER BY created_at', [req.user.id]),
     ]);
-    return { exported_at: new Date().toISOString(), user: u, budgets, transactions, work_entries, work_projects, work_timer: timer, contacts, calendar_events, notes, todos, bug_reports, bug_report_comments };
+    // Eigene Schulungsteilnahmen und selbst angelegte Akten, Lizenzarten, Schulungen und Dokumentationen
+    const [training_records, case_files, license_types, trainings, doc_categories] = await Promise.all([
+      many(`SELECT r.id, tr.name training, r.result, r.completed_on, r.valid_until, s.session_date, r.created_at FROM training_records r
+        JOIN trainings tr ON tr.id=r.training_id LEFT JOIN training_sessions s ON s.id=r.session_id WHERE r.user_id=$1 ORDER BY r.created_at`, [req.user.id]),
+      many('SELECT id,file_number,title,description,status,opened_on,closed_on,created_at FROM case_files WHERE owner_user_id=$1 ORDER BY created_at', [req.user.id]),
+      many('SELECT id,name,description,validity_months,created_at FROM license_types WHERE owner_user_id=$1 ORDER BY name', [req.user.id]),
+      many('SELECT id,name,description,validity_months,active,created_at FROM trainings WHERE owner_user_id=$1 ORDER BY name', [req.user.id]),
+      many(`SELECT c.id, c.name, COALESCE(json_agg(json_build_object('title', p.title, 'body', p.body, 'updated_at', p.updated_at) ORDER BY p.title) FILTER (WHERE p.id IS NOT NULL), '[]') pages
+        FROM doc_categories c LEFT JOIN doc_pages p ON p.category_id=c.id WHERE c.owner_user_id=$1 GROUP BY c.id ORDER BY c.name`, [req.user.id]),
+    ]);
+    return { exported_at: new Date().toISOString(), user: u, budgets, transactions, work_entries, work_projects, work_timer: timer, contacts, calendar_events, notes, todos, bug_reports, bug_report_comments, training_records, case_files, license_types, trainings, doc_categories };
   });
 }
 
