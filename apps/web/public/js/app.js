@@ -2,9 +2,9 @@ import { api, refresh, setToken, onLogout, hasToken } from './api.js';
 import { $, $$, esc, toast, setCurrency, bindPasswordToggles, passwordToggleButton } from './ui.js';
 import { md5 } from './md5.js';
 
-export const state = { me: null, perms: new Set(), mfaSetup: false, appName: 'Budget Manager' };
+export const state = { me: null, perms: new Set(), mfaSetup: false, appName: 'RP-Management-Board' };
 export function applyAppName(name) {
-  state.appName = (name || '').trim() || 'Budget Manager';
+  state.appName = (name || '').trim() || 'RP-Management-Board';
   document.title = state.appName;
   document.querySelectorAll('[data-app-name]').forEach((n) => { n.textContent = state.appName; });
 }

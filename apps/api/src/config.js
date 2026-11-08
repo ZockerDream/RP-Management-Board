@@ -42,7 +42,7 @@ export const config = {
     secure: (env.SMTP_SECURE || 'false') === 'true',
     user: env.SMTP_USER || '',
     pass: env.SMTP_PASSWORD || '',
-    from: env.SMTP_FROM || 'Budget Manager <noreply@localhost>',
+    from: env.SMTP_FROM || 'RP-Management-Board <noreply@localhost>',
   },
   oauth: {
     googleClientId: env.GOOGLE_CLIENT_ID || '',
@@ -52,7 +52,7 @@ export const config = {
   },
   githubIssues: {
     token: env.GITHUB_ISSUES_TOKEN || '',
-    repository: env.GITHUB_ISSUES_REPOSITORY || 'ZockerDream/budget-manager',
+    repository: env.GITHUB_ISSUES_REPOSITORY || 'ZockerDream/RP-Management-Board',
   },
   imprint: {
     name: env.IMPRINT_NAME || '',

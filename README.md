@@ -1,4 +1,4 @@
-# Budget Manager
+# RP-Management-Board
 
 Selbst gehostete Verwaltung persönlicher und geteilter Konten: Buchungen, Ausgaben-Budgets, Daueraufträge, Sparziele, Zeiterfassung mit Gehaltsgutschrift, Sport-Bestenlisten, Berichte, Teams, Kalender, Notizblock, ToDos mit Deadline-Benachrichtigung, Google-/Outlook-Sync, Objektverwaltung (Fahrzeuge, Häuser, Personen, Schlüssel), Rollen & Rechte, 2FA und verschlüsselte Backups. Konzept: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Anleitung für KI-Assistenten mit allen Anforderungen: [AGENTS.md](AGENTS.md), Tests: [tests/e2e/README.md](tests/e2e/README.md).
 
@@ -18,7 +18,7 @@ Voraussetzungen: Docker ≥ 24 mit Compose ≥ 2.24. Ein Reverse-Proxy ist optio
 
 ```bash
 git clone <repository-url>
-cd budget-manager
+cd RP-Management-Board
 cp .env.example .env
 ./scripts/gen-secrets.sh        # trägt DB_PASSWORD, JWT_SECRET, ENCRYPTION_KEY, ADMIN_PASSWORD in .env ein (oder manuell setzen)
 $EDITOR .env                    # APP_URL (öffentliche URL), ADMIN_EMAIL, SMTP_* anpassen
@@ -113,8 +113,8 @@ Sichere zusätzlich `.env` (insbesondere `ENCRYPTION_KEY`) und `.env-impressum` 
 Nicht enthalten: SSO/OIDC, LDAP, Bankanbindung (FinTS/PSD2), MT940-Import, S3/SFTP-Backupziele, E-Mail-Bestätigungsfluss bei Registrierung.
 
 ## Repository
-Remote ist `git@github.com:ZockerDream/budget-manager.git` (Branch `develop`):
+Remote ist `git@github.com:ZockerDream/RP-Management-Board.git` (Branch `develop`):
 
 ```bash
-git clone -b develop git@github.com:ZockerDream/budget-manager.git
+git clone -b develop git@github.com:ZockerDream/RP-Management-Board.git
 ```

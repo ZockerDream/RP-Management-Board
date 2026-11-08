@@ -1,4 +1,4 @@
-# Budget Manager – Anleitung für KI-Assistenten
+# RP-Management-Board – Anleitung für KI-Assistenten
 
 Diese Datei gilt für jede KI, die an diesem Projekt weiterarbeitet (`CLAUDE.md` verweist nur hierher). Sie ist die maßgebliche Quelle für Anforderungen, Regeln und Testablauf; halte sie bei jeder Änderung aktuell.
 
@@ -12,14 +12,14 @@ Diese Datei gilt für jede KI, die an diesem Projekt weiterarbeitet (`CLAUDE.md`
 
 Selbst gehostete deutschsprachige Web-App: Finanzen, Zeiterfassung, Sport, Objekte (Fahrzeuge, Häuser, Personen, Schlüssel), Teams, Kalender und Administration. Betrieb per Docker Compose.
 
-Die Anforderungen wurden aus Code, Doku und Git-Historie abgeleitet (Stand 2026-11-06, Migration 015); die frühen Originalgespräche mit dem Auftraggeber lagen nicht vor. Im Zweifel beim Auftraggeber nachfragen und hier ergänzen. Fachliche Details: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Betrieb: [README.md](README.md).
+Die Anforderungen wurden aus Code, Doku und Git-Historie abgeleitet (Stand 2026-11-08, Migration 016); die frühen Originalgespräche mit dem Auftraggeber lagen nicht vor. Im Zweifel beim Auftraggeber nachfragen und hier ergänzen. Fachliche Details: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Betrieb: [README.md](README.md).
 
 ## Arbeitsweise
 
 - Mit dem Auftraggeber **auf Deutsch** kommunizieren. UI, Hilfe, Fehlermeldungen und Doku sind deutsch (echte Umlaute, Du-Form).
 - Fachbegriffe sauber trennen: **Konto** = Finanzbereich mit Kontostand (Code/DB/API: `budgets`, `budget_id`). **Budget** = Ausgabenlimit pro Zeitraum (`spending_budgets`). Die Namen im Code nicht „korrigieren“.
 - Bei Funktionsänderungen immer mitpflegen: [help.js](apps/web/public/js/pages/help.js), `CONCEPT.md`, `TECHNICAL.md`, `README.md`, bei neuen personenbezogenen Daten auch [privacy.js](apps/web/public/js/pages/privacy.js), und diese Datei.
-- Commit und Push nur auf Anweisung. Hauptbranch ist `develop` (der lokale Branch `main` trackt `origin/develop`); Änderungen über `feature/*`-Branches und Pull Requests, direkt auf `develop` nur auf ausdrückliche Anweisung. Remote: `git@github.com:ZockerDream/budget-manager.git`.
+- Commit und Push nur auf Anweisung. Hauptbranch ist `develop` (der lokale Branch `main` trackt `origin/develop`); Änderungen über `feature/*`-Branches und Pull Requests, direkt auf `develop` nur auf ausdrückliche Anweisung. Remote: `git@github.com:ZockerDream/RP-Management-Board.git`.
 - `.env` und `.env-impressum` enthalten Secrets bzw. private Daten und werden nie committet. Änderungen nur in `.env.example` / `.env-impressum.example` mit Platzhaltern.
 
 ## Stack
@@ -50,6 +50,7 @@ Node 22, Fastify 5, reines ESM-JavaScript, `zod`, `pg` mit handgeschriebenem SQL
 - **Mit fester Adresse wären neue Navigation und alter Code gemischt:** Genau das passierte beim Update von Migration 009 auf 013: Alle neuen Seiten leiteten aufs Dashboard um, das Impressum zeigte die alte Seite. Frische Testläufe sehen so etwas nie, deshalb gehört `upgrade.mjs` vor jedes Release.
 - **`.env-impressum` ist nicht in Git:** Sie muss auf jedem Server einzeln existieren und gefüllt sein. Das Update überträgt sie nicht; `update.sh` warnt, wenn das Impressum leer ist.
 - **Laufende Instanz:** Vor Tests prüfen, welchen Code die Container wirklich enthalten; das Image wird nicht automatisch neu gebaut.
+- **Der alte Name `budget-manager` bleibt absichtlich an einigen Stellen:** App und GitHub-Repo heißen `RP-Management-Board` (seit Migration 016). Compose-Projekt (`name:` in `docker-compose.yml`), Container und Image `budget-manager-api` behalten den alten Namen: Der Projektname bestimmt die Volumes (`budget-manager_db_data` usw.), ihn zu ändern hieße, mit leerer Datenbank zu starten. Weil er fest gesetzt ist, darf das Verzeichnis beliebig heißen. Ebenso bleiben die iCal-UIDs (`…@budget-manager`, sonst erscheinen abonnierte Termine doppelt) und die Kennung `BMB1` verschlüsselter Backups (sonst lassen sich alte Backups nicht mehr entschlüsseln).
 - **Admin-IP-Allowlist:** Wird nur gespeichert, wenn die eigene IP enthalten ist. Ausgesperrt? Direkt in der DB: `DELETE FROM settings WHERE key='security.admin_ip_allowlist'`.
 - **Teil-Updates nur mit `patchSchema()`** (`validation.js`), nie mit `.partial()`: Zod 4 setzt dort Standardwerte, ein PATCH würde fehlende Felder still überschreiben. Schemas mit `.refine()` auf Objektebene haben kein `.shape` und lassen sich nicht ableiten; die Grundform getrennt halten (`keyFields` in `objects.js`).
 - **Validierungsmeldungen:** Der Fehler-Handler übersetzt Zod-Fehler in `validation.js`. Neue API-Felder dort in `LABELS` eintragen, sonst heißt es nur „Eingabe ist ungültig“.

@@ -158,7 +158,7 @@ export default async function routes(app) {
     const from = addInterval(today(), 'monthly', -1);
     const to = addInterval(today(), 'yearly', 1);
     const feed = (await buildFeed(u.id, from, to)).filter((e) => e.type !== 'holiday');
-    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Budget Manager//DE', 'CALSCALE:GREGORIAN', `X-WR-CALNAME:Budget Manager`];
+    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//RP-Management-Board//DE', 'CALSCALE:GREGORIAN', `X-WR-CALNAME:RP-Management-Board`];
     for (const e of feed) {
       const d = e.date.replaceAll('-', '');
       lines.push('BEGIN:VEVENT', `UID:${e.id}@budget-manager`, `DTSTAMP:${new Date().toISOString().replace(/[-:]|\.\d{3}/g, '')}`);

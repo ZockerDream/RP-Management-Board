@@ -22,7 +22,7 @@ export async function createInvitation({ email, roleId, teamId, teamRole: tr, in
   await q("INSERT INTO invitations(email, role_id, team_id, team_role, token_hash, invited_by, expires_at) VALUES ($1,$2,$3,$4,$5,$6, now() + interval '7 days')",
     [email, roleId || null, teamId || null, tr || 'viewer', sha256(token), invitedBy]);
   const link = `${config.appUrl}/#/invite?token=${token}`;
-  const sent = await sendMail({ to: email, subject: 'Einladung zu Budget Manager', text: `Du wurdest zu Budget Manager eingeladen.\n\nKonto anlegen (7 Tage gültig):\n${link}\n`, log });
+  const sent = await sendMail({ to: email, subject: 'Einladung zu RP-Management-Board', text: `Du wurdest zu RP-Management-Board eingeladen.\n\nKonto anlegen (7 Tage gültig):\n${link}\n`, log });
   return { link, mail_sent: sent };
 }
 

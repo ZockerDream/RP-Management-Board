@@ -13,7 +13,7 @@ const MAGIC = Buffer.from('BMB1');
 export async function runBackup(userId, log = console) {
   fs.mkdirSync(config.backupDir, { recursive: true, mode: 0o700 });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const filename = `budget-manager-${stamp}.dump${config.backupEncrypt ? '.enc' : ''}`;
+  const filename = `rp-management-board-${stamp}.dump${config.backupEncrypt ? '.enc' : ''}`;
   const file = path.join(config.backupDir, filename);
   const rec = await one('INSERT INTO backups(filename, created_by) VALUES ($1,$2) RETURNING id', [filename, userId || null]);
   try {
