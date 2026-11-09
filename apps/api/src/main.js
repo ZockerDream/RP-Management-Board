@@ -114,7 +114,7 @@ await waitForDb().catch((e) => {
 await migrate(app.log);
 await seed(app.log);
 
-const modules = ['auth', 'me', 'finance', 'teams', 'objects', 'calendar', 'admin', 'attachments', 'work', 'integrations', 'spending', 'sport', 'notes', 'todos', 'casefiles', 'case-records', 'case-reports', 'person-files', 'licenses', 'trainings', 'docs', 'public'];
+const modules = ['auth', 'me', 'finance', 'teams', 'objects', 'calendar', 'admin', 'attachments', 'work', 'integrations', 'spending', 'sport', 'notes', 'todos', 'casefiles', 'case-records', 'case-reports', 'person-files', 'licenses', 'trainings', 'training-exams', 'docs', 'public'];
 await app.register(
   async (api) => {
     for (const m of modules) await api.register((await import(`./routes/${m}.js`)).default);

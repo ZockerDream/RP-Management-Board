@@ -42,6 +42,9 @@ const LABELS = {
   fine: 'Geldstrafe', jail: 'Haft', points: 'Punkte', category: 'Kategorie', storage: 'Lagerort', found_at: 'Fundzeit', found_where: 'Fundort',
   action: 'Vorgang', reason: 'Begründung', close_note: 'Vermerk', warnings: 'Warnhinweise', blood_type: 'Blutgruppe',
   allergies: 'Allergien', conditions: 'Vorerkrankungen', medications: 'Medikamente', emergency_contact: 'Notfallkontakt',
+  // Test im Tool (Schulungen)
+  exam_required: 'Test nötig', exam_pass_percent: 'Bestehensgrenze', exam_time_limit: 'Zeitlimit', exam_max_attempts: 'Versuche',
+  exam_shuffle: 'Mischen', exam_after_session: 'Test nach Teilnahme', options: 'Antworten', answers: 'Antworten', explanation: 'Erklärung',
 };
 
 function subject(path) {
