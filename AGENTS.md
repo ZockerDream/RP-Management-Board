@@ -10,14 +10,14 @@ Diese Datei gilt für jede KI, die an diesem Projekt weiterarbeitet (`CLAUDE.md`
 4. Die Punkte unter „Offene Punkte“ am Ende kennen, bevor du dort etwas änderst oder neu erfindest.
 5. Vor dem Abschluss einer Änderung: Tests laufen lassen (siehe „Testen“) und Doku mitpflegen. Ergebnisse ehrlich berichten, auch Fehlschläge und Nicht-Getestetes.
 
-Selbst gehostete deutschsprachige Web-App: Finanzen, Zeiterfassung, Sport, Objekte (Fahrzeuge, Häuser, Personen, Schlüssel), Akten, Schulungen, Lizenzen, Dokumentationen, Teams, Kalender und Administration. Betrieb per Docker Compose.
+Selbst gehostete deutschsprachige Web-App: Finanzen, Zeiterfassung, Sport, Objekte (Fahrzeuge, Häuser, Personen, Schlüssel), Akten, Schulungen, Lizenzen, Dokumentationen, Organisationen mit Rängen, Gruppen und Rechten, Kalender und Administration. Betrieb per Docker Compose.
 
-Die Anforderungen wurden aus Code, Doku und Git-Historie abgeleitet (Stand 2026-11-08, Migration 016); die frühen Originalgespräche mit dem Auftraggeber lagen nicht vor. Akten, Schulungen, Lizenzen, Dokumentationen und die Nachtschicht-Regel (Migration 017) hat der Auftraggeber am 2026-11-08 direkt entschieden. Im Zweifel beim Auftraggeber nachfragen und hier ergänzen. Fachliche Details: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Betrieb: [README.md](README.md).
+Die Anforderungen wurden aus Code, Doku und Git-Historie abgeleitet (Stand 2026-11-08, Migration 016); die frühen Originalgespräche mit dem Auftraggeber lagen nicht vor. Akten, Schulungen, Lizenzen, Dokumentationen und die Nachtschicht-Regel (Migration 017) hat der Auftraggeber am 2026-11-08 direkt entschieden, Organisationen mit Rängen, Gruppen und Rechten (Migration 018) am 2026-11-09. Im Zweifel beim Auftraggeber nachfragen und hier ergänzen. Fachliche Details: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Betrieb: [README.md](README.md).
 
 ## Arbeitsweise
 
 - Mit dem Auftraggeber **auf Deutsch** kommunizieren. UI, Hilfe, Fehlermeldungen und Doku sind deutsch (echte Umlaute, Du-Form).
-- Fachbegriffe sauber trennen: **Konto** = Finanzbereich mit Kontostand (Code/DB/API: `budgets`, `budget_id`). **Budget** = Ausgabenlimit pro Zeitraum (`spending_budgets`). Die Namen im Code nicht „korrigieren“.
+- Fachbegriffe sauber trennen: **Konto** = Finanzbereich mit Kontostand (Code/DB/API: `budgets`, `budget_id`). **Budget** = Ausgabenlimit pro Zeitraum (`spending_budgets`). **Organisation** = früher Team (Code/DB/API: `teams`, `team_id`, `/teams`, Route `#/teams`). **Gruppen** einer Organisation (`team_groups`) sind nicht die appweiten Gruppen der Administration (`groups`). Die Namen im Code nicht „korrigieren“.
 - Bei Funktionsänderungen immer mitpflegen: [help.js](apps/web/public/js/pages/help.js), `CONCEPT.md`, `TECHNICAL.md`, `README.md`, bei neuen personenbezogenen Daten auch [privacy.js](apps/web/public/js/pages/privacy.js), und diese Datei.
 - Commit und Push nur auf Anweisung. Hauptbranch ist `develop` (der lokale Branch `main` trackt `origin/develop`); Änderungen über `feature/*`-Branches und Pull Requests, direkt auf `develop` nur auf ausdrückliche Anweisung. Remote: `git@github.com:ZockerDream/RP-Management-Board.git`.
 - `.env` und `.env-impressum` enthalten Secrets bzw. private Daten und werden nie committet. Änderungen nur in `.env.example` / `.env-impressum.example` mit Platzhaltern.
@@ -64,7 +64,11 @@ Node 22, Fastify 5, reines ESM-JavaScript, `zod`, `pg` mit handgeschriebenem SQL
 - **Ein Arbeitszeit-Eintrag gehört genau einem Kalendertag.** Neue Wege, Einträge anzulegen oder zu ändern, müssen über `splitManualEntry`/`splitTimer` (`work-split.js`) gehen; sonst zählen Stunden nach Mitternacht in der falschen Woche.
 - **Gehaltslauf stündlich, Stichtag 03:45:** `payroll.run` bucht vor 03:45 Uhr nur bis vorgestern. Tests, die den Job aufrufen, müssen das berücksichtigen (`api.mjs` tut es); der Teil „wartet auf das Ausstempeln“ läuft nur zwischen 03:45 und 23:00.
 - **Personen sind Bezugspunkt für Akten, Lizenzen und Schulungsnachweise:** `DELETE /people/:id` lehnt solche Personen ab, und sie wechseln nicht den Bereich (`personRecords` in `objects.js`); neue Tabellen mit Personenbezug dort mit prüfen. Die Fremdschlüssel selbst müssen kaskadieren: Beim Löschen eines Teams prüft PostgreSQL Verweise ohne `ON DELETE` schon in der kaskadierenden Teil-Löschung der Personen, das ergab einen 500er.
-- **Bereich fest, Personen im selben Bereich:** Akten, Lizenzarten, Schulungen und Doku-Kategorien wechseln nach dem Anlegen nicht zwischen Solo und Team; Personen und Teilnehmer müssen zum selben Team bzw. derselben Person gehören (`records.js`).
+- **Bereich fest, Personen im selben Bereich:** Akten, Lizenzarten, Schulungen und Doku-Kategorien wechseln nach dem Anlegen nicht zwischen Solo und Organisation; Personen und Teilnehmer müssen zur selben Organisation bzw. derselben Person gehören (`records.js`).
+- **Rechte in Organisationen nie selbst aus `team_members` ableiten:** Es gibt keine `team_role` mehr. Sichtbarkeit und Schreibrecht kommen allein aus der Datenbankfunktion `team_level(team, user, modul, bereich)` bzw. `case_file_level(akte, user)`; in JS über `levelSql`/`visibleSql`/`recordLevel`/`recordOwner`/`teamUsers` aus `org.js`. `visibleSql(alias, modul)` braucht immer das Modul; der Alias muss `owner_user_id` und `team_id` haben. Eine reine Mitgliedschaftsprüfung (`team_members`) ist nur richtig, wo es um Mitgliedschaft geht (Teilnehmer, geteilte Daueraufträge).
+- **Neue Funktion mit Organisationsbezug:** in `ORG_MODULES` (`org.js`) eintragen, dieselben Stufen in `seed_team_ranks()` (neue Migration) ergänzen und bestehenden Organisationen per Migration Zeilen für ihre Ränge geben, sonst hat dort niemand außer den Inhabern Zugriff. Erinnerungen über `teamUsers(team, modul)` verschicken.
+- **Niemand vergibt mehr, als er selbst hat:** `teams.js` prüft bei Rang, Gruppe, persönlichem Recht und Zuweisung jede gestiegene Stufe gegen die eigene (`assertWithin`), Nicht-Inhaber verwalten nur Mitglieder und Ränge unter dem eigenen Rang. Neue Verwaltungswege dort mit absichern. Inhaber (`team_members.is_owner`) dürfen immer alles; der letzte Inhaber kann nicht gehen.
+- **Bereichsrechte (`scope_id`) hängen ohne Fremdschlüssel an Aktenarten und Doku-Kategorien:** Beim Löschen einer Art oder Kategorie die Zeilen in `team_permissions` mit löschen (wie in `casefiles.js` und `docs.js`).
 
 ## Testen
 
@@ -88,57 +92,66 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 ### Allgemein
 - Einziger Einstieg ist `api` auf einem Port (UI und API, gleicher Ursprung). Kein mitgelieferter Reverse-Proxy; `db` nur im internen Netz.
 - App-Name zentral in den Einstellungen änderbar; wirkt in Seitenleiste, Login, Titel und Rechtsseiten.
-- Navigation: **Finanzen** (Dashboard, Transaktionen, Stundenzettel, Konten, Budgets, Daueraufträge, Sparziele, Berichte), **Zusammenarbeit** (Teams, Kalender, Notizblock, ToDos), **Sport** (Laufen, Schwimmen, Biken), **Object Management** (Fahrzeuge, Häuser, Personen, Schlüssel, Verwaltung), **Organisation** (Akten, Schulungen, Lizenzen, Dokumentationen), **Administration** (User-Management, Server-Management, Tickets – nur Admins; Hilfe und Fehler melden für alle), dazu Impressum und Datenschutz.
+- Navigation: **Finanzen** (Dashboard, Transaktionen, Stundenzettel, Konten, Budgets, Daueraufträge, Sparziele, Berichte), **Zusammenarbeit** (Kalender, Notizblock, ToDos), **Sport** (Laufen, Schwimmen, Biken), **Object Management** (Fahrzeuge, Häuser, Personen, Schlüssel, Verwaltung), **Organisation** (Organisationen, Akten, Schulungen, Lizenzen, Dokumentationen), **Administration** (User-Management, Server-Management, Tickets – nur Admins; Hilfe und Fehler melden für alle), dazu Impressum und Datenschutz.
 - Alte Links (`#/assets?tab=…`, `#/admin`, QR-Codes) müssen weiter funktionieren.
 
 ### Konten und Buchungen
-- Konten sind persönlich oder geteilt (Team) und zeigen Kontostand, Einkommen und Ausgaben. **Kein Limit und kein Zeitraum im Kontoformular**; Limits gehören zu den Budgets. Kategorien dürfen weiter eigene Limits haben.
+- Konten sind persönlich oder geteilt (Organisation) und zeigen Kontostand, Einkommen und Ausgaben. **Kein Limit und kein Zeitraum im Kontoformular**; Limits gehören zu den Budgets. Kategorien dürfen weiter eigene Limits haben.
 - Buchungstypen: Einnahme, Ausgabe, Einzahlung auf ein Sparziel. Viewer dürfen nicht buchen. CSV-Export, Belege.
 - **Kontostand und Dashboard zeigen nur, was wirklich auf dem Konto ist** (Entscheidung des Auftraggebers): Einnahmen minus Ausgaben bis heute. Sparziel-Einzahlungen bleiben auf dem Konto und ändern den Saldo nicht; Buchungen mit Datum in der Zukunft zählen erst ab diesem Datum. KPIs, Cashflow und letzte Buchungen im Dashboard folgen derselben Regel; die Transaktionsliste und Berichte zeigen weiter auch Zukünftiges.
 - Das Dashboard wechselt zwischen **Tag, Woche und Monat**. KPIs und Kategorien folgen dem gewählten Zeitraum, der Cashflow zeigt 14 Tage, 8 Wochen oder 6 Monate, der Gesamtsaldo bleibt der heutige Stand. Die Woche beginnt mit dem Wochenstart aus dem Profil.
 
 ### Budgets
-- Ausgabenlimit mit Name, Betrag, Zeitraum (Tag, Woche, Monat, Jahr), optional auf Konto und/oder Kategorie begrenzt. Zeigt Verbrauch, Rest und Überschreitung. Privat pro Benutzer; Team-Ausgaben zählen nur für zugängliche Konten.
+- Ausgabenlimit mit Name, Betrag, Zeitraum (Tag, Woche, Monat, Jahr), optional auf Konto und/oder Kategorie begrenzt. Zeigt Verbrauch, Rest und Überschreitung. Privat pro Benutzer; Ausgaben auf Konten einer Organisation zählen nur, wenn man sie lesen darf.
 
 ### Daueraufträge und Sparziele
 - Intervalle täglich, wöchentlich, monatlich, jährlich, benutzerdefiniert in Tagen, jeweils mit Abstand. Monats-/Jahresserien rasten auf den letzten gültigen Tag ein.
-- Teilen mit Teammitglied nach dessen Zustimmung: voller Betrag auch in dessen persönlichem Konto, gleiche Währung nötig.
+- Teilen mit einem Mitglied derselben Organisation nach dessen Zustimmung: voller Betrag auch in dessen persönlichem Konto, gleiche Währung nötig.
 - Objektkosten aktualisieren den verknüpften Auftrag, keine Duplikate. Sparziele mit Rate und Rhythmus.
 
 ### Stundenzettel und Gehalt
-- Timer (Ein-/Ausstempeln, Pause) und manuelle Einträge, mit oder ohne Projekt; Pausen zählen nicht. Projekte privat oder im Team. Löschen von Teamprojekten nur durch Team-Owner.
+- Timer (Ein-/Ausstempeln, Pause) und manuelle Einträge, mit oder ohne Projekt; Pausen zählen nicht. Projekte privat oder in einer Organisation: buchen ab „Teilnehmen“, anlegen und ändern ab „Lesen & Schreiben“, löschen mit „Verwalten“.
 - KPI „Wochen-Soll“. Monats-Soll = Wochen-Soll × Kalendertage / 7. PDF und CSV.
 - Das Gehaltskonto ist auf dem Stundenzettel („Gehalt einstellen“) und im Profil wählbar. Nicht wählbare Konten stehen mit Begründung in der Liste; fehlt ein passendes Konto, sagt ein Hinweis, was zu tun ist.
 - **Gehaltsregel des Auftraggebers** (Beispiel: 1.669 Festgehalt pro Tag, 13 Stunden Wochen-Soll, 17 % Bonus): Das Festgehalt wird jeden Tag um 03:45 für den Vortag gebucht, inklusive Wochenende und unabhängig von den Stunden, auf ein eigenes persönliches Konto. Nur Stunden über dem Wochen-Soll (Mo–So) bringen zusätzlich je Stunde den Bonus, einen Prozentsatz des Festgehalts (17 % von 1.669 = 283,73). Woche 1, Soll nicht erreicht: täglich nur Festgehalt. Woche 2, Soll am Dienstag erreicht: ab dann jede weitere Stunde mit Bonus. Woche 3, Soll am Samstag erreicht: nur der Rest von Samstag und Sonntag. Montags beginnt die Zählung neu.
 - **Nachtschicht (Entscheidung des Auftraggebers):** Stunden zählen an dem Kalendertag, an dem gearbeitet wurde. Timer und manuelle Einträge werden an Mitternacht in einen Eintrag je Tag geteilt; in der Nacht von Sonntag auf Montag gehören die Stunden nach 0 Uhr zur neuen Woche. Läuft um 03:45 noch ein Timer (jünger als 24 Stunden), wartet die Gutschrift seines Starttags bis zum Ausstempeln und folgt spätestens eine Stunde danach. Timer über 24 Stunden lassen sich nur verwerfen.
 - Nachgetragene Stunden derselben Woche kommen mit der nächsten Gutschrift dazu; abgeschlossene Wochen werden nicht nachberechnet, sonst würde ein geändertes Wochen-Soll alte Wochen neu bewerten. Stunden über dem Wochen-Soll (Mo–So) zusätzlich mit Stundenlohn plus Zuschlag. Idempotent, Ausfälle werden nachgeholt.
-- Team-Owner und -Editoren sehen und bearbeiten Zeiten und Mitarbeitereinstellungen ihres Teams.
+- Mit „Lesen“ beim Stundenzettel sieht man die Zeiten aller Mitglieder der Organisation, mit „Lesen & Schreiben“ bearbeitet man sie und die Mitarbeitereinstellungen.
 
 ### Sport
-- Getrennte Seiten für Laufen, Schwimmen, Biken. Strecken gehören einem Team, mit Checkpoints, Distanz, Notizen. Bestenliste nach Punkten absteigend, dann Zeit.
-- Owner/Editor verwalten Strecken. Jedes Mitglied, auch Viewer, trägt eigene Ergebnisse ein und löscht sie; Owner/Editor dürfen auch fremde löschen. Fremde sehen nichts.
+- Getrennte Seiten für Laufen, Schwimmen, Biken. Strecken gehören einer Organisation, mit Checkpoints, Distanz, Notizen. Bestenliste nach Punkten absteigend, dann Zeit.
+- Mit „Lesen“ Bestenliste sehen und eigene Ergebnisse eintragen und löschen; mit „Lesen & Schreiben“ Strecken verwalten und fremde Ergebnisse löschen. Fremde sehen nichts.
 
 ### Objekte
-- Objekte sind privat oder pro Datensatz im Team freigegeben. Fahrzeuge (Service nach Datum/km, Verbandskasten), Häuser (Wartung), Personen (auch ohne Login), Schlüssel (freie Art, Kopien, Ausgabe, Rückgabe, verloren, QR-Code, Inventur).
+- Objekte sind privat oder pro Datensatz einer Organisation freigegeben (ändern ab „Lesen & Schreiben“, löschen mit „Verwalten“). Fahrzeuge (Service nach Datum/km, Verbandskasten), Häuser (Wartung), Personen (auch ohne Login), Schlüssel (freie Art, Kopien, Ausgabe, Rückgabe, verloren, QR-Code, Inventur).
 - Tür-PINs verschlüsselt, nie in Listen, nur nach Passwort und ggf. 2FA sichtbar, jeder Zugriff im Audit-Log.
 - „Verwaltung“ bündelt Übersicht, Kosten, Protokoll und Auditlog (nur mit `audit:read`). Keine Versicherungsangabe an Fahrzeugen.
 
 ### Akten, Schulungen, Lizenzen, Dokumentationen (Entscheidungen des Auftraggebers vom 2026-11-08)
-- Alle vier solo oder pro Team, Bereich beim Anlegen fest. Team-Owner und -Editoren ändern, Viewer lesen, Fremde sehen nichts; zusätzlich Katalogrechte `casefile`, `training`, `license`, `doc`.
+- Alle vier solo oder pro Organisation, Bereich beim Anlegen fest. Rechte nach „Organisationen und Rechte“; Fremde sehen nichts; zusätzlich Katalogrechte `casefile`, `training`, `license`, `doc`.
 - **Akten:** Fall- bzw. Vorgangsakten mit Aktenzeichen (automatisch `Jahr-Nummer`), Status offen/ruhend/abgeschlossen, beteiligten Personen mit Rolle, chronologischen Einträgen und Anhängen. Auf jeder Person zeigt die „Übersicht“ alle Akten und Einträge zu ihr, dazu Lizenzen und Schulungen.
 - **Lizenzen für Personen:** frei anlegbare Lizenzarten mit Standard-Gültigkeit; Lizenz mit Nummer, Aussteller, Ausstellung, Ablauf, Status gültig/gesperrt/entzogen mit Begründung; Erinnerung 30 Tage vorher und nach Ablauf.
 - **Schulungen, Teilnahme und Nachweis:** Termine, Teilnehmer (Benutzer oder Personen), Ergebnis, Gültigkeit mit Erinnerung, Übersicht wer was hat. Keine Lerninhalte mit Test.
 - **Dokumentationen:** Wiki mit selbst angelegten Kategorien (z. B. Gesetze, Funktionen), einfache Formatierung, Suche.
 
+### Organisationen und Rechte (Entscheidungen des Auftraggebers vom 2026-11-09)
+- „Team“ heißt jetzt **Organisation** (nur in der Oberfläche). Navigation: Abschnitt „Organisation“ mit Organisationen, Akten, Schulungen, Lizenzen, Dokumentationen.
+- Jedes Mitglied hat einen **Rang**; Ränge haben eine Reihenfolge. Dazu beliebig viele **Gruppen** pro Organisation. Neue Organisationen bekommen Leitung, Mitglied und Leser; bestehende Teams wurden so übernommen: Owner → Inhaber mit Rang Leitung, Editor → Mitglied, Viewer → Leser.
+- Rechte **pro Funktion** (`ORG_MODULES`): Kein Zugriff, Teilnehmen, Lesen, Lesen & Schreiben, Verwalten; vergeben für Ränge, Gruppen und einzelne Mitglieder. **Es gilt das höchste Recht aus Rang und Gruppen; ein persönlich gesetztes Recht gilt genau so, auch wenn es weniger ist.** Aktenarten und Doku-Kategorien haben eigene Zeilen, die der allgemeinen Zeile desselben Rangs bzw. derselben Gruppe vorgehen.
+- **„Teilnehmen“** (Wunsch des Auftraggebers für Schulungen): Schulungen und Termine sehen, sich selbst an- und abmelden, aber keine Teilnehmer und keine Ergebnisse sehen oder bearbeiten. Beim Stundenzettel heißt es: auf Projekte der Organisation buchen.
+- **Akten:** Aktenarten mit eigenen Rechten und zusätzlich einzelne Akten beschränkbar auf Ränge (samt allen höheren), Gruppen und Mitglieder; Inhaber und Ersteller sehen sie immer, sich selbst aussperren geht nicht.
+- **Hierarchie:** Nicht-Inhaber verwalten nur Mitglieder und Ränge unter dem eigenen Rang und vergeben nie mehr, als sie selbst haben. Inhaber dürfen alles; mindestens ein Inhaber bleibt.
+- Die appweiten Rollen aus der Administration gelten zusätzlich (z. B. `casefile:read`); fehlt dort ein Recht, hilft auch die Organisation nicht.
+
 ### Kalender und Benachrichtigungen
 - Monat, Woche, Tag, Agenda; eigene Termine plus abgeleitete (Zahlungen, Service, Schlüsselfristen, Wartung, Schulungstermine, Ablauf von Lizenzen und Schulungsnachweisen, Feiertage); iCal-Abo. Glocke mit Zähler. Täglicher Job erinnert an Termine, Service, Verbandskasten, Schlüsselrückgaben, ablaufende Lizenzen und Schulungsnachweise.
 
 ### Notizblock und ToDos
-- Beide solo oder pro Team. Team-Owner und -Editoren ändern, Viewer lesen nur und sehen keine Aktionen; Fremde sehen nichts.
-- ToDos mit optionaler Deadline. Offene ToDos mit Deadline erinnern in der Glocke einen Tag vorher, am Fälligkeitstag und einmal bei Überfälligkeit, Team-ToDos alle Mitglieder. In den Einstellungen abschaltbar, E-Mail nur nach ausdrücklicher Wahl.
+- Beide solo oder pro Organisation. Mit „Lesen & Schreiben“ ändern, mit „Lesen“ nur lesen ohne Aktionen; Fremde sehen nichts.
+- ToDos mit optionaler Deadline. Offene ToDos mit Deadline erinnern in der Glocke einen Tag vorher, am Fälligkeitstag und einmal bei Überfälligkeit, ToDos einer Organisation alle Mitglieder mit Leserecht. In den Einstellungen abschaltbar, E-Mail nur nach ausdrücklicher Wahl.
 
 ### Administration
-- User-Management: Benutzer, Rollen & Rechte, Gruppen, Teams. Server-Management: Übersicht, Sicherheit & Einstellungen, System & Backups, Integrationen, Audit-Log. Tickets: gemeldete Fehler (optional Abgleich mit GitHub Issues).
+- User-Management: Benutzer, Rollen & Rechte, Gruppen, Organisationen (nur Übersicht). Server-Management: Übersicht, Sicherheit & Einstellungen, System & Backups, Integrationen, Audit-Log. Tickets: gemeldete Fehler (optional Abgleich mit GitHub Issues).
 - Tickets lassen sich kommentieren und löschen: Admins alle, Melder ihre eigenen. Kommentare benachrichtigen die jeweils andere Seite. Eigene Kommentare darf jeder löschen, Admins alle. Kommentare bleiben intern; ein GitHub-Issue bleibt beim Löschen bestehen.
 - Rechte als `ressource:aktion`, Systemrollen `Admin` und `User`, eigene Rollen frei. Jede Route prüft serverseitig, Frontend blendet nur aus.
 
@@ -150,5 +163,7 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 ## Offene Punkte
 
 - **Stunden für abgeschlossene Wochen**, die nachgetragen werden, bringen keinen Bonus mehr. Nachtschichten sind davon seit Migration 017 nicht mehr betroffen. Einträge über Mitternacht von vor dieser Regel wurden nicht umgerechnet.
+- **„Heute“ ist im Server UTC:** `today()` in `lib.js` nimmt das UTC-Datum. Zwischen Mitternacht und 1 Uhr (Sommer 2 Uhr) ist „heute“ deshalb noch gestern, etwa beim Abschlussdatum einer Akte oder als Vorgabe für Buchungen. Ein Umstieg auf `TZ` betrifft viele Stellen und ist noch nicht entschieden; Tests mit Datum schlagen in diesem Zeitfenster fehl.
+- **Eigene Rollen** aus der Administration bekommen neue Katalogrechte nicht automatisch; Admin und User schon.
 - **Beträge** erscheinen überall in der Profilwährung, auch bei Konten in anderer Währung; umgerechnet wird nichts.
 - Nicht enthalten: SSO/OIDC, LDAP, Bankanbindung, MT940, S3/SFTP-Backupziele, E-Mail-Bestätigung bei Registrierung, Restore in der Oberfläche.

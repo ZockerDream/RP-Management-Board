@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { one, many, q } from '../db.js';
 import { requireAuth, notFound, forbidden, bad } from '../authz.js';
+import { LEVEL, teamLevel, recordOwner, needMessage } from '../org.js';
 
 const id = z.string().uuid();
 const sportType = z.enum(['run', 'swim', 'bike']);
@@ -21,26 +22,26 @@ const scoreBody = z.object({
 });
 
 export default async function routes(app) {
-  const teamRole = async (userId, teamId) => (await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [teamId, userId]))?.team_role;
-
+  // Strecken gehören immer einer Organisation: Bestenliste und eigene Ergebnisse ab „Lesen“, Strecken ab „Lesen & Schreiben“
   async function routeAccess(userId, routeId, write = false) {
     const route = await one('SELECT * FROM sport_routes WHERE id=$1', [routeId]);
-    const role = route && await teamRole(userId, route.team_id);
-    if (!role) throw notFound();
-    if (write && role === 'viewer') throw forbidden('Nur Team-Owner und Editoren können Strecken verwalten');
-    return { route, role };
+    const level = route ? await teamLevel(userId, route.team_id, 'sport') : 0;
+    if (level < LEVEL.READ) throw notFound();
+    if (write && level < LEVEL.WRITE) throw forbidden(needMessage('sport', LEVEL.WRITE));
+    return { route, level };
   }
 
   app.get('/sport/routes', requireAuth, async (req) => {
     const { sport_type: type } = z.object({ sport_type: sportType.optional() }).parse(req.query);
     const routes = await many(
-      `SELECT r.*, t.name team_name, tm.team_role role,
-         (SELECT count(*)::int FROM sport_scores s WHERE s.route_id=r.id) attempts,
-         (SELECT count(DISTINCT s.user_id)::int FROM sport_scores s WHERE s.route_id=r.id) participants,
-         (SELECT max(s.score) FROM sport_scores s WHERE s.route_id=r.id) best_score
-       FROM sport_routes r JOIN teams t ON t.id=r.team_id JOIN team_members tm ON tm.team_id=r.team_id AND tm.user_id=$1
-       WHERE ($2::text IS NULL OR r.sport_type=$2)
-       ORDER BY t.name, r.name`,
+      `SELECT * FROM (
+         SELECT r.*, t.name team_name, team_level(r.team_id, $1, 'sport') AS level,
+           (SELECT count(*)::int FROM sport_scores s WHERE s.route_id=r.id) attempts,
+           (SELECT count(DISTINCT s.user_id)::int FROM sport_scores s WHERE s.route_id=r.id) participants,
+           (SELECT max(s.score) FROM sport_scores s WHERE s.route_id=r.id) best_score
+         FROM sport_routes r JOIN teams t ON t.id=r.team_id
+         WHERE r.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1) AND ($2::text IS NULL OR r.sport_type=$2)
+       ) x WHERE x.level >= 2 ORDER BY x.team_name, x.name`,
       [req.user.id, type ?? null],
     );
     if (!routes.length) return routes;
@@ -55,9 +56,7 @@ export default async function routes(app) {
 
   app.post('/sport/routes', requireAuth, async (req) => {
     const b = routeBody.parse(req.body);
-    const role = await teamRole(req.user.id, b.team_id);
-    if (!role) throw notFound('Team nicht gefunden');
-    if (role === 'viewer') throw forbidden('Nur Team-Owner und Editoren können Strecken anlegen');
+    await recordOwner(req.user.id, b.team_id, 'sport', LEVEL.WRITE);
     return one('INSERT INTO sport_routes(team_id,sport_type,name,checkpoints,distance_km,notes,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
       [b.team_id, b.sport_type, b.name, b.checkpoints, b.distance_km ?? null, b.notes, req.user.id]);
   });
@@ -88,9 +87,9 @@ export default async function routes(app) {
 
   app.delete('/sport/scores/:id', requireAuth, async (req) => {
     const score = await one('SELECT s.id, s.user_id, r.team_id FROM sport_scores s JOIN sport_routes r ON r.id=s.route_id WHERE s.id=$1', [req.params.id]);
-    const role = score && await teamRole(req.user.id, score.team_id);
-    if (!role) throw notFound();
-    if (score.user_id !== req.user.id && role === 'viewer') throw forbidden();
+    const level = score ? await teamLevel(req.user.id, score.team_id, 'sport') : 0;
+    if (level < LEVEL.READ) throw notFound();
+    if (score.user_id !== req.user.id && level < LEVEL.WRITE) throw forbidden(needMessage('sport', LEVEL.WRITE));
     await q('DELETE FROM sport_scores WHERE id=$1', [score.id]);
     return { ok: true };
   });

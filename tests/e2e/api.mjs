@@ -97,8 +97,12 @@ denied('User darf /admin/system nicht', await alice.get('/admin/system'));
 
 // ---------- Teams
 const team = ok('team', await alice.post('/teams', { name: 'E2E Team' }));
-ok('bob editor', await alice.post(`/teams/${team.id}/members`, { email: uB.email, team_role: 'editor' }));
-ok('carol viewer', await alice.post(`/teams/${team.id}/members`, { email: uC.email, team_role: 'viewer' }));
+// Neue Organisationen haben die Ränge Leitung, Mitglied und Leser (bisher Owner, Editor, Viewer)
+const rankIdOf = async (who, teamId, name) => (await who.get('/teams')).data.find((t) => t.id === teamId).ranks.find((r) => r.name === name).id;
+const rankMember = await rankIdOf(alice, team.id, 'Mitglied');
+const rankReader = await rankIdOf(alice, team.id, 'Leser');
+ok('bob Mitglied', await alice.post(`/teams/${team.id}/members`, { email: uB.email, rank_id: rankMember }));
+ok('carol Leser', await alice.post(`/teams/${team.id}/members`, { email: uC.email, rank_id: rankReader }));
 const teams = ok('teams', await bob.get('/teams'));
 check('bob sieht Team', teams.some((t) => t.id === team.id), JSON.stringify(teams));
 
@@ -331,9 +335,11 @@ check('Festgehalt jeden Tag 1.669', paidBefore.every((row) => row.base === '1669
 const bonusIn = (monday) => paidBefore.filter((row) => row.date >= monday && row.date <= plusDays(monday, 6) && row.hours > 0).map((row) => `${row.date}:${row.hours}:${row.pay}`).join();
 check('Woche 1: Soll verfehlt, kein Bonus', bonusIn(week1) === '', bonusIn(week1));
 check('Woche 2: Bonus ab Dienstag', bonusIn(week2) === `${plusDays(week2, 1)}:2:567.46,${plusDays(week2, 2)}:1:283.73`, bonusIn(week2));
-check('Woche 3: nur Rest Samstag und Sonntag', bonusIn(week3) === `${plusDays(week3, 5)}:1:283.73,${plusDays(week3, 6)}:2:567.46`, bonusIn(week3));
+// Montags vor 03:45 ist der Sonntag der Vorwoche noch nicht gebucht
+const week3Bonus = [[plusDays(week3, 5), '1:283.73'], [plusDays(week3, 6), '2:567.46']].filter(([date]) => date <= payrollLastDay);
+check('Woche 3: nur Rest Samstag und Sonntag', bonusIn(week3) === week3Bonus.map(([date, value]) => `${date}:${value}`).join(), bonusIn(week3));
 check('Montag beginnt neu', bonusIn(mondayOfThisWeek) === '', bonusIn(mondayOfThisWeek));
-const expectedSalary = expectedDays * 1669 + 567.46 + 283.73 + 283.73 + 567.46;
+const expectedSalary = expectedDays * 1669 + 567.46 + 283.73 + (week3Bonus.length > 0 ? 283.73 : 0) + (week3Bonus.length > 1 ? 567.46 : 0);
 check('Kontostand stimmt auf den Cent', (await bob.get('/budgets')).data.find((row) => row.id === salaryAccount.id).balance === expectedSalary.toFixed(2), `${(await bob.get('/budgets')).data.find((row) => row.id === salaryAccount.id).balance} statt ${expectedSalary.toFixed(2)}`);
 const salaryBookings = (await bob.get(`/transactions?budget_id=${salaryAccount.id}&limit=100`)).data.items;
 check('Buchungstexte', salaryBookings.some((row) => row.title === 'Festgehalt und Bonus' && /567\.46 EUR Bonus für 2 Stunden/.test(row.note)) && salaryBookings.some((row) => row.title === 'Festgehalt'), JSON.stringify(salaryBookings[0]));
@@ -432,15 +438,15 @@ ok('Objekt privat→Team', await alice.patch(`/vehicles/${car.id}`, { scope: 'te
 check('Team sieht Fahrzeug', (await carol.get('/vehicles')).data.some((v) => v.id === car.id));
 denied('Viewer ändert Teamobjekt nicht', await carol.patch(`/vehicles/${car.id}`, { make_model: 'x' }));
 // Die Oberfläche blendet Aktionen anhand der Rolle aus, dazu muss sie in den Listen stehen
-const roleOf = async (who, path, itemId) => (await who.get(path)).data.find((row) => row.id === itemId)?.role;
-check('Rolle in der Liste: Viewer', (await roleOf(carol, '/vehicles', car.id)) === 'viewer');
-check('Rolle in der Liste: Editor', (await roleOf(bob, '/vehicles', car.id)) === 'editor');
-check('Rolle in der Liste: Team-Owner', (await roleOf(alice, '/vehicles', car.id)) === 'owner');
-check('Rolle in der Liste: privat', (await roleOf(alice, '/properties', house.id)) === 'owner');
+const roleOf = async (who, path, itemId) => (await who.get(path)).data.find((row) => row.id === itemId)?.level;
+check('Stufe in der Liste: Leser', (await roleOf(carol, '/vehicles', car.id)) === 2);
+check('Stufe in der Liste: Mitglied', (await roleOf(bob, '/vehicles', car.id)) === 4);
+check('Stufe in der Liste: Inhaber', (await roleOf(alice, '/vehicles', car.id)) === 4);
+check('Stufe in der Liste: privat', (await roleOf(alice, '/properties', house.id)) === 4);
 const teamPerson = ok('Team-Person', await alice.post('/people', { name: 'Teamer', scope: 'team', team_id: team.id }));
 const teamKey = ok('Team-Schlüssel', await alice.post('/keys', { code: 'TK', label: 'Team-Tor', vehicle_id: car.id, scope: 'team', team_id: team.id, copies: 2 }));
-check('Rolle bei Personen', (await roleOf(carol, '/people', teamPerson.id)) === 'viewer');
-check('Rolle bei Schlüsseln', (await roleOf(carol, '/keys', teamKey.id)) === 'viewer');
+check('Stufe bei Personen', (await roleOf(carol, '/people', teamPerson.id)) === 2);
+check('Stufe bei Schlüsseln', (await roleOf(carol, '/keys', teamKey.id)) === 2);
 const teamIssue = ok('Team-Schlüssel ausgeben', await alice.post(`/keys/${teamKey.id}/assign`, { person_id: teamPerson.id }));
 denied('Viewer gibt nicht aus', await carol.post(`/keys/${teamKey.id}/assign`, { person_id: teamPerson.id }));
 denied('Viewer nimmt nicht zurück', await carol.post(`/assignments/${teamIssue.id}/return`, {}));
@@ -559,7 +565,7 @@ const noteSolo = ok('Notiz solo', await alice.post('/notes', { title: 'Meine Not
 const noteTeam = ok('Notiz Team', await bob.post('/notes', { title: 'Team-Notiz', body: 'Für alle', team_id: team.id }));
 const notesOf = async (who) => (await who.get('/notes')).data;
 check('Eigene und Team-Notiz', (await notesOf(alice)).some((n) => n.id === noteSolo.id) && (await notesOf(alice)).some((n) => n.id === noteTeam.id));
-check('Rolle in der Liste', (await notesOf(carol)).find((n) => n.id === noteTeam.id)?.role === 'viewer');
+check('Stufe in der Liste', (await notesOf(carol)).find((n) => n.id === noteTeam.id)?.level === 2);
 check('Viewer sieht fremde Solo-Notiz nicht', !(await notesOf(carol)).some((n) => n.id === noteSolo.id));
 check('Fremder sieht nichts', !(await notesOf(dave)).some((n) => [noteSolo.id, noteTeam.id].includes(n.id)));
 denied('IDOR Notiz ändern', await bob.patch(`/notes/${noteSolo.id}`, { title: 'x' }), [404]);
@@ -589,7 +595,7 @@ check('Team sieht verschobene Notiz', (await notesOf(carol)).some((n) => n.id ==
 denied('Viewer verschiebt nicht', await carol.patch(`/notes/${noteSolo.id}`, { team_id: null }), [403]);
 ok('Notiz Team→privat', await alice.patch(`/notes/${noteSolo.id}`, { team_id: null }));
 check('Team sieht sie nicht mehr', !(await notesOf(bob)).some((n) => n.id === noteSolo.id));
-check('Besitzerin behält sie', (await notesOf(alice)).find((n) => n.id === noteSolo.id)?.role === 'owner');
+check('Besitzerin behält sie', (await notesOf(alice)).find((n) => n.id === noteSolo.id)?.level === 4);
 const noteExtra = ok('Notiz zum Löschen', await alice.post('/notes', { body: 'nur Text, kein Titel' }));
 ok('Notiz löschen', await alice.del(`/notes/${noteExtra.id}`));
 denied('Gelöschte Notiz ist weg', await alice.del(`/notes/${noteExtra.id}`), [404]);
@@ -599,7 +605,7 @@ const todosOf = async (who) => (await who.get('/todos')).data;
 const todoSolo = ok('ToDo solo', await alice.post('/todos', { title: 'Steuer abgeben', due_date: dayAt(1), note: 'Belege' }));
 const todoTeam = ok('ToDo Team', await bob.post('/todos', { title: 'Team-Aufgabe', due_date: dayAt(0), team_id: team.id }));
 const todoFree = ok('ToDo ohne Deadline', await alice.post('/todos', { title: 'Irgendwann' }));
-check('Team-ToDo für Team sichtbar', (await todosOf(carol)).find((t) => t.id === todoTeam.id)?.role === 'viewer');
+check('Team-ToDo für Team sichtbar', (await todosOf(carol)).find((t) => t.id === todoTeam.id)?.level === 2);
 check('Solo-ToDo nicht für Team sichtbar', !(await todosOf(bob)).some((t) => t.id === todoSolo.id));
 check('Fremder sieht keine ToDos', !(await todosOf(dave)).some((t) => [todoSolo.id, todoTeam.id].includes(t.id)));
 denied('IDOR ToDo ändern', await bob.patch(`/todos/${todoSolo.id}`, { title: 'x' }), [404]);
@@ -678,7 +684,7 @@ invalid('Aktenzeichen doppelt', await alice.post('/case-files', { title: 'Dritte
 invalid('Private Person in Team-Akte', await alice.post('/case-files', { title: 'X', team_id: team.id, people: [{ person_id: privatePerson.id }] }));
 invalid('Akte ohne Titel', await alice.post('/case-files', { title: '', team_id: team.id }));
 denied('Viewer legt keine Akte an', await carol.post('/case-files', { title: 'X', team_id: team.id }));
-check('Viewer sieht Team-Akte', (await carol.get('/case-files')).data.some((f) => f.id === caseFile.id && f.role === 'viewer'));
+check('Viewer sieht Team-Akte', (await carol.get('/case-files')).data.some((f) => f.id === caseFile.id && f.level === 2));
 denied('Fremder öffnet Akte nicht', await dave.get(`/case-files/${caseFile.id}`));
 check('Fremder sieht Akte nicht in der Liste', !(await dave.get('/case-files')).data.some((f) => f.id === caseFile.id));
 denied('Viewer ändert Akte nicht', await carol.patch(`/case-files/${caseFile.id}`, { title: 'Geändert' }));
@@ -796,6 +802,162 @@ check('Gewechselte Person ist privat', psql(`SELECT (team_id IS NULL AND owner_u
 ok('Team mit Unterlagen löschen', await alice.del(`/teams/${dropTeam.id}`));
 check('Unterlagen des Teams sind weg', psql(`SELECT (SELECT count(*) FROM people WHERE id='${dropPerson.id}') + (SELECT count(*) FROM case_files WHERE id='${dropFile.id}') + (SELECT count(*) FROM licenses WHERE person_id='${dropPerson.id}') + (SELECT count(*) FROM training_records WHERE person_id='${dropPerson.id}')`) === '0');
 
+// ---------- Organisationen: Ränge, Gruppen, Rechte pro Funktion
+const catalog = ok('Rechte-Katalog', await alice.get('/teams/catalog'));
+check('Katalog hat alle Funktionen', catalog.modules.length === 15 && catalog.levels.length === 5, JSON.stringify(catalog.modules.map((m) => m.key)));
+const org = ok('Organisation anlegen', await alice.post('/teams', { name: 'E2E Wache' }));
+const orgOf = async (who) => (await who.get('/teams')).data.find((t) => t.id === org.id);
+let orgView = await orgOf(alice);
+check('Inhaberin mit Rang Leitung', orgView.is_owner && orgView.rank_name === 'Leitung', JSON.stringify(orgView));
+check('Inhaberin darf alles', Object.values(orgView.levels).every((level) => level >= 3), JSON.stringify(orgView.levels));
+check('Drei Standard-Ränge', orgView.ranks.map((r) => r.name).join(',') === 'Leitung,Mitglied,Leser', orgView.ranks.map((r) => r.name).join(','));
+const orgRank = Object.fromEntries(orgView.ranks.map((r) => [r.name, r.id]));
+const cadet = ok('Rang anlegen', await alice.post(`/teams/${org.id}/ranks`, { name: 'Anwärter' }));
+invalid('Rangname doppelt', await alice.post(`/teams/${org.id}/ranks`, { name: 'Anwärter' }));
+orgView = await orgOf(alice);
+check('Neuer Rang ganz unten', orgView.ranks.at(-1).id === cadet.id);
+ok('Rang nach oben', await alice.patch(`/team-ranks/${cadet.id}`, { move: 'up' }));
+orgView = await orgOf(alice);
+check('Rang über Leser', orgView.ranks.map((r) => r.name).join(',') === 'Leitung,Mitglied,Anwärter,Leser', orgView.ranks.map((r) => r.name).join(','));
+ok('Rang wieder nach unten', await alice.patch(`/team-ranks/${cadet.id}`, { move: 'down' }));
+invalid('Unterster Rang nicht weiter nach unten', await alice.patch(`/team-ranks/${cadet.id}`, { move: 'down' }));
+ok('Bob als Mitglied', await alice.post(`/teams/${org.id}/members`, { email: uB.email, rank_id: orgRank.Mitglied }));
+ok('Carol als Leser', await alice.post(`/teams/${org.id}/members`, { email: uC.email, rank_id: orgRank.Leser }));
+ok('Dave als Anwärter', await alice.post(`/teams/${org.id}/members`, { email: uD.email, rank_id: cadet.id }));
+invalid('Schon Mitglied', await alice.post(`/teams/${org.id}/members`, { email: uD.email, rank_id: cadet.id }));
+const daveOrg = await orgOf(dave);
+check('Neuer Rang hat keine Rechte', Object.values(daveOrg.levels).every((level) => level === 0), JSON.stringify(daveOrg.levels));
+check('Ohne Recht keine Mitgliederliste', daveOrg.members.length === 0 && daveOrg.ranks.length === 0);
+denied('Ohne Recht keine Rechte-Übersicht', await dave.get(`/teams/${org.id}/permissions`), [403]);
+denied('Fremde sehen keine Rechte', await admin.get(`/teams/${org.id}/permissions`), [404]);
+const setPerm = (who, body) => who.put(`/teams/${org.id}/permissions`, body);
+invalid('Stufe passt nicht zur Funktion', await setPerm(alice, { subject: 'rank', subject_id: cadet.id, module: 'sport', level: 1 }));
+invalid('Unbekannte Funktion', await setPerm(alice, { subject: 'rank', subject_id: cadet.id, module: 'raketen', level: 2 }));
+invalid('Rang einer anderen Organisation', await setPerm(alice, { subject: 'rank', subject_id: rankMember, module: 'doc', level: 2 }));
+ok('Anwärter darf an Schulungen teilnehmen', await setPerm(alice, { subject: 'rank', subject_id: cadet.id, module: 'training', level: 1 }));
+check('Stufe wirkt sofort', (await orgOf(dave)).levels.training === 1);
+
+// Gruppen und persönliche Rechte: höchstes aus Rang und Gruppen, ein persönliches Recht gilt genau so
+const detectives = ok('Gruppe anlegen', await alice.post(`/teams/${org.id}/groups`, { name: 'Ermittler', description: 'Kripo' }));
+ok('Gruppe darf Akten schreiben', await setPerm(alice, { subject: 'group', subject_id: detectives.id, module: 'casefile', level: 3 }));
+ok('Carol in die Gruppe', await alice.patch(`/teams/${org.id}/members/${uC.id}`, { group_ids: [detectives.id] }));
+check('Gruppe hebt Leser an', (await orgOf(carol)).levels.casefile === 3);
+const carolFile = ok('Carol legt dank Gruppe eine Akte an', await carol.post('/case-files', { title: 'Gruppenakte', team_id: org.id }));
+ok('Persönlich nur lesen', await setPerm(alice, { subject: 'user', subject_id: uC.id, module: 'casefile', level: 2 }));
+check('Persönliches Recht geht vor', (await orgOf(carol)).levels.casefile === 2);
+denied('Mit persönlichem Leserecht keine Akte', await carol.post('/case-files', { title: 'Nein', team_id: org.id }), [403]);
+denied('Mit persönlichem Leserecht keine Einträge', await carol.post(`/case-files/${carolFile.id}/entries`, { body: 'x' }), [403]);
+ok('Persönliches Recht entfernen', await setPerm(alice, { subject: 'user', subject_id: uC.id, module: 'casefile', level: null }));
+check('Wieder über die Gruppe', (await orgOf(carol)).levels.casefile === 3);
+const carolLevels = ok('Was darf Carol', await alice.get(`/teams/${org.id}/members/${uC.id}/levels`));
+check('Stufen eines Mitglieds', carolLevels.casefile === 3 && carolLevels.members === 2, JSON.stringify(carolLevels));
+denied('Fremde Stufen nur mit Verwalten', await carol.get(`/teams/${org.id}/members/${uB.id}/levels`), [403]);
+
+// Hierarchie: Bob verwaltet Mitglieder unter seinem Rang und gibt nie mehr, als er selbst hat
+ok('Mitglied darf verwalten', await setPerm(alice, { subject: 'rank', subject_id: orgRank.Mitglied, module: 'members', level: 4 }));
+ok('Bob gibt Carol einen anderen niedrigeren Rang', await bob.patch(`/teams/${org.id}/members/${uC.id}`, { rank_id: cadet.id }));
+denied('Bob vergibt keinen Rang über sich', await bob.patch(`/teams/${org.id}/members/${uC.id}`, { rank_id: orgRank.Leitung }), [403]);
+denied('Bob ändert die Inhaberin nicht', await bob.patch(`/teams/${org.id}/members/${uA.id}`, { rank_id: orgRank.Leser }), [403]);
+denied('Bob ändert seinen eigenen Rang nicht', await bob.patch(`/teams/${org.id}/members/${uB.id}`, { rank_id: orgRank.Leser }), [403]);
+denied('Bob macht niemanden zum Inhaber', await bob.patch(`/teams/${org.id}/members/${uC.id}`, { is_owner: true }), [403]);
+denied('Bob ändert den Rang Leitung nicht', await bob.patch(`/team-ranks/${orgRank.Leitung}`, { name: 'Chef' }), [403]);
+denied('Kein Rang steigt über Bob', await bob.patch(`/team-ranks/${orgRank.Leser}`, { move: 'up' }), [400, 403]);
+ok('Bob gibt Lesern Akten-Verwalten (hat er selbst)', await setPerm(bob, { subject: 'rank', subject_id: orgRank.Leser, module: 'casefile', level: 4 }));
+denied('Bob gibt Lesern kein Konto-Verwalten (hat er nicht)', await setPerm(bob, { subject: 'rank', subject_id: orgRank.Leser, module: 'budget', level: 4 }), [403]);
+denied('Bob gibt der Gruppe nicht mehr als er hat', await setPerm(bob, { subject: 'group', subject_id: detectives.id, module: 'budget', level: 4 }), [403]);
+denied('Bob ändert die Rechte seines eigenen Rangs nicht', await setPerm(bob, { subject: 'rank', subject_id: orgRank.Mitglied, module: 'budget', level: 4 }), [403]);
+ok('Bob setzt die Leser zurück', await setPerm(bob, { subject: 'rank', subject_id: orgRank.Leser, module: 'casefile', level: 2 }));
+ok('Carol wieder Leser', await alice.patch(`/teams/${org.id}/members/${uC.id}`, { rank_id: orgRank.Leser }));
+invalid('Benutzter Rang lässt sich nicht löschen', await alice.del(`/team-ranks/${orgRank.Leser}`));
+
+// Aktenarten: eigene Rechte pro Art; die Zeile für die Art geht der allgemeinen vor
+const staffType = ok('Aktenart anlegen', await bob.post('/case-file-types', { name: 'Personalakte', team_id: org.id }));
+invalid('Aktenart doppelt', await bob.post('/case-file-types', { name: 'personalakte', team_id: org.id }));
+denied('Leser legen keine Aktenart an', await carol.post('/case-file-types', { name: 'X', team_id: org.id }), [403]);
+ok('Leser sehen keine Personalakten', await setPerm(alice, { subject: 'rank', subject_id: orgRank.Leser, module: 'casefile', scope_id: staffType.id, level: 0 }));
+const staffFile = ok('Personalakte anlegen', await bob.post('/case-files', { title: 'Personalakte Carol', team_id: org.id, type_id: staffType.id }));
+check('Über die Gruppe noch sichtbar', (await carol.get(`/case-files/${staffFile.id}`)).status === 200);
+ok('Gruppe ohne Personalakten', await setPerm(alice, { subject: 'group', subject_id: detectives.id, module: 'casefile', scope_id: staffType.id, level: 0 }));
+denied('Personalakte unsichtbar', await carol.get(`/case-files/${staffFile.id}`), [404]);
+check('Personalakte nicht in der Liste', !(await carol.get('/case-files')).data.some((f) => f.id === staffFile.id));
+check('Andere Akten weiter sichtbar', (await carol.get('/case-files')).data.some((f) => f.id === carolFile.id));
+check('Aktenart für Carol unsichtbar', !(await carol.get('/case-file-types')).data.some((t) => t.id === staffType.id));
+invalid('Aktenart in Benutzung', await bob.del(`/case-file-types/${staffType.id}`));
+
+// Einzelne Akte beschränken: Ränge zählen samt allen höheren, dazu Gruppen, Mitglieder, Inhaber und Ersteller
+const secretFile = ok('Akte zum Beschränken', await alice.post('/case-files', { title: 'Interne Ermittlung', team_id: org.id }));
+ok('Nur für die Ermittler', await alice.put(`/case-files/${secretFile.id}/access`, { restricted: true, group_ids: [detectives.id] }));
+check('Ermittlerin sieht sie', (await carol.get(`/case-files/${secretFile.id}`)).status === 200);
+denied('Bob nicht in der Gruppe', await bob.get(`/case-files/${secretFile.id}`), [404]);
+check('Inhaberin sieht sie', (await alice.get(`/case-files/${secretFile.id}`)).data.access?.length === 1);
+check('Beschränkt in der Liste markiert', (await alice.get('/case-files')).data.find((f) => f.id === secretFile.id)?.restricted === true);
+ok('Ab Rang Leser', await alice.put(`/case-files/${secretFile.id}/access`, { restricted: true, rank_ids: [orgRank.Leser] }));
+check('Höherer Rang sieht sie', (await bob.get(`/case-files/${secretFile.id}`)).status === 200);
+denied('Anwärter nicht', await dave.get(`/case-files/${secretFile.id}`), [404]);
+const lockFile = ok('Akte von Alice', await alice.post('/case-files', { title: 'Aussperren', team_id: org.id }));
+invalid('Bob sperrt sich nicht selbst aus', await bob.put(`/case-files/${lockFile.id}/access`, { restricted: true, user_ids: [uC.id] }));
+invalid('Beschränkt ohne Auswahl', await alice.put(`/case-files/${lockFile.id}/access`, { restricted: true }));
+invalid('Fremder Benutzer', await alice.put(`/case-files/${lockFile.id}/access`, { restricted: true, user_ids: [meAdmin.user.id] }));
+denied('Leser beschränken nicht', await carol.put(`/case-files/${lockFile.id}/access`, { restricted: false }), [403]);
+ok('Beschränkung aufheben', await alice.put(`/case-files/${secretFile.id}/access`, { restricted: false }));
+check('Wieder für alle mit Leserecht', (await dave.get(`/case-files/${secretFile.id}`)).status === 404 && (await carol.get(`/case-files/${secretFile.id}`)).status === 200);
+ok('Personalakte löschen', await bob.del(`/case-files/${staffFile.id}`));
+ok('Leere Aktenart löschen', await bob.del(`/case-file-types/${staffType.id}`));
+check('Rechte der Aktenart sind weg', psql(`SELECT count(*) FROM team_permissions WHERE scope_id='${staffType.id}'`) === '0');
+
+// Schulungen: „Teilnehmen“ sieht Termine und meldet sich an, aber keine Teilnehmer und keine Ergebnisse
+const tomorrowDate = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
+const orgTraining = ok('Schulung der Organisation', await alice.post('/trainings', { name: 'Funkausbildung', team_id: org.id, validity_months: 12 }));
+const nextSession = ok('Kommender Termin', await alice.post(`/trainings/${orgTraining.id}/sessions`, { session_date: tomorrowDate }));
+const pastSession = ok('Vergangener Termin', await alice.post(`/trainings/${orgTraining.id}/sessions`, { session_date: '2020-01-10' }));
+ok('Carol hat bestanden', await alice.post(`/trainings/${orgTraining.id}/records`, { user_id: uC.id, session_id: pastSession.id, result: 'passed' }));
+const daveTrainings = ok('Anwärter sieht Schulungen', await dave.get('/trainings'));
+const daveTraining = daveTrainings.find((t) => t.id === orgTraining.id);
+check('Ohne Ergebniszahlen', daveTraining?.level === 1 && daveTraining.valid_records === null, JSON.stringify(daveTraining));
+const daveDetail = ok('Anwärter öffnet die Schulung', await dave.get(`/trainings/${orgTraining.id}`));
+check('Keine Teilnehmer und Ergebnisse', daveDetail.records.length === 0 && daveDetail.sessions.length === 2);
+check('Keine Übersicht', !(await dave.get('/trainings/overview')).data.some((r) => r.training_id === orgTraining.id));
+ok('Selbst anmelden', await dave.post(`/training-sessions/${nextSession.id}/enroll`));
+invalid('Doppelt anmelden', await dave.post(`/training-sessions/${nextSession.id}/enroll`));
+invalid('Vergangener Termin', await dave.post(`/training-sessions/${pastSession.id}/enroll`));
+check('Eigene Anmeldung sichtbar', (await dave.get(`/trainings/${orgTraining.id}`)).data.my_sessions.some((s) => s.session_id === nextSession.id && s.withdrawable));
+denied('Anwärter trägt keine Ergebnisse ein', await dave.post(`/trainings/${orgTraining.id}/records`, { user_id: uD.id, result: 'passed' }), [403]);
+denied('Anwärter sieht keine Kandidaten', await dave.get(`/trainings/${orgTraining.id}/candidates`), [403]);
+check('Leitung sieht die Anmeldung', (await alice.get(`/trainings/${orgTraining.id}`)).data.records.some((r) => r.user_id === uD.id && r.result === 'registered'));
+ok('Selbst abmelden', await dave.del(`/training-sessions/${nextSession.id}/enroll`));
+invalid('Nicht angemeldet', await dave.del(`/training-sessions/${nextSession.id}/enroll`));
+check('Carol (Leser) sieht Ergebnisse', (await carol.get(`/trainings/${orgTraining.id}`)).data.records.length === 1);
+ok('Anwärter ohne Schulungen', await setPerm(alice, { subject: 'rank', subject_id: cadet.id, module: 'training', level: 0 }));
+denied('Ohne Recht keine Schulung', await dave.get(`/trainings/${orgTraining.id}`), [404]);
+
+// Dokumentationen: Rechte pro Kategorie
+const internal = ok('Interne Kategorie', await alice.post('/doc-categories', { name: 'Intern', team_id: org.id }));
+const publicCat = ok('Offene Kategorie', await alice.post('/doc-categories', { name: 'Gesetze', team_id: org.id }));
+ok('Seite intern', await alice.post('/doc-pages', { category_id: internal.id, title: 'Dienstplan', body: 'geheim' }));
+ok('Leser ohne Intern', await setPerm(alice, { subject: 'rank', subject_id: orgRank.Leser, module: 'doc', scope_id: internal.id, level: 0 }));
+ok('Gruppe ohne Intern', await setPerm(alice, { subject: 'group', subject_id: detectives.id, module: 'doc', scope_id: internal.id, level: 0 }));
+const carolCats = (await carol.get('/doc-categories')).data;
+check('Kategorie pro Recht sichtbar', carolCats.some((c) => c.id === publicCat.id) && !carolCats.some((c) => c.id === internal.id));
+check('Suche findet nichts Internes', !(await carol.get('/doc-pages?q=geheim')).data.length);
+invalid('Bereich einer anderen Funktion', await setPerm(alice, { subject: 'rank', subject_id: orgRank.Leser, module: 'casefile', scope_id: internal.id, level: 2 }));
+
+// Mitglieder, Einladungen, Inhaber
+const invite = ok('Einladung mit Rang', await bob.post(`/teams/${org.id}/members`, { email: 'neuling@e2e.test', rank_id: cadet.id }));
+check('Einladung offen', invite.invited === true);
+check('Einladung mit Rang gelistet', (await orgOf(bob)).invitations.some((i) => i.email === 'neuling@e2e.test' && i.rank_name === 'Anwärter'));
+denied('Bob lädt nicht in die Leitung ein', await bob.post(`/teams/${org.id}/members`, { email: 'chef@e2e.test', rank_id: orgRank.Leitung }), [403]);
+ok('Bob entfernt Dave', await bob.del(`/teams/${org.id}/members/${uD.id}`));
+denied('Ehemalige sehen nichts', await dave.get(`/teams/${org.id}/permissions`), [404]);
+invalid('Letzte Inhaberin bleibt', await alice.del(`/teams/${org.id}/members/${uA.id}`));
+ok('Bob wird Inhaber', await alice.patch(`/teams/${org.id}/members/${uB.id}`, { is_owner: true }));
+check('Inhaber darf alles', Object.values((await orgOf(bob)).levels).every((level) => level >= 3));
+ok('Alice tritt aus', await alice.del(`/teams/${org.id}/members/${uA.id}`));
+invalid('Bob ist jetzt letzter Inhaber', await bob.patch(`/teams/${org.id}/members/${uB.id}`, { is_owner: false }));
+ok('Carol tritt aus', await carol.del(`/teams/${org.id}/members/${uC.id}`));
+check('Gruppen der Ausgetretenen sind weg', psql(`SELECT count(*) FROM team_group_members WHERE team_id='${org.id}'`) === '0');
+ok('Organisation löschen', await bob.del(`/teams/${org.id}`));
+check('Ränge, Gruppen und Rechte sind weg', psql(`SELECT (SELECT count(*) FROM team_ranks WHERE team_id='${org.id}') + (SELECT count(*) FROM team_groups WHERE team_id='${org.id}') + (SELECT count(*) FROM team_permissions WHERE team_id='${org.id}')`) === '0');
+
 // ---------- Admin
 for (const p of ['/admin/overview', '/admin/users', '/admin/roles', '/admin/groups', '/admin/teams', '/admin/settings', '/admin/system', '/admin/audit?limit=10', '/admin/api-keys', '/admin/webhooks', '/admin/backups']) ok(`GET ${p}`, await admin.get(p));
 check('Audit-Export', (await admin.raw('/admin/audit/export.csv')).status === 200);
@@ -829,13 +991,14 @@ check('Kein Proxy-Hinweis ohne Proxy', (await admin.get('/admin/settings')).data
 // Benachrichtigungs-Schalter gelten für alle Arten
 ok('Dave schaltet Team-Meldungen ab', await dave.put('/me/notification-prefs', [{ kind: 'team_added', in_app: false, email: false }]));
 const switchTeam = ok('Team für Schalter-Test', await alice.post('/teams', { name: 'Schalter' }));
-ok('Dave hinzufügen', await alice.post(`/teams/${switchTeam.id}/members`, { email: uD.email, team_role: 'viewer' }));
-const daveTeamNotes = async () => (await dave.get('/notifications')).data.items.filter((item) => item.kind === 'team_added').length;
+ok('Dave hinzufügen', await alice.post(`/teams/${switchTeam.id}/members`, { email: uD.email }));
+// Dave hat schon frühere Meldungen dieser Art (Organisationstest); gezählt wird die zum Schalter-Team
+const daveTeamNotes = async (title = '') => (await dave.get('/notifications')).data.items.filter((item) => item.kind === 'team_added' && item.title.includes(title)).length;
 check('Abgeschaltete Art erscheint nicht', (await daveTeamNotes()) === 0);
 const daveUnread = (await dave.get('/notifications')).data.unread;
 ok('Dave schaltet sie wieder an', await dave.put('/me/notification-prefs', [{ kind: 'team_added', in_app: true, email: false }]));
-check('Danach ist sie wieder sichtbar', (await daveTeamNotes()) === 1);
-check('Zähler folgt dem Schalter', (await dave.get('/notifications')).data.unread === daveUnread + 1);
+check('Danach ist sie wieder sichtbar', (await daveTeamNotes('Schalter')) === 1);
+check('Zähler folgt dem Schalter', (await dave.get('/notifications')).data.unread === daveUnread + (await daveTeamNotes()));
 ok('Team für Schalter-Test löschen', await alice.del(`/teams/${switchTeam.id}`));
 // Mailversand, wenn ein Test-SMTP läuft (MAILPIT=http://localhost:18025)
 if (process.env.MAILPIT) {
@@ -865,7 +1028,7 @@ if (process.env.MAILPIT) {
   // Ältere Arten: E-Mail-Schalter wirkt jetzt auch dort
   ok('Dave wählt Mail für Team-Meldungen', await dave.put('/me/notification-prefs', [{ kind: 'team_added', in_app: true, email: true }]));
   const mailTeam = ok('Team für Mail-Test', await alice.post('/teams', { name: 'MailTeam' }));
-  ok('Dave hinzufügen für Mail', await alice.post(`/teams/${mailTeam.id}/members`, { email: uD.email, team_role: 'viewer' }));
+  ok('Dave hinzufügen für Mail', await alice.post(`/teams/${mailTeam.id}/members`, { email: uD.email }));
   check('Team-Meldung kommt per Mail', await mailsAfter(uD.email, 'zu „MailTeam“', 1));
   ok('Team für Mail-Test löschen', await alice.del(`/teams/${mailTeam.id}`));
   ok('Alice: ToDo wieder normal', await alice.put('/me/notification-prefs', [{ kind: 'todo_due', in_app: true, email: false }, { kind: 'ticket_comment', in_app: true, email: false }]));

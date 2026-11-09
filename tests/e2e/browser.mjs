@@ -140,14 +140,17 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.waitForSelector('.modal.open .auth-error:not([hidden])');
   check('Leere Notiz wird abgelehnt', /erforderlich/.test(await page.textContent('.modal.open .auth-error')));
   await page.fill('.modal.open [name=title]', 'UI Notiz');
-  await page.fill('.modal.open [name=body]', 'Zeile 1\nZeile 2');
+  await page.fill('.modal.open [name=body]', 'Zeile 1\nZeile 2 mit **fett** und [Link](https://example.org)\n\n<b>kein HTML</b>');
   await submit(page);
   const noteCard = page.locator('#n-list .memo', { hasText: 'UI Notiz' });
   check('Notiz angelegt', await noteCard.count() === 1);
-  check('Zeilenumbrüche bleiben', await noteCard.locator('.memo-body').evaluate((n) => getComputedStyle(n).whiteSpace === 'pre-wrap' && n.textContent === 'Zeile 1\nZeile 2'));
+  // Notizen sind Markdown: Zeilenumbruch bleibt, **fett** und Links werden formatiert, HTML wird nur angezeigt
+  check('Zeilenumbrüche bleiben', await noteCard.locator('.memo-body').evaluate((n) => n.querySelectorAll('p br').length === 1 && /Zeile 1/.test(n.textContent) && /Zeile 2/.test(n.textContent)));
+  check('Markdown in Notizen', await noteCard.locator('.memo-body').evaluate((n) => n.querySelector('b')?.textContent === 'fett' && n.querySelector('a[href="https://example.org"][rel~=noopener]') !== null));
+  check('HTML in Notizen wird nicht ausgeführt', await noteCard.locator('.memo-body').evaluate((n) => n.textContent.includes('<b>kein HTML</b>') && n.querySelectorAll('b').length === 1));
   await noteCard.locator('[data-edit]').click();
-  check('Notiz vorbefüllt', (await page.inputValue('.modal.open [name=body]')) === 'Zeile 1\nZeile 2');
-  await page.selectOption('.modal.open [name=team_id]', { label: 'Team: E2E Team' });
+  check('Notiz vorbefüllt mit dem Rohtext', (await page.inputValue('.modal.open [name=body]')).startsWith('Zeile 1\nZeile 2 mit **fett**'));
+  await page.selectOption('.modal.open [name=team_id]', { label: 'Organisation: E2E Team' });
   await submit(page);
   check('Notiz im Team', /E2E Team/.test(await noteCard.textContent()));
   await noteCard.locator('[data-pin]').click();
@@ -181,7 +184,7 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   check('ToDo braucht einen Titel', await page.locator('.modal.open form').count() === 1);
   await page.fill('.modal.open [name=title]', 'UI Aufgabe');
   await page.fill('.modal.open [name=due_date]', new Date(Date.now() + 10 * 86400000).toLocaleDateString('sv-SE'));
-  await page.selectOption('.modal.open [name=team_id]', { label: 'Team: E2E Team' });
+  await page.selectOption('.modal.open [name=team_id]', { label: 'Organisation: E2E Team' });
   await submit(page);
   const todoRow = page.locator('#t-list .todo-row', { hasText: 'UI Aufgabe' });
   check('ToDo angelegt', await todoRow.count() === 1 && /E2E Team/.test(await todoRow.textContent()));
@@ -331,7 +334,7 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.click('#pay-settings');
   const payOptions = () => page.$$eval('.modal.open [name=payroll_budget_id] option', (o) => o.map((x) => ({ text: x.textContent, off: x.disabled })));
   check('Eigenes Konto wählbar', (await payOptions()).some((o) => /UI Konto/.test(o.text) && !o.off), JSON.stringify(await payOptions()));
-  check('Team-Konto mit Begründung gesperrt', (await payOptions()).some((o) => /Team-Kasse.*Team-Konto/.test(o.text) && o.off), JSON.stringify(await payOptions()));
+  check('Team-Konto mit Begründung gesperrt', (await payOptions()).some((o) => /Team-Kasse.*Konto einer Organisation/.test(o.text) && o.off), JSON.stringify(await payOptions()));
   check('Gehaltsdialog nach dem neuen Modell', !!(await page.$('.modal.open [name=daily_salary]')) && !!(await page.$('.modal.open [name=hourly_bonus_percent]')) && !(await page.$('.modal.open [name=hourly_rate]')));
   await page.selectOption('.modal.open [name=payroll_budget_id]', { label: 'UI Konto (EUR)' });
   await page.fill('.modal.open [name=daily_salary]', '1669');
@@ -548,6 +551,68 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   check('ToDo-Deadlines in den Einstellungen', /ToDo-Deadlines/.test(await page.textContent('#view')) && /Kommentare zu Tickets/.test(await page.textContent('#view')));
   check('Gespeicherte Abwahl bleibt', !(await page.isChecked('[name="todo_due.in_app"]')));
   check('E-Mail ist ohne Wahl aus', !(await page.isChecked('[name="ticket_comment.email"]')) && await page.isChecked('[name="ticket_comment.in_app"]'));
+  at('carol organisation');
+  await go(page, '#/teams');
+  check('Leser sieht eigene Rechte', /Deine Rechte/.test(await page.textContent('#view')) && /Leser/.test(await page.textContent('#view')));
+  check('Leser ohne Rechte-Tab', await page.locator('#view .tabs [data-tab=rights]').count() === 0 && await page.locator('#view .tabs [data-tab=members]').count() === 1);
+  await page.click('#view .tabs [data-tab=members]');
+  await page.waitForTimeout(300);
+  check('Leser ohne Rang-Auswahl und Einladung', await page.locator('#view [data-rank], #t-inv').count() === 0);
+  await ctx.close();
+}
+
+// ---------- Organisationen: Ränge, Gruppen und Rechte über die Oberfläche
+{
+  const { page, at, ctx } = await session();
+  at('alice organisationen');
+  await login(page, 'alice@e2e.test', 'alice-Sehr-Sicher-9931!');
+  await go(page, '#/teams');
+  check('Organisationen in der Navigation', /Organisationen/.test(await page.textContent('.sidebar')));
+  check('Übersicht mit eigenen Rechten', /Deine Rechte/.test(await page.textContent('#view')) && /Inhaber/.test(await page.textContent('#view')));
+  for (const tab of ['members', 'ranks', 'groups', 'rights']) {
+    at(`alice organisationen ${tab}`);
+    await page.click(`#view .tabs [data-tab=${tab}]`);
+    await page.waitForTimeout(400);
+    check(`Tab ${tab} ohne Fehler`, !(await viewErr(page)) && !/undefined|NaN/.test(await page.textContent('#t-panel')), (await page.textContent('#t-panel')).slice(0, 120));
+  }
+  at('alice rang');
+  await page.click('#view .tabs [data-tab=ranks]');
+  await page.waitForTimeout(300);
+  await page.click('#r-new');
+  await page.fill('.modal.open [name=name]', 'Praktikant');
+  await submit(page);
+  check('Rang angelegt', /Praktikant/.test(await page.textContent('#t-panel')));
+  at('alice gruppe');
+  await page.click('#view .tabs [data-tab=groups]');
+  await page.waitForTimeout(300);
+  await page.click('#g-new');
+  await page.fill('.modal.open [name=name]', 'Streife');
+  await page.fill('.modal.open [name=description]', 'Außendienst');
+  await submit(page);
+  check('Gruppe angelegt', /Streife/.test(await page.textContent('#t-panel')));
+  at('alice gruppe zuweisen');
+  await page.click('#view .tabs [data-tab=members]');
+  await page.waitForTimeout(300);
+  await page.locator('#t-panel tr', { hasText: 'carol@e2e.test' }).locator('[data-groups]').click();
+  await page.locator('.modal.open label', { hasText: 'Streife' }).locator('input').check();
+  await submit(page);
+  await page.waitForTimeout(300);
+  check('Gruppe beim Mitglied', /Streife/.test(await page.locator('#t-panel tr', { hasText: 'carol@e2e.test' }).textContent()));
+  at('alice rechte');
+  await page.click('#view .tabs [data-tab=rights]');
+  await page.waitForTimeout(400);
+  await page.selectOption('#r-subject', { label: 'Praktikant' });
+  await page.waitForTimeout(400);
+  const caseSelect = 'select[data-perm=casefile][data-scope=""]';
+  check('Neuer Rang ohne Rechte', (await page.$eval(caseSelect, (s) => s.value)) === '0');
+  await page.selectOption(caseSelect, '2');
+  await page.waitForTimeout(600);
+  check('Recht gespeichert', (await page.$eval(caseSelect, (s) => s.value)) === '2');
+  check('Übersicht zeigt den Rang', /Praktikant/.test(await page.locator('#t-panel table.matrix').textContent()));
+  await page.selectOption('#r-subject', { label: 'carol' });
+  await page.waitForTimeout(500);
+  check('Persönliche Rechte mit Wirksam-Spalte', /Wirksam/.test(await page.textContent('#t-panel')) && (await page.$eval(caseSelect, (s) => s.value)) === '');
+  await page.screenshot({ path: `${out}/organisation-rechte.png`, fullPage: true });
   await ctx.close();
 }
 

@@ -22,14 +22,17 @@ const LABELS = {
   recipient_user_id: 'Empfänger', recipients: 'Empfänger', registered_owner: 'Besitzer', remind: 'Erinnerung', repeat: 'Wiederholung', repeat_interval: 'Wiederholungsabstand',
   responsible_person_id: 'Verantwortlich', rhythm: 'Rhythmus', rhythm_interval: 'Abstand', role_ids: 'Rollen', scope: 'Sichtbarkeit', score: 'Punkte', service_due: 'Service',
   service_due_km: 'Service bei km', service_interval_km: 'Service-Intervall', sport_type: 'Sportart', start: 'Beginn', start_date: 'Startdatum', started_at: 'Beginn',
-  status: 'Status', steps: 'Reproduktionsschritte', tags: 'Tags', target_amount: 'Zielbetrag', target_date: 'Zieldatum', team_id: 'Team', team_role: 'Teamrolle', title: 'Titel',
+  status: 'Status', steps: 'Reproduktionsschritte', tags: 'Tags', target_amount: 'Zielbetrag', target_date: 'Zieldatum', team_id: 'Organisation', title: 'Titel',
   to: 'Bis', type: 'Typ', url: 'URL', vehicle_id: 'Fahrzeug', week_start: 'Wochenstart', weekly_work_hours: 'Wochen-Soll', work_date: 'Datum',
   // Akten, Lizenzen, Schulungen, Dokumentationen
   case_file_id: 'Akte', closed_on: 'Abgeschlossen am', completed_on: 'Abgeschlossen am', end_time: 'Ende', entry_date: 'Datum', file_number: 'Aktenzeichen',
   instructor: 'Ausbilder', issued_on: 'Ausgestellt am', issuer: 'Ausgestellt von', location: 'Ort', number: 'Nummer', opened_on: 'Eröffnet am',
   people: 'Personen', pinned: 'Angeheftet', q: 'Suche', result: 'Ergebnis', role: 'Rolle', session_date: 'Datum', session_id: 'Termin', sort: 'Reihenfolge',
-  start_time: 'Beginn', state: 'Zustand', status_reason: 'Begründung', type_id: 'Lizenzart', user_id: 'Benutzer', valid_until: 'Gültig bis',
+  start_time: 'Beginn', state: 'Zustand', status_reason: 'Begründung', type_id: 'Art', user_id: 'Benutzer', valid_until: 'Gültig bis',
   validity_months: 'Gültigkeit',
+  // Organisationen
+  is_owner: 'Inhaber', level: 'Recht', module: 'Funktion', move: 'Verschieben', rank_id: 'Rang', rank_ids: 'Ränge', restricted: 'Beschränkt',
+  scope_id: 'Bereich', subject: 'Recht für', subject_id: 'Recht für', user_ids: 'Mitglieder',
 };
 
 function subject(path) {

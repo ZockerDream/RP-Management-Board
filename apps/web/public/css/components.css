@@ -250,6 +250,11 @@ button.list-item:hover { background: var(--surface-2); }
 .doc-body hr { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
 .doc-body code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: .92em; }
 .doc-body a { color: var(--primary); }
+/* Markdown in Notizen und Beschreibungen: kompakt, ohne pre-wrap */
+.md { white-space: normal; line-height: 1.5; }
+.md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+.md h2 { font-size: 17px; } .md h3 { font-size: 15px; } .md h4 { font-size: 14px; }
+.md.small { font-size: 13px; color: var(--muted); }
 .case-entry { padding: 12px 0; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
 .case-entry .memo-body { max-height: none; }
 .person-record h3 { margin: 18px 0 2px; font-size: 15px; }

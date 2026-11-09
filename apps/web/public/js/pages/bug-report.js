@@ -10,6 +10,7 @@ export async function render(view) {
           <label class="field full">Kurzer Titel<input name="title" required minlength="5" maxlength="120"></label>
           <label class="field full">Was ist passiert?<textarea name="description" rows="4" required minlength="20" maxlength="10000"></textarea></label>
           <label class="field full">Reproduktionsschritte (optional)<textarea name="steps" rows="3" maxlength="5000"></textarea></label>
+          <small class="muted full">Beschreibung und Schritte unterstützen Markdown: **fett**, *kursiv*, - Liste, &#96;Code&#96;, [Text](https://…).</small>
         </div>
         <div class="modal-foot"><button class="btn" type="submit">Ticket erstellen</button></div>
       </form>

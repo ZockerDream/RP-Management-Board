@@ -7,6 +7,7 @@ import { getSetting } from './settings.js';
 import { planPayroll, mondayOf, nextDate, payrollCutoff } from './payroll.js';
 import { localDateTime } from './work-split.js';
 import { todoStage, dateInZone } from './periods.js';
+import { teamUsers } from './org.js';
 
 const localDate = (date = new Date()) => dateInZone(config.tz, date);
 
@@ -146,7 +147,7 @@ export async function reminders(log) {
     if (!occ || e.last_reminded === occ) continue;
     const days = Math.round((new Date(occ) - new Date(t)) / 86400000);
     if (days > REMIND_DAYS[e.remind]) continue;
-    const users = e.type === 'team' ? (await many('SELECT user_id FROM team_members WHERE team_id=$1', [e.team_id])).map((r) => r.user_id) : [e.owner_id];
+    const users = e.type === 'team' ? await teamUsers(e.team_id, 'calendar') : [e.owner_id];
     for (const uid of users) {
       await notify(uid, 'calendar', `Termin: ${e.title}`, `${days === 0 ? 'Heute' : `In ${days} Tag(en) – ${occ}`}${e.note ? `\n${e.note}` : ''}`, `cal:${e.id}:${occ}`, log);
     }
@@ -159,9 +160,7 @@ export async function reminders(log) {
     FROM vehicles WHERE (service_due IS NOT NULL AND service_due <= $1)
       OR (odometer_km IS NOT NULL AND service_due_km IS NOT NULL AND odometer_km >= service_due_km)
       OR (first_aid_kit_expires_on IS NOT NULL AND first_aid_kit_expires_on <= $2)`, [soon, kitSoon])) {
-    const users = v.owner_user_id
-      ? [v.owner_user_id]
-      : (await many('SELECT user_id FROM team_members WHERE team_id=$1', [v.team_id])).map((member) => member.user_id);
+    const users = v.owner_user_id ? [v.owner_user_id] : await teamUsers(v.team_id, 'vehicle');
     for (const userId of users) {
       const details = [
         v.service_due ? `Datum: ${v.service_due}` : null,
@@ -181,24 +180,21 @@ export async function reminders(log) {
   }
   for (const a of await many(`SELECT a.id, k.label, k.owner_user_id, k.team_id, a.due_at FROM key_assignments a JOIN keys k ON k.id=a.key_id
     WHERE a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at IS NOT NULL AND a.due_at <= $1`, [soon])) {
-    const users = a.owner_user_id
-      ? [a.owner_user_id]
-      : (await many('SELECT user_id FROM team_members WHERE team_id=$1', [a.team_id])).map((member) => member.user_id);
+    const users = a.owner_user_id ? [a.owner_user_id] : await teamUsers(a.team_id, 'key');
     for (const userId of users) {
       const body = a.due_at < t ? `Überfällig seit ${a.due_at}` : `Rückgabe bis ${a.due_at}`;
       await notify(userId, 'key_overdue', `Schlüssel-Rückgabe: ${a.label}`, body, `key:${a.id}:${userId}`);
     }
   }
-  const scopeUsers = async (row) => (row.owner_user_id
-    ? [row.owner_user_id]
-    : (await many('SELECT user_id FROM team_members WHERE team_id=$1', [row.team_id])).map((member) => member.user_id));
+  // Erinnerungen bekommt in einer Organisation, wer die Funktion lesen darf; „Teilnehmen“ bei Schulungen reicht nicht
+  const scopeUsers = async (row, module) => (row.owner_user_id ? [row.owner_user_id] : teamUsers(row.team_id, module));
   const expiryText = (date) => (date < t ? `abgelaufen am ${date}` : `läuft am ${date} ab`);
   // Lizenzen: 30 Tage vorher und noch einmal nach dem Ablauf
   for (const l of await many(`SELECT l.id, l.valid_until, lt.name type_name, lt.owner_user_id, lt.team_id, pe.name person
     FROM licenses l JOIN license_types lt ON lt.id=l.type_id JOIN people pe ON pe.id=l.person_id
     WHERE l.status='valid' AND l.valid_until IS NOT NULL AND l.valid_until <= $1`, [kitSoon])) {
     const stage = l.valid_until < t ? 'expired' : 'soon';
-    for (const userId of await scopeUsers(l)) {
+    for (const userId of await scopeUsers(l, 'license')) {
       await notify(userId, 'license_expiry', `Lizenz: ${l.type_name} von ${l.person}`, expiryText(l.valid_until), `lic:${l.id}:${l.valid_until}:${stage}`);
     }
   }
@@ -212,7 +208,7 @@ export async function reminders(log) {
       ORDER BY r.training_id, COALESCE(r.user_id, r.person_id), r.completed_on DESC NULLS LAST, r.created_at DESC
     ) latest WHERE valid_until IS NOT NULL AND valid_until <= $1`, [kitSoon])) {
     const stage = r.valid_until < t ? 'expired' : 'soon';
-    for (const userId of await scopeUsers(r)) {
+    for (const userId of await scopeUsers(r, 'training')) {
       await notify(userId, 'training_expiry', `Schulung: ${r.name} – ${r.participant}`, expiryText(r.valid_until), `training:${r.id}:${r.valid_until}:${stage}`);
     }
   }
@@ -235,14 +231,8 @@ export async function todoReminders(log) {
     const stage = todoStage(due, now);
     const reminder = `${due}:${stage}`;
     if (!stage || todo.last_reminder === reminder) continue;
-    const users = todo.team_id
-      ? (await many(
-        `SELECT tm.user_id FROM team_members tm JOIN users u ON u.id=tm.user_id
-         WHERE tm.team_id=$1 AND u.status='active' AND u.deleted_at IS NULL`,
-        [todo.team_id],
-      )).map((row) => row.user_id)
-      : [todo.owner_user_id];
-    const deadline = `Deadline: ${due.split('-').reverse().join('.')}${todo.team_name ? ` · Team ${todo.team_name}` : ''}`;
+    const users = todo.team_id ? await teamUsers(todo.team_id, 'todos') : [todo.owner_user_id];
+    const deadline = `Deadline: ${due.split('-').reverse().join('.')}${todo.team_name ? ` · ${todo.team_name}` : ''}`;
     for (const userId of users) {
       await notify(userId, 'todo_due', `${TODO_TITLES[stage]}: ${todo.title}`, deadline, `todo:${todo.id}:${reminder}`, log);
     }
@@ -261,7 +251,7 @@ export async function reportsRun(log) {
     const from = addInterval(t, r.rhythm, -interval);
     const rows = await many(
       `SELECT COALESCE(c.name,'Ohne Kategorie') name, sum(t.amount) total FROM transactions t JOIN budgets b ON b.id=t.budget_id LEFT JOIN categories c ON c.id=t.category_id
-       WHERE t.type='expense' AND t.booked_at BETWEEN $2 AND $3 AND ((b.type='solo' AND b.owner_user_id=$1) OR b.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1))
+       WHERE t.type='expense' AND t.booked_at BETWEEN $2 AND $3 AND ((b.type='solo' AND b.owner_user_id=$1) OR (b.type='shared' AND team_level(b.team_id, $1, 'budget') >= 2))
        GROUP BY 1 ORDER BY 2 DESC`,
       [r.owner_id, from, t],
     );

@@ -1,5 +1,7 @@
 import { api } from '../api.js';
 import { $, esc, empty, openForm, confirmBox, toast, todayStr, fdate } from '../ui.js';
+import { state } from '../app.js';
+import { markdownBlock, MARKDOWN_HELP } from '../markdown.js';
 
 const SPORTS = {
   run: { label: 'Laufen', title: 'Laufstrecke' },
@@ -24,31 +26,31 @@ const optionalInt = (value) => (String(value).trim() === '' ? null : Number(valu
 export async function render(view, sportType = 'run') {
   const sport = SPORTS[sportType];
   let routes = [], teams = [];
-  view.innerHTML = `<div class="page-head"><div><h1>${sport.label}</h1><p>Strecken deines Teams und gemeinsame Bestenliste</p></div>
+  view.innerHTML = `<div class="page-head"><div><h1>${sport.label}</h1><p>Strecken deiner Organisation und gemeinsame Bestenliste</p></div>
     <div class="actions"><button class="btn" id="route-new">Strecke anlegen</button></div></div><div id="sport-body"></div>`;
 
   async function load() {
     [routes, teams] = await Promise.all([api.get(`/sport/routes?sport_type=${sportType}`), api.get('/teams').catch(() => [])]);
-    teams = teams.filter((team) => team.role !== 'viewer');
+    teams = teams.filter((team) => team.levels.sport >= 3);
     $('#route-new').hidden = !teams.length;
     $('#sport-body').innerHTML = routes.length ? routes.map((route) => {
-      const manage = route.role !== 'viewer';
+      const manage = route.level >= 3;
       return `<div class="card" style="margin-bottom:16px"><div class="card-head"><h2>${esc(route.name)}</h2>
         <div class="row"><button class="btn sm" data-score-new="${route.id}">Ergebnis eintragen</button>${manage ? `<button class="btn ghost sm" data-route-edit="${route.id}">Bearbeiten</button><button class="btn ghost sm" data-route-del="${route.id}">Löschen</button>` : ''}</div></div>
-        <div class="chips"><span class="chip">Team: ${esc(route.team_name)}</span><span class="chip">${route.checkpoints} Checkpoints</span>${route.distance_km != null ? `<span class="chip">${num(route.distance_km)} km</span>` : ''}<span class="chip">${route.attempts} Versuche</span><span class="chip">${route.participants} Teilnehmer</span>${route.best_score != null ? `<span class="chip">Bestwert ${num(route.best_score)}</span>` : ''}</div>
-        ${route.notes ? `<p class="muted" style="white-space:pre-wrap">${esc(route.notes)}</p>` : ''}
-        ${route.scores.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>#</th><th>Name</th><th>Punkte</th><th>Zeit</th><th>Checkpoints</th><th>Datum</th><th>Notiz</th><th></th></tr></thead><tbody>${route.scores.map((score, index) => `<tr><td>${index + 1}</td><td><b>${esc(score.user_name)}</b></td><td>${num(score.score)}</td><td>${duration(score.duration_seconds)}</td><td>${score.checkpoints_reached ?? "–"}</td><td>${fdate(score.achieved_on)}</td><td>${esc(score.note)}</td><td><button class="link" data-score-del="${score.id}">Löschen</button></td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Ergebnisse.')}</div>`;
-    }).join('') : `<div class="card">${empty(`Noch keine Strecken für ${sport.label}. Teameditoren können Strecken anlegen.`)}</div>`;
+        <div class="chips"><span class="chip">${esc(route.team_name)}</span><span class="chip">${route.checkpoints} Checkpoints</span>${route.distance_km != null ? `<span class="chip">${num(route.distance_km)} km</span>` : ''}<span class="chip">${route.attempts} Versuche</span><span class="chip">${route.participants} Teilnehmer</span>${route.best_score != null ? `<span class="chip">Bestwert ${num(route.best_score)}</span>` : ''}</div>
+        ${route.notes ? markdownBlock(route.notes, 'small') : ''}
+        ${route.scores.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>#</th><th>Name</th><th>Punkte</th><th>Zeit</th><th>Checkpoints</th><th>Datum</th><th>Notiz</th><th></th></tr></thead><tbody>${route.scores.map((score, index) => `<tr><td>${index + 1}</td><td><b>${esc(score.user_name)}</b></td><td>${num(score.score)}</td><td>${duration(score.duration_seconds)}</td><td>${score.checkpoints_reached ?? "–"}</td><td>${fdate(score.achieved_on)}</td><td>${esc(score.note)}</td><td>${manage || score.user_id === state.me.id ? `<button class="link" data-score-del="${score.id}">Löschen</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Ergebnisse.')}</div>`;
+    }).join('') : `<div class="card">${empty(`Noch keine Strecken für ${sport.label}. Strecken legt an, wer bei Sport „Lesen & Schreiben“ hat.`)}</div>`;
   }
 
   const routeForm = (route) => openForm({
     title: route ? `${sport.title} bearbeiten` : `${sport.title} anlegen`,
     fields: [
       { name: 'name', label: 'Name', value: route?.name, required: true, full: true },
-      ...(route ? [] : [{ name: 'team_id', label: 'Team', type: 'select', options: teams.map((team) => ({ v: team.id, l: team.name })), value: teams[0]?.id }]),
+      ...(route ? [] : [{ name: 'team_id', label: 'Organisation', type: 'select', options: teams.map((team) => ({ v: team.id, l: team.name })), value: teams[0]?.id }]),
       { name: 'checkpoints', label: 'Checkpoints', type: 'number', min: 0, step: 1, value: route?.checkpoints ?? 0, required: true },
       { name: 'distance_km', label: 'Distanz (km, optional)', type: 'number', min: 0, step: 0.01, value: route?.distance_km ?? '' },
-      { name: 'notes', label: 'Notizen', type: 'textarea', value: route?.notes || '', full: true },
+      { name: 'notes', label: 'Notizen', type: 'textarea', value: route?.notes || '', full: true, help: MARKDOWN_HELP },
     ],
     onSubmit: async (v) => {
       const body = { name: v.name.trim(), checkpoints: Number(v.checkpoints), distance_km: v.distance_km === '' ? null : Number(v.distance_km), notes: v.notes };

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import PDFDocument from 'pdfkit';
 import { many, one, q, tx } from '../db.js';
 import { requireAuth, notFound, bad, forbidden } from '../authz.js';
+import { LEVEL, recordOwner, teamLevel, needMessage, visibleSql } from '../org.js';
 import { toCsv } from '../lib.js';
 import { config } from '../config.js';
 import { calculateWorkCompensation } from '../work-hours.js';
@@ -27,20 +28,25 @@ const entryBody = z.object({
 });
 
 export default async function routes(app) {
-  async function projectAccess(userId, projectId, write = false) {
+  // Projekte einer Organisation: buchen ab „Teilnehmen“, ändern ab „Lesen & Schreiben“, löschen mit „Verwalten“
+  async function projectAccess(userId, projectId, need = LEVEL.PARTICIPATE) {
     if (!projectId) return null;
     const project = await one('SELECT * FROM work_projects WHERE id=$1', [projectId]);
     if (!project) throw bad('Projekt nicht gefunden');
     if (project.owner_user_id === userId) return project;
-    const member = project.team_id && await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [project.team_id, userId]);
-    if (!member || (write && member.team_role === 'viewer')) throw notFound();
+    const level = project.team_id ? await teamLevel(userId, project.team_id, 'work') : 0;
+    if (level < LEVEL.PARTICIPATE) throw notFound();
+    if (level < need) throw forbidden(needMessage('work', need));
     return project;
   }
 
-  async function requireTeamEditor(userId, teamId) {
-    const membership = await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [teamId, userId]);
-    if (!membership) throw notFound('Team nicht gefunden');
-    if (membership.team_role === 'viewer') throw forbidden('Nur Team-Owner und Editoren können Arbeitszeiten verwalten');
+  // Zeiten aller Mitglieder: sehen ab „Lesen“, Einstellungen ändern ab „Lesen & Schreiben“
+  async function requireTeamWork(userId, teamId, need) {
+    const level = await teamLevel(userId, teamId, 'work');
+    if (level < need) {
+      if (!(await one('SELECT 1 FROM team_members WHERE team_id=$1 AND user_id=$2', [teamId, userId]))) throw notFound('Organisation nicht gefunden');
+      throw forbidden(needMessage('work', need));
+    }
   }
 
   // Schichten über Mitternacht werden zu einem Eintrag je Kalendertag
@@ -64,7 +70,7 @@ export default async function routes(app) {
     const membership = await one(
       `SELECT 1 FROM team_members editor
        JOIN team_members employee ON employee.team_id=editor.team_id
-       WHERE editor.user_id=$1 AND employee.user_id=$2 AND editor.team_role IN ('owner','editor')`,
+       WHERE editor.user_id=$1 AND employee.user_id=$2 AND team_level(editor.team_id, editor.user_id, 'work') >= 3`,
       [userId, entry.user_id],
     );
     if (!membership) throw notFound();
@@ -73,22 +79,19 @@ export default async function routes(app) {
 
   app.get('/work-projects', requireAuth, async (req) => many(
     `SELECT p.*, t.name team_name FROM work_projects p LEFT JOIN teams t ON t.id=p.team_id
-     WHERE p.owner_user_id=$1 OR p.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1)
+     WHERE ${visibleSql('p', 'work', '$1', LEVEL.PARTICIPATE)}
      ORDER BY p.active DESC, p.name`,
     [req.user.id],
   ));
 
   app.post('/work-projects', requireAuth, async (req) => {
     const body = z.object({ name: z.string().trim().min(1).max(100), team_id: z.string().uuid().nullish() }).parse(req.body);
-    if (body.team_id) {
-      const member = await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [body.team_id, req.user.id]);
-      if (!member || member.team_role === 'viewer') throw forbidden();
-    }
+    if (body.team_id) await recordOwner(req.user.id, body.team_id, 'work', LEVEL.WRITE);
     return one('INSERT INTO work_projects(name,owner_user_id,team_id) VALUES ($1,$2,$3) RETURNING id', [body.name, body.team_id ? null : req.user.id, body.team_id || null]);
   });
 
   app.patch('/work-projects/:id', requireAuth, async (req) => {
-    const project = await projectAccess(req.user.id, req.params.id, true);
+    const project = await projectAccess(req.user.id, req.params.id, LEVEL.WRITE);
     const body = z.object({ name: z.string().trim().min(1).max(100), active: z.boolean() }).partial().parse(req.body);
     const keys = Object.keys(body);
     if (keys.length) await q(`UPDATE work_projects SET ${keys.map((key, index) => `${key}=$${index + 2}`).join(',')} WHERE id=$1`, [project.id, ...keys.map((key) => body[key])]);
@@ -96,11 +99,7 @@ export default async function routes(app) {
   });
 
   app.delete('/work-projects/:id', requireAuth, async (req) => {
-    const project = await projectAccess(req.user.id, req.params.id, true);
-    if (project.owner_user_id !== req.user.id) {
-      const membership = await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [project.team_id, req.user.id]);
-      if (!membership || membership.team_role !== 'owner') throw forbidden('Nur Besitzer bzw. Team-Owner können das Projekt löschen');
-    }
+    const project = await projectAccess(req.user.id, req.params.id, LEVEL.MANAGE);
     await q('DELETE FROM work_projects WHERE id=$1', [project.id]);
     return { ok: true };
   });
@@ -113,7 +112,7 @@ export default async function routes(app) {
 
   app.post('/work-hours/timer/start', requireAuth, async (req) => {
     const body = z.object({ project_id: z.string().uuid().nullish(), note: z.string().max(500).default('') }).parse(req.body);
-    if (body.project_id) await projectAccess(req.user.id, body.project_id, true);
+    if (body.project_id) await projectAccess(req.user.id, body.project_id);
     try {
       return await one('INSERT INTO work_timers(user_id,project_id,started_at,note) VALUES ($1,$2,now(),$3) RETURNING *', [req.user.id, body.project_id || null, body.note]);
     } catch (error) {
@@ -230,7 +229,7 @@ export default async function routes(app) {
 
   app.get('/work-hours/team/monthly', requireAuth, async (req) => {
     const { team_id: teamId, month } = z.object({ team_id: id, month: monthFilter.shape.month }).parse(req.query);
-    await requireTeamEditor(req.user.id, teamId);
+    await requireTeamWork(req.user.id, teamId, LEVEL.READ);
     const members = await many(
       `SELECT u.id,u.name,u.weekly_work_hours,u.daily_salary,u.hourly_bonus_percent,u.currency
        FROM team_members tm JOIN users u ON u.id=tm.user_id
@@ -252,7 +251,7 @@ export default async function routes(app) {
   app.patch('/work-hours/team/:teamId/members/:userId/settings', requireAuth, async (req) => {
     const teamId = id.parse(req.params.teamId);
     const userId = id.parse(req.params.userId);
-    await requireTeamEditor(req.user.id, teamId);
+    await requireTeamWork(req.user.id, teamId, LEVEL.WRITE);
     if (!(await one('SELECT 1 FROM team_members WHERE team_id=$1 AND user_id=$2', [teamId, userId]))) throw notFound();
     const settings = z.object({
       weekly_work_hours: z.number().min(1).max(168).multipleOf(0.25).optional(),
@@ -326,7 +325,7 @@ export default async function routes(app) {
 
   app.post('/work-hours', requireAuth, async (req) => {
     const entry = entryBody.parse(req.body);
-    if (entry.project_id) await projectAccess(req.user.id, entry.project_id, true);
+    if (entry.project_id) await projectAccess(req.user.id, entry.project_id);
     const ids = await tx((client) => insertEntries(client, req.user.id, entry));
     return { id: ids[0], entries: ids.length };
   });
@@ -334,7 +333,7 @@ export default async function routes(app) {
   app.patch('/work-hours/:id', requireAuth, async (req) => {
     const existing = await workEntryAccess(req.user.id, req.params.id);
     const entry = patchSchema(entryBody).parse(req.body);
-    if (entry.project_id) await projectAccess(existing.user_id, entry.project_id, existing.user_id === req.user.id);
+    if (entry.project_id) await projectAccess(existing.user_id, entry.project_id);
     if (!Object.keys(entry).length) return { ok: true };
     return tx(async (client) => {
       const current = (await client.query('SELECT * FROM work_entries WHERE id=$1 AND user_id=$2 FOR UPDATE', [existing.id, existing.user_id])).rows[0];

@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { $, esc, empty, fdate, tag, openForm, confirmBox, toast, todayStr, debounce } from '../ui.js';
 import { can } from '../app.js';
 import { writableTeams, visibilityField, scopeTag } from './common.js';
+import { markdownBlock, MARKDOWN_HELP } from '../markdown.js';
 
 export const LICENSE_STATE = {
   valid: ['ok', 'Gültig'], expiring: ['warn', 'Läuft bald ab'], expired: ['bad', 'Abgelaufen'], suspended: ['warn', 'Gesperrt'], revoked: ['bad', 'Entzogen'],
@@ -15,7 +16,7 @@ const typeForm = (type, teams) => openForm({
     { name: 'name', label: 'Name', value: type?.name, required: true, maxlength: 100, placeholder: 'z. B. Führerschein, Waffenschein', full: true },
     { name: 'validity_months', label: 'Standard-Gültigkeit in Monaten', type: 'number', min: 1, step: 1, value: type?.validity_months ?? '', help: 'Leer heißt unbefristet. Neue Lizenzen laufen dann so lange.' },
     ...(type ? [] : [visibilityField(teams, null)]),
-    { name: 'description', label: 'Beschreibung', type: 'textarea', value: type?.description, maxlength: 2000, full: true },
+    { name: 'description', label: 'Beschreibung', type: 'textarea', value: type?.description, maxlength: 2000, full: true, help: MARKDOWN_HELP },
   ],
   onSubmit: async (values) => {
     const body = { name: values.name.trim(), description: values.description, validity_months: values.validity_months ? Number(values.validity_months) : null };
@@ -26,7 +27,7 @@ const typeForm = (type, teams) => openForm({
 });
 
 async function licenseForm(license, types, people) {
-  const writableTypes = types.filter((t) => t.role !== 'viewer');
+  const writableTypes = types.filter((t) => t.level >= 3);
   if (!license && !writableTypes.length) { toast('Lege zuerst eine Lizenzart an', true); return false; }
   const type = license ? types.find((t) => t.id === license.type_id) : writableTypes[0];
   const personOptions = (forType) => people.filter((p) => sameScope(forType, p) && (p.active || p.id === license?.person_id)).map((p) => ({ v: p.id, l: p.name }));
@@ -34,7 +35,7 @@ async function licenseForm(license, types, people) {
     { type: 'html', html: `<p><b>${esc(license.type_name)}</b> für <b>${esc(license.person_name || 'unbekannte Person')}</b></p>` },
   ] : [
     { name: 'type_id', label: 'Lizenzart', type: 'select', options: writableTypes.map((t) => ({ v: t.id, l: `${t.name}${t.team_name ? ` · ${t.team_name}` : ''}` })), value: type.id },
-    { name: 'person_id', label: 'Person', type: 'select', options: personOptions(type), help: 'Personen aus demselben Bereich wie die Lizenzart (Team oder privat).' },
+    { name: 'person_id', label: 'Person', type: 'select', options: personOptions(type), help: 'Personen aus demselben Bereich wie die Lizenzart (Organisation oder privat).' },
   ];
   fields.push(
     { name: 'number', label: 'Nummer', value: license?.number, maxlength: 60 },
@@ -80,7 +81,8 @@ export async function render(view) {
   let licenses = [];
   let people = [];
   const filter = { state: '', type_id: '', q: '' };
-  const teams = can('team:read') ? await writableTeams() : [];
+  // Lizenzarten anlegen braucht „Verwalten“ bei Lizenzen
+  const teams = can('team:read') ? await writableTeams('license', 4) : [];
   view.innerHTML = `<div class="page-head"><div><h1>Lizenzen</h1><p>Lizenzen von Personen mit Gültigkeit, Sperre und Entzug</p></div>
     <div class="actions">${can('license:create') ? '<button class="btn ghost" id="l-type-new">Neue Lizenzart</button><button class="btn" id="l-new">Lizenz ausstellen</button>' : ''}</div></div>
     <div><div class="tabs"><button data-tab="licenses" class="on">Lizenzen</button><button data-tab="types">Lizenzarten</button></div>
@@ -91,14 +93,15 @@ export async function render(view) {
       <div class="card" id="l-list"></div></div>
     <div class="tab-panel" data-panel="types"><div class="card" id="l-types"></div></div></div>`;
 
-  const writable = (row) => row.role !== 'viewer';
+  const writable = (row) => row.level >= 3;
+  const manageable = (row) => row.level >= 4;
   function drawTypes() {
     $('#l-type').innerHTML = `<option value="">Alle Lizenzarten</option>${types.map((t) => `<option value="${t.id}" ${filter.type_id === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}`;
     $('#l-types').innerHTML = types.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Lizenzart</th><th>Gültigkeit</th><th>Lizenzen</th><th>Sichtbarkeit</th><th></th></tr></thead><tbody>
-      ${types.map((t) => `<tr><td><b>${esc(t.name)}</b>${t.description ? `<br><small class="muted">${esc(t.description)}</small>` : ''}</td>
+      ${types.map((t) => `<tr><td><b>${esc(t.name)}</b>${t.description ? markdownBlock(t.description, 'small') : ''}</td>
         <td>${t.validity_months ? `${t.validity_months} Monate` : 'unbefristet'}</td><td>${t.licenses}</td><td>${scopeTag(t)}</td>
-        <td style="white-space:nowrap">${writable(t) && can('license:update') ? `<button class="btn ghost sm" data-type-edit="${t.id}">Bearbeiten</button>` : ''}
-        ${writable(t) && can('license:delete') && !t.licenses ? `<button class="btn ghost sm" data-type-del="${t.id}">Löschen</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
+        <td style="white-space:nowrap">${manageable(t) && can('license:update') ? `<button class="btn ghost sm" data-type-edit="${t.id}">Bearbeiten</button>` : ''}
+        ${manageable(t) && can('license:delete') && !t.licenses ? `<button class="btn ghost sm" data-type-del="${t.id}">Löschen</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
       : empty('Noch keine Lizenzarten. Lege zuerst eine an, z. B. „Führerschein“.');
   }
   function drawLicenses() {
@@ -107,7 +110,7 @@ export async function render(view) {
         <td>${esc(l.number || '–')}</td><td>${fdate(l.issued_on)}${l.issuer ? `<br><small class="muted">${esc(l.issuer)}</small>` : ''}</td><td>${l.valid_until ? fdate(l.valid_until) : 'unbefristet'}</td>
         <td>${stateTag(l.state)}${l.status_reason ? `<br><small class="muted">${esc(l.status_reason)}</small>` : ''}</td>
         <td style="white-space:nowrap">${writable(l) && can('license:update') ? `<button class="btn ghost sm" data-edit="${l.id}">Bearbeiten</button>${l.validity_months && l.status !== 'revoked' ? ` <button class="btn ghost sm" data-renew="${l.id}">Verlängern</button>` : ''}` : ''}
-        ${writable(l) && can('license:delete') ? ` <button class="btn ghost sm" data-del="${l.id}">Löschen</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
+        ${manageable(l) && can('license:delete') ? ` <button class="btn ghost sm" data-del="${l.id}">Löschen</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
       : empty(types.length ? 'Keine passenden Lizenzen.' : 'Noch keine Lizenzarten angelegt.');
   }
   async function load() {

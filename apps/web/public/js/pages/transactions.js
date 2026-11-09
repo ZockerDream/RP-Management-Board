@@ -12,7 +12,7 @@ export async function render(view) {
   view.innerHTML = `<div class="page-head"><div><h1>Transaktionen</h1><p>Alle Buchungen deiner Konten</p></div>
     <div class="actions">${can('transaction:export') ? '<button class="btn ghost" id="t-csv">CSV-Export</button>' : ''}${can('transaction:create') ? '<button class="btn" id="t-new">Neue Buchung</button>' : ''}</div></div>
     <div class="card"><div class="toolbar" style="flex-wrap:wrap;gap:8px">
-      <div class="seg" id="t-scope"><button data-s="all" class="on">Alle</button><button data-s="solo">Solo</button><button data-s="shared">Team</button></div>
+      <div class="seg" id="t-scope"><button data-s="all" class="on">Alle</button><button data-s="solo">Solo</button><button data-s="shared">Organisation</button></div>
       <input id="t-q" placeholder="Suchen…" style="width:180px">
       <select id="t-budget"><option value="">Alle Konten</option>${opts(budgets, '')}</select>
       <select id="t-type"><option value="">Alle Arten</option><option value="expense">Ausgaben</option><option value="income">Einnahmen</option><option value="deposit">Einzahlungen</option></select>

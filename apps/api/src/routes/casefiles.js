@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import { one, many, q, tx } from '../db.js';
-import { authz, bad, notFound, recordRole, recordOwner, can } from '../authz.js';
+import { authz, bad, notFound, forbidden, can } from '../authz.js';
+import { LEVEL, levelSql, visibleSql, recordLevel, recordOwner, needMessage } from '../org.js';
 import { audit } from '../audit.js';
 import { patchSchema } from '../validation.js';
 import { today } from '../lib.js';
 import { receiveUpload, sendUpload, removeUpload } from '../uploads.js';
-import { uuid, isoDate, visibleSql, roleSql, assertPersonInScope, personJoin } from '../records.js';
+import { uuid, isoDate, assertPersonInScope, personJoin } from '../records.js';
 
 const STATUS = ['open', 'dormant', 'closed'];
 const fileFields = z.object({
@@ -18,6 +19,7 @@ const fileFields = z.object({
 });
 const createBody = fileFields.extend({
   team_id: uuid.nullish(),
+  type_id: uuid.nullish(),
   people: z.array(z.object({ person_id: uuid, role: z.string().trim().max(60).default('') })).max(100).default([]),
 });
 const personBody = z.object({ person_id: uuid, role: z.string().trim().max(60).default('') });
@@ -44,32 +46,50 @@ const uniqueNumber = (e) => {
   throw e;
 };
 
+// Stufe für eine Akte: Aktenart und Beschränkung rechnet case_file_level() (Migration 018)
+const fileLevelSql = (alias, n = '$1') => `case_file_level(${alias}.id, ${n})`;
+
+// Aktenart im selben Bereich wie die Akte; ohne Art gelten die Rechte für Akten allgemein
+async function typeInScope(typeId, scope) {
+  if (!typeId) return null;
+  const type = await one('SELECT * FROM case_file_types WHERE id=$1', [typeId]);
+  const same = type && (scope.team_id ? type.team_id === scope.team_id : type.owner_user_id === scope.owner_user_id);
+  if (!same) throw bad(scope.team_id ? 'Aktenart gehört nicht zu dieser Organisation' : 'Aktenart ist nicht deine private Aktenart');
+  return type;
+}
+
 export default async function routes(app) {
-  async function loadFile(req, id, write = false) {
-    const file = await one('SELECT * FROM case_files WHERE id=$1', [id]);
-    const role = await recordRole(req.user.id, file, write);
-    return { file, role };
+  // Lesen ab 2, Einträge, Personen und Anhänge ab 3, Löschen, Aktenart wechseln und Beschränken mit 4
+  async function loadFile(req, id, need = LEVEL.READ) {
+    const file = await one(`SELECT c.*, ${fileLevelSql('c', '$2')} AS level FROM case_files c WHERE c.id=$1`, [id, req.user.id]);
+    if (!file || file.level < LEVEL.READ) throw notFound();
+    if (file.level < need) throw forbidden(needMessage('casefile', need));
+    const { level, ...rest } = file;
+    return { file: rest, level };
   }
+  const write = LEVEL.WRITE;
   const checkDates = (opened, closed) => {
     if (closed && opened && closed < opened) throw bad('Abgeschlossen am liegt vor dem Eröffnungsdatum');
   };
 
   app.get('/case-files', authz('casefile:read'), async (req) => {
-    const f = z.object({ status: z.enum(STATUS).optional(), q: z.string().max(100).optional() }).parse(req.query);
+    const f = z.object({ status: z.enum(STATUS).optional(), type_id: uuid.optional(), q: z.string().max(100).optional() }).parse(req.query);
     const params = [req.user.id];
-    const where = [visibleSql('c')];
+    const where = [`${fileLevelSql('c')} >= 2`];
     if (f.status) { params.push(f.status); where.push(`c.status=$${params.length}`); }
+    if (f.type_id) { params.push(f.type_id); where.push(`c.type_id=$${params.length}`); }
     if (f.q) {
       params.push(`%${f.q}%`);
       where.push(`(c.title ILIKE $${params.length} OR c.file_number ILIKE $${params.length} OR c.description ILIKE $${params.length}
         OR EXISTS (SELECT 1 FROM case_file_people cp JOIN people pe ON pe.id=cp.person_id WHERE cp.case_file_id=c.id AND pe.name ILIKE $${params.length}))`);
     }
     return many(
-      `SELECT c.id, c.file_number, c.title, c.status, c.opened_on, c.closed_on, c.team_id, t.name team_name, c.updated_at, ${roleSql('c')} AS role,
+      `SELECT c.id, c.file_number, c.title, c.status, c.opened_on, c.closed_on, c.team_id, t.name team_name, c.updated_at, ${fileLevelSql('c')} AS level,
+         c.type_id, ct.name type_name, c.restricted,
          (SELECT count(*)::int FROM case_file_entries e WHERE e.case_file_id=c.id) entries,
          (SELECT max(e.entry_date) FROM case_file_entries e WHERE e.case_file_id=c.id) last_entry,
          (SELECT COALESCE(json_agg(pe.name ORDER BY pe.name), '[]') FROM case_file_people cp JOIN people pe ON pe.id=cp.person_id WHERE cp.case_file_id=c.id) people
-       FROM case_files c LEFT JOIN teams t ON t.id=c.team_id
+       FROM case_files c LEFT JOIN teams t ON t.id=c.team_id LEFT JOIN case_file_types ct ON ct.id=c.type_id
        WHERE ${where.join(' AND ')}
        ORDER BY c.status='closed', c.updated_at DESC LIMIT 500`,
       params,
@@ -78,7 +98,8 @@ export default async function routes(app) {
 
   app.post('/case-files', authz('casefile:create'), async (req) => {
     const b = createBody.parse(req.body);
-    const scope = await recordOwner(req.user.id, b.team_id);
+    const scope = await recordOwner(req.user.id, b.team_id, 'casefile', LEVEL.WRITE, b.type_id || null);
+    await typeInScope(b.type_id, scope);
     const openedOn = b.opened_on || today();
     const closedOn = b.status === 'closed' ? b.closed_on || today() : null;
     checkDates(openedOn, closedOn);
@@ -87,9 +108,9 @@ export default async function routes(app) {
     const created = await tx(async (client) => {
       const number = b.file_number || await nextFileNumber(client, scope);
       const row = (await client.query(
-        `INSERT INTO case_files(owner_user_id,team_id,file_number,title,description,status,opened_on,closed_on,created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, file_number`,
-        [scope.owner_user_id, scope.team_id, number, b.title, b.description, b.status, openedOn, closedOn, req.user.id],
+        `INSERT INTO case_files(owner_user_id,team_id,file_number,title,description,status,opened_on,closed_on,created_by,type_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, file_number`,
+        [scope.owner_user_id, scope.team_id, number, b.title, b.description, b.status, openedOn, closedOn, req.user.id, b.type_id || null],
       )).rows[0];
       for (const p of b.people) await client.query('INSERT INTO case_file_people(case_file_id,person_id,role) VALUES ($1,$2,$3)', [row.id, p.person_id, p.role]);
       return row;
@@ -99,9 +120,15 @@ export default async function routes(app) {
   });
 
   app.get('/case-files/:id', authz('casefile:read'), async (req) => {
-    const { file, role } = await loadFile(req, req.params.id);
-    const [team, people, entries, attachments] = await Promise.all([
+    const { file, level } = await loadFile(req, req.params.id);
+    const [team, type, access, people, entries, attachments] = await Promise.all([
       file.team_id ? one('SELECT name FROM teams WHERE id=$1', [file.team_id]) : null,
+      file.type_id ? one('SELECT name FROM case_file_types WHERE id=$1', [file.type_id]) : null,
+      // Wer eine beschränkte Akte sehen darf, zeigt die Akte nur denen, die sie verwalten
+      file.team_id && level >= LEVEL.MANAGE ? many(
+        `SELECT a.rank_id, a.group_id, a.user_id, COALESCE(r.name, g.name, u.name) AS name FROM case_file_access a
+         LEFT JOIN team_ranks r ON r.id=a.rank_id LEFT JOIN team_groups g ON g.id=a.group_id LEFT JOIN users u ON u.id=a.user_id
+         WHERE a.case_file_id=$1 ORDER BY name`, [file.id]) : [],
       many(`SELECT cp.person_id, cp.role, pe.name, pe.kind, pe.function, pe.active FROM case_file_people cp
         ${personJoin('pe', 'cp.person_id', '$2')} WHERE cp.case_file_id=$1 ORDER BY pe.name NULLS LAST`, [file.id, req.user.id]),
       many(`SELECT e.id, e.entry_date, e.kind, e.body, e.person_id, pe.name person_name, e.created_at, e.updated_at,
@@ -112,27 +139,35 @@ export default async function routes(app) {
       many(`SELECT a.id, a.original_name, a.mime, a.size, a.created_at, u.name uploaded_by_name FROM case_file_attachments a
         LEFT JOIN users u ON u.id=a.uploaded_by WHERE a.case_file_id=$1 ORDER BY a.created_at`, [file.id]),
     ]);
-    return { ...file, team_name: team?.name || null, role, people, entries, attachments };
+    return { ...file, team_name: team?.name || null, type_name: type?.name || null, level, access, people, entries, attachments };
   });
 
   app.patch('/case-files/:id', authz('casefile:update'), async (req) => {
-    const { file } = await loadFile(req, req.params.id, true);
-    const b = patchSchema(fileFields).parse(req.body);
+    const { file, level } = await loadFile(req, req.params.id, write);
+    const b = patchSchema(fileFields).extend({ type_id: uuid.nullish() }).parse(req.body);
+    // Eine andere Aktenart ändert, wer die Akte sieht: dafür „Verwalten“ hier und Schreibrecht für die neue Art
+    const typeChanged = 'type_id' in b && (b.type_id || null) !== file.type_id;
+    if (typeChanged) {
+      if (level < LEVEL.MANAGE) throw forbidden(needMessage('casefile', LEVEL.MANAGE));
+      await typeInScope(b.type_id, file);
+      if (file.team_id) await recordOwner(req.user.id, file.team_id, 'casefile', LEVEL.WRITE, b.type_id || null);
+    }
     const status = b.status ?? file.status;
     const openedOn = b.opened_on ?? file.opened_on;
     // Abschließen setzt das Datum, Wiedereröffnen löscht es
     const closedOn = status === 'closed' ? ('closed_on' in b ? b.closed_on : file.closed_on) || today() : null;
     checkDates(openedOn, closedOn);
     await q(
-      `UPDATE case_files SET file_number=$2, title=$3, description=$4, status=$5, opened_on=$6, closed_on=$7, updated_at=now() WHERE id=$1`,
-      [file.id, b.file_number || file.file_number, b.title ?? file.title, b.description ?? file.description, status, openedOn, closedOn],
+      `UPDATE case_files SET file_number=$2, title=$3, description=$4, status=$5, opened_on=$6, closed_on=$7, type_id=$8, updated_at=now() WHERE id=$1`,
+      [file.id, b.file_number || file.file_number, b.title ?? file.title, b.description ?? file.description, status, openedOn, closedOn, typeChanged ? b.type_id || null : file.type_id],
     ).catch(uniqueNumber);
-    await audit(req, 'casefile.updated', 'case_file', file.id, status !== file.status ? { status } : undefined);
+    const changes = { ...(status !== file.status ? { status } : {}), ...(typeChanged ? { type: b.type_id || null } : {}) };
+    await audit(req, 'casefile.updated', 'case_file', file.id, Object.keys(changes).length ? changes : undefined);
     return { ok: true };
   });
 
   app.delete('/case-files/:id', authz('casefile:delete'), async (req) => {
-    const { file } = await loadFile(req, req.params.id, true);
+    const { file } = await loadFile(req, req.params.id, LEVEL.MANAGE);
     const files = await many('SELECT storage_key FROM case_file_attachments WHERE case_file_id=$1', [file.id]);
     await q('DELETE FROM case_files WHERE id=$1', [file.id]);
     for (const a of files) removeUpload(a.storage_key);
@@ -142,7 +177,7 @@ export default async function routes(app) {
 
   // ---- Beteiligte Personen
   app.post('/case-files/:id/people', authz('casefile:update'), async (req) => {
-    const { file } = await loadFile(req, req.params.id, true);
+    const { file } = await loadFile(req, req.params.id, write);
     const b = personBody.parse(req.body);
     await assertPersonInScope(b.person_id, file);
     await q(
@@ -155,7 +190,7 @@ export default async function routes(app) {
   });
 
   app.delete('/case-files/:id/people/:personId', authz('casefile:update'), async (req) => {
-    const { file } = await loadFile(req, req.params.id, true);
+    const { file } = await loadFile(req, req.params.id, write);
     const personId = uuid.parse(req.params.personId);
     await tx(async (client) => {
       const removed = await client.query('DELETE FROM case_file_people WHERE case_file_id=$1 AND person_id=$2', [file.id, personId]);
@@ -177,12 +212,12 @@ export default async function routes(app) {
   async function loadEntry(req) {
     const entry = await one('SELECT * FROM case_file_entries WHERE id=$1', [req.params.id]);
     if (!entry) throw notFound();
-    const { file } = await loadFile(req, entry.case_file_id, true);
+    const { file } = await loadFile(req, entry.case_file_id, write);
     return { entry, file };
   }
 
   app.post('/case-files/:id/entries', authz('casefile:update'), async (req) => {
-    const { file } = await loadFile(req, req.params.id, true);
+    const { file } = await loadFile(req, req.params.id, write);
     const b = entryFields.parse(req.body);
     await assertInvolved(file.id, b.person_id);
     const row = await one(
@@ -216,7 +251,7 @@ export default async function routes(app) {
 
   // ---- Anhänge
   app.post('/case-files/:id/attachments', authz('casefile:update'), async (req) => {
-    const { file } = await loadFile(req, req.params.id, true);
+    const { file } = await loadFile(req, req.params.id, write);
     const upload = await receiveUpload(req);
     const row = await one(
       'INSERT INTO case_file_attachments(case_file_id,storage_key,original_name,mime,size,sha256,uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
@@ -226,48 +261,138 @@ export default async function routes(app) {
     return row;
   });
 
-  async function loadAttachment(req, write) {
+  async function loadAttachment(req, need) {
     const attachment = await one('SELECT * FROM case_file_attachments WHERE id=$1', [req.params.id]);
     if (!attachment) throw notFound();
-    await loadFile(req, attachment.case_file_id, write);
+    await loadFile(req, attachment.case_file_id, need);
     return attachment;
   }
-  app.get('/case-file-attachments/:id', authz('casefile:read'), async (req, reply) => sendUpload(reply, await loadAttachment(req, false)));
+  app.get('/case-file-attachments/:id', authz('casefile:read'), async (req, reply) => sendUpload(reply, await loadAttachment(req, LEVEL.READ)));
   app.delete('/case-file-attachments/:id', authz('casefile:update'), async (req) => {
-    const attachment = await loadAttachment(req, true);
+    const attachment = await loadAttachment(req, write);
     await q('DELETE FROM case_file_attachments WHERE id=$1', [attachment.id]);
     removeUpload(attachment.storage_key);
     await audit(req, 'casefile.attachment_deleted', 'case_file', attachment.case_file_id, { name: attachment.original_name });
     return { ok: true };
   });
 
+  // ---- Beschränkung: nur bestimmte Ränge (und alle höheren), Gruppen und Mitglieder sehen die Akte
+  // Auswahl für den Dialog; wer Akten verwaltet, braucht dafür kein Recht auf die Mitgliederliste
+  app.get('/case-files/:id/access-options', authz('casefile:update'), async (req) => {
+    const { file } = await loadFile(req, req.params.id, LEVEL.MANAGE);
+    if (!file.team_id) throw bad('Private Akten sieht ohnehin nur du');
+    const [ranks, groups, members] = await Promise.all([
+      many('SELECT id, name FROM team_ranks WHERE team_id=$1 ORDER BY position DESC', [file.team_id]),
+      many('SELECT id, name FROM team_groups WHERE team_id=$1 ORDER BY name', [file.team_id]),
+      many('SELECT u.id, u.name FROM team_members tm JOIN users u ON u.id=tm.user_id WHERE tm.team_id=$1 AND u.deleted_at IS NULL ORDER BY u.name', [file.team_id]),
+    ]);
+    return { ranks, groups, members };
+  });
+
+  app.put('/case-files/:id/access', authz('casefile:update'), async (req) => {
+    const { file } = await loadFile(req, req.params.id, LEVEL.MANAGE);
+    if (!file.team_id) throw bad('Private Akten sieht ohnehin nur du');
+    const b = z.object({
+      restricted: z.boolean(),
+      rank_ids: z.array(uuid).max(100).default([]),
+      group_ids: z.array(uuid).max(100).default([]),
+      user_ids: z.array(uuid).max(500).default([]),
+    }).parse(req.body);
+    const count = async (sql, ids) => (ids.length ? (await one(sql, [file.team_id, [...new Set(ids)]])).n : 0);
+    if (await count('SELECT count(*)::int n FROM team_ranks WHERE team_id=$1 AND id = ANY($2::uuid[])', b.rank_ids) !== new Set(b.rank_ids).size) throw bad('Rang gehört nicht zu dieser Organisation');
+    if (await count('SELECT count(*)::int n FROM team_groups WHERE team_id=$1 AND id = ANY($2::uuid[])', b.group_ids) !== new Set(b.group_ids).size) throw bad('Gruppe gehört nicht zu dieser Organisation');
+    if (await count('SELECT count(*)::int n FROM team_members WHERE team_id=$1 AND user_id = ANY($2::uuid[])', b.user_ids) !== new Set(b.user_ids).size) throw bad('Benutzer ist nicht Mitglied dieser Organisation');
+    if (b.restricted && !b.rank_ids.length && !b.group_ids.length && !b.user_ids.length) throw bad('Wähle mindestens einen Rang, eine Gruppe oder ein Mitglied');
+    await tx(async (client) => {
+      await client.query('DELETE FROM case_file_access WHERE case_file_id=$1', [file.id]);
+      if (b.restricted) {
+        for (const [column, ids] of [['rank_id', b.rank_ids], ['group_id', b.group_ids], ['user_id', b.user_ids]]) {
+          for (const id of new Set(ids)) await client.query(`INSERT INTO case_file_access(case_file_id, ${column}) VALUES ($1,$2)`, [file.id, id]);
+        }
+      }
+      await client.query('UPDATE case_files SET restricted=$2, updated_at=now() WHERE id=$1', [file.id, b.restricted]);
+      // Wer beschränkt, muss die Akte danach noch verwalten können
+      const after = (await client.query('SELECT case_file_level($1,$2) AS level', [file.id, req.user.id])).rows[0].level;
+      if (after < LEVEL.MANAGE) throw bad('Damit würdest du dich selbst aussperren – nimm deinen Rang, eine deiner Gruppen oder dich selbst mit auf');
+    });
+    await audit(req, b.restricted ? 'casefile.restricted' : 'casefile.unrestricted', 'case_file', file.id,
+      b.restricted ? { ranks: b.rank_ids, groups: b.group_ids, users: b.user_ids } : undefined);
+    return { ok: true };
+  });
+
+  // ---- Aktenarten: eigene Rechte pro Art; anlegen mit „Verwalten“ für Akten, ändern und löschen mit „Verwalten“ für die Art
+  app.get('/case-file-types', authz('casefile:read'), async (req) => many(
+    `SELECT * FROM (
+       SELECT ct.id, ct.name, ct.team_id, t.name team_name, ${levelSql('ct', 'casefile', '$1', 'ct.id')} AS level,
+         (SELECT count(*)::int FROM case_files c WHERE c.type_id=ct.id) files
+       FROM case_file_types ct LEFT JOIN teams t ON t.id=ct.team_id
+       WHERE ct.owner_user_id=$1 OR ct.team_id IS NOT NULL
+     ) x WHERE x.level >= 2 ORDER BY x.team_name NULLS FIRST, x.name`,
+    [req.user.id],
+  ));
+
+  const typeName = z.object({ name: z.string().trim().min(1).max(100) });
+  const uniqueType = (e) => {
+    if (e.code === '23505') throw bad('Eine Aktenart mit diesem Namen gibt es hier schon');
+    throw e;
+  };
+  app.post('/case-file-types', authz('casefile:create'), async (req) => {
+    const b = typeName.extend({ team_id: uuid.nullish() }).parse(req.body);
+    const scope = await recordOwner(req.user.id, b.team_id, 'casefile', LEVEL.MANAGE);
+    const row = await one('INSERT INTO case_file_types(owner_user_id, team_id, name) VALUES ($1,$2,$3) RETURNING id', [scope.owner_user_id, scope.team_id, b.name]).catch(uniqueType);
+    await audit(req, 'casefile.type_created', 'case_file_type', row.id, { name: b.name });
+    return row;
+  });
+  async function loadType(req) {
+    const type = await one('SELECT * FROM case_file_types WHERE id=$1', [req.params.id]);
+    await recordLevel(req.user.id, type, 'casefile', { need: LEVEL.MANAGE, scope: type?.id });
+    return type;
+  }
+  app.patch('/case-file-types/:id', authz('casefile:update'), async (req) => {
+    const type = await loadType(req);
+    const b = typeName.parse(req.body);
+    await q('UPDATE case_file_types SET name=$2 WHERE id=$1', [type.id, b.name]).catch(uniqueType);
+    return { ok: true };
+  });
+  app.delete('/case-file-types/:id', authz('casefile:delete'), async (req) => {
+    const type = await loadType(req);
+    const used = (await one('SELECT count(*)::int n FROM case_files WHERE type_id=$1', [type.id])).n;
+    if (used) throw bad(`Die Aktenart wird von ${used === 1 ? 'einer Akte' : `${used} Akten`} genutzt – ordne sie zuerst einer anderen Art zu`);
+    await tx(async (client) => {
+      await client.query('DELETE FROM team_permissions WHERE scope_id=$1', [type.id]);
+      await client.query('DELETE FROM case_file_types WHERE id=$1', [type.id]);
+    });
+    await audit(req, 'casefile.type_deleted', 'case_file_type', type.id, { name: type.name });
+    return { ok: true };
+  });
+
   // ---- Personenakte: alles zu einer Person, soweit die Rechte reichen
   app.get('/people/:id/record', authz('person:read'), async (req) => {
     const personId = uuid.parse(req.params.id);
-    const person = await one(`SELECT pe.* FROM people pe WHERE pe.id=$1 AND ${visibleSql('pe', '$2')}`, [personId, req.user.id]);
+    const person = await one(`SELECT pe.* FROM people pe WHERE pe.id=$1 AND ${visibleSql('pe', 'person', '$2')}`, [personId, req.user.id]);
     if (!person) throw notFound();
     const result = { person, case_files: null, entries: null, licenses: null, trainings: null };
     if (can(req, 'casefile:read')) {
       result.case_files = await many(
         `SELECT c.id, c.file_number, c.title, c.status, c.opened_on, c.closed_on, cp.role FROM case_file_people cp JOIN case_files c ON c.id=cp.case_file_id
-         WHERE cp.person_id=$1 AND ${visibleSql('c', '$2')} ORDER BY c.opened_on DESC`, [personId, req.user.id],
+         WHERE cp.person_id=$1 AND ${fileLevelSql('c', '$2')} >= 2 ORDER BY c.opened_on DESC`, [personId, req.user.id],
       );
       result.entries = await many(
         `SELECT e.id, e.entry_date, e.kind, e.body, c.id case_file_id, c.file_number, c.title FROM case_file_entries e JOIN case_files c ON c.id=e.case_file_id
-         WHERE e.person_id=$1 AND ${visibleSql('c', '$2')} ORDER BY e.entry_date DESC, e.created_at DESC LIMIT 200`, [personId, req.user.id],
+         WHERE e.person_id=$1 AND ${fileLevelSql('c', '$2')} >= 2 ORDER BY e.entry_date DESC, e.created_at DESC LIMIT 200`, [personId, req.user.id],
       );
     }
     if (can(req, 'license:read')) {
       result.licenses = await many(
         `SELECT l.id, lt.name type_name, l.number, l.issued_on, l.valid_until, l.status, l.status_reason FROM licenses l JOIN license_types lt ON lt.id=l.type_id
-         WHERE l.person_id=$1 AND ${visibleSql('lt', '$2')} ORDER BY lt.name, l.issued_on DESC`, [personId, req.user.id],
+         WHERE l.person_id=$1 AND ${visibleSql('lt', 'license', '$2')} ORDER BY lt.name, l.issued_on DESC`, [personId, req.user.id],
       );
     }
     if (can(req, 'training:read')) {
       result.trainings = await many(
         `SELECT r.id, tr.name training_name, r.result, r.completed_on, r.valid_until, s.session_date FROM training_records r JOIN trainings tr ON tr.id=r.training_id
            LEFT JOIN training_sessions s ON s.id=r.session_id
-         WHERE r.person_id=$1 AND ${visibleSql('tr', '$2')} ORDER BY COALESCE(r.completed_on, s.session_date) DESC NULLS LAST`, [personId, req.user.id],
+         WHERE r.person_id=$1 AND ${visibleSql('tr', 'training', '$2')} ORDER BY COALESCE(r.completed_on, s.session_date) DESC NULLS LAST`, [personId, req.user.id],
       );
     }
     return result;

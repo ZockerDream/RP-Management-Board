@@ -1,10 +1,11 @@
 import { z } from 'zod';
 import { one, many, q } from '../db.js';
-import { authz, bad, notFound, recordRole, recordOwner } from '../authz.js';
+import { authz, bad, notFound } from '../authz.js';
+import { LEVEL, levelSql, visibleSql, recordLevel, recordOwner } from '../org.js';
 import { audit } from '../audit.js';
 import { patchSchema } from '../validation.js';
 import { addInterval, today } from '../lib.js';
-import { uuid, isoDate, visibleSql, roleSql, assertPersonInScope, personJoin } from '../records.js';
+import { uuid, isoDate, assertPersonInScope, personJoin } from '../records.js';
 
 export const EXPIRY_WARNING_DAYS = 30;
 
@@ -32,15 +33,16 @@ export const licenseState = `CASE WHEN l.status<>'valid' THEN l.status
   ELSE 'valid' END`;
 
 export default async function routes(app) {
-  async function loadType(req, id, write = false) {
+  // Lizenzen ausstellen, ändern, verlängern ab 3; Lizenzen löschen und Lizenzarten verwalten mit 4
+  async function loadType(req, id, need = LEVEL.READ) {
     const type = await one('SELECT * FROM license_types WHERE id=$1', [id]);
-    const role = await recordRole(req.user.id, type, write);
-    return { type, role };
+    const level = await recordLevel(req.user.id, type, 'license', { need });
+    return { type, level };
   }
-  async function loadLicense(req, write = false) {
+  async function loadLicense(req, need = LEVEL.READ) {
     const license = await one('SELECT * FROM licenses WHERE id=$1', [req.params.id]);
     if (!license) throw notFound();
-    const { type } = await loadType(req, license.type_id, write);
+    const { type } = await loadType(req, license.type_id, need);
     return { license, type };
   }
   const checkDates = (issued, until) => {
@@ -49,14 +51,14 @@ export default async function routes(app) {
 
   // ---- Lizenzarten
   app.get('/license-types', authz('license:read'), async (req) => many(
-    `SELECT lt.*, t.name team_name, ${roleSql('lt')} AS role, (SELECT count(*)::int FROM licenses l WHERE l.type_id=lt.id) licenses
-     FROM license_types lt LEFT JOIN teams t ON t.id=lt.team_id WHERE ${visibleSql('lt')} ORDER BY lt.name`,
+    `SELECT lt.*, t.name team_name, ${levelSql('lt', 'license')} AS level, (SELECT count(*)::int FROM licenses l WHERE l.type_id=lt.id) licenses
+     FROM license_types lt LEFT JOIN teams t ON t.id=lt.team_id WHERE ${visibleSql('lt', 'license')} ORDER BY lt.name`,
     [req.user.id],
   ));
 
   app.post('/license-types', authz('license:create'), async (req) => {
     const b = typeFields.extend({ team_id: uuid.nullish() }).parse(req.body);
-    const scope = await recordOwner(req.user.id, b.team_id);
+    const scope = await recordOwner(req.user.id, b.team_id, 'license', LEVEL.MANAGE);
     const row = await one(
       'INSERT INTO license_types(owner_user_id,team_id,name,description,validity_months) VALUES ($1,$2,$3,$4,$5) RETURNING id',
       [scope.owner_user_id, scope.team_id, b.name, b.description, b.validity_months ?? null],
@@ -66,7 +68,7 @@ export default async function routes(app) {
   });
 
   app.patch('/license-types/:id', authz('license:update'), async (req) => {
-    const { type } = await loadType(req, req.params.id, true);
+    const { type } = await loadType(req, req.params.id, LEVEL.MANAGE);
     const b = patchSchema(typeFields).parse(req.body);
     await q('UPDATE license_types SET name=$2, description=$3, validity_months=$4 WHERE id=$1', [
       type.id, b.name ?? type.name, b.description ?? type.description, 'validity_months' in b ? b.validity_months ?? null : type.validity_months,
@@ -76,7 +78,7 @@ export default async function routes(app) {
   });
 
   app.delete('/license-types/:id', authz('license:delete'), async (req) => {
-    const { type } = await loadType(req, req.params.id, true);
+    const { type } = await loadType(req, req.params.id, LEVEL.MANAGE);
     if (await one('SELECT 1 FROM licenses WHERE type_id=$1 LIMIT 1', [type.id])) throw bad('Es gibt noch Lizenzen dieser Art – zuerst löschen');
     await q('DELETE FROM license_types WHERE id=$1', [type.id]);
     await audit(req, 'license_type.deleted', 'license_type', type.id, { name: type.name });
@@ -90,13 +92,13 @@ export default async function routes(app) {
       state: z.enum(['valid', 'expiring', 'expired', 'suspended', 'revoked']).optional(),
     }).parse(req.query);
     const params = [req.user.id];
-    const where = [visibleSql('lt')];
+    const where = [visibleSql('lt', 'license')];
     if (f.type_id) { params.push(f.type_id); where.push(`l.type_id=$${params.length}`); }
     if (f.person_id) { params.push(f.person_id); where.push(`l.person_id=$${params.length}`); }
     if (f.q) { params.push(`%${f.q}%`); where.push(`(pe.name ILIKE $${params.length} OR l.number ILIKE $${params.length} OR lt.name ILIKE $${params.length})`); }
     if (f.state) { params.push(f.state); where.push(`(${licenseState})=$${params.length}`); }
     return many(
-      `SELECT l.*, lt.name type_name, lt.validity_months, lt.team_id, t.name team_name, pe.name person_name, ${roleSql('lt')} AS role, ${licenseState} AS state
+      `SELECT l.*, lt.name type_name, lt.validity_months, lt.team_id, t.name team_name, pe.name person_name, ${levelSql('lt', 'license')} AS level, ${licenseState} AS state
        FROM licenses l JOIN license_types lt ON lt.id=l.type_id LEFT JOIN teams t ON t.id=lt.team_id ${personJoin('pe', 'l.person_id')}
        WHERE ${where.join(' AND ')}
        ORDER BY (${licenseState}) IN ('valid') , l.valid_until NULLS LAST, pe.name LIMIT 1000`,
@@ -106,7 +108,7 @@ export default async function routes(app) {
 
   app.post('/licenses', authz('license:create'), async (req) => {
     const b = licenseFields.extend({ type_id: uuid, person_id: uuid }).parse(req.body);
-    const { type } = await loadType(req, b.type_id, true);
+    const { type } = await loadType(req, b.type_id, LEVEL.WRITE);
     await assertPersonInScope(b.person_id, type);
     const issuedOn = b.issued_on || today();
     // Ohne Angabe gilt die Standard-Gültigkeit der Lizenzart; null heißt unbefristet
@@ -121,7 +123,7 @@ export default async function routes(app) {
   });
 
   app.patch('/licenses/:id', authz('license:update'), async (req) => {
-    const { license } = await loadLicense(req, true);
+    const { license } = await loadLicense(req, LEVEL.WRITE);
     const b = patchSchema(licenseFields).extend(statusFields).parse(req.body);
     const issuedOn = b.issued_on ?? license.issued_on;
     const validUntil = 'valid_until' in b ? b.valid_until ?? null : license.valid_until;
@@ -139,7 +141,7 @@ export default async function routes(app) {
 
   // Verlängern um die Standard-Gültigkeit, ab heute oder ab dem bisherigen Ablauf, falls der noch in der Zukunft liegt
   app.post('/licenses/:id/renew', authz('license:update'), async (req) => {
-    const { license, type } = await loadLicense(req, true);
+    const { license, type } = await loadLicense(req, LEVEL.WRITE);
     if (!type.validity_months) throw bad('Die Lizenzart hat keine Standard-Gültigkeit – trage das neue Ablaufdatum direkt ein');
     if (license.status === 'revoked') throw bad('Eine entzogene Lizenz lässt sich nicht verlängern');
     const from = license.valid_until && license.valid_until > today() ? license.valid_until : today();
@@ -150,7 +152,7 @@ export default async function routes(app) {
   });
 
   app.delete('/licenses/:id', authz('license:delete'), async (req) => {
-    const { license } = await loadLicense(req, true);
+    const { license } = await loadLicense(req, LEVEL.MANAGE);
     await q('DELETE FROM licenses WHERE id=$1', [license.id]);
     await audit(req, 'license.deleted', 'license', license.id);
     return { ok: true };

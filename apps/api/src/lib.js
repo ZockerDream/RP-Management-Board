@@ -63,7 +63,8 @@ export async function budgetUsed(b) {
 
 async function recipients(budget) {
   if (budget.type === 'solo') return [budget.owner_user_id];
-  return (await many('SELECT user_id FROM team_members WHERE team_id=$1 AND team_role IN (\'owner\',\'editor\')', [budget.team_id])).map((r) => r.user_id);
+  // Wer in der Organisation auf dem Konto buchen darf
+  return (await many("SELECT user_id FROM team_members WHERE team_id=$1 AND team_level(team_id, user_id, 'budget') >= 3", [budget.team_id])).map((r) => r.user_id);
 }
 
 // Die Zeile entsteht immer: Sie verhindert doppelte Mails, auch wenn „In der App“ aus ist (`/notifications` blendet solche Arten aus).
