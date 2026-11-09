@@ -8,6 +8,9 @@ import { hashPassword, encrypt, randomToken } from '../security.js';
 import { patchSchema } from '../validation.js';
 import { allSettings, setSettings, jobStatus, DEFAULTS } from '../settings.js';
 import { createInvitation } from './teams.js';
+
+// Version des Codes aus package.json; APP_VERSION aus der .env benennt nur das Docker-Image und kann veraltet sein
+const APP_VERSION = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 import { checkPassword } from './auth.js';
 import { toCsv } from '../lib.js';
 import { verifyMail, mailConfigured } from '../mail.js';
@@ -307,7 +310,7 @@ export default async function routes(app) {
   app.get('/admin/system', A('settings:read'), async () => {
     const db = await one("SELECT version() v, pg_database_size(current_database()) size");
     return {
-      version: process.env.APP_VERSION || '1.0.0', node: process.version, uptime_s: Math.round(process.uptime()), db_version: db.v.split(' ').slice(0, 2).join(' '), db_size: Number(db.size),
+      version: APP_VERSION, image: process.env.APP_VERSION || null, node: process.version, uptime_s: Math.round(process.uptime()), db_version: db.v.split(' ').slice(0, 2).join(' '), db_size: Number(db.size),
       jobs: await jobStatus(), memory_mb: Math.round(process.memoryUsage().rss / 1048576),
     };
   });

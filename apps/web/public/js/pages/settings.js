@@ -64,9 +64,15 @@ export async function render(view) {
         <div class="setting"><span>Modus</span><div class="seg" id="ap-mode">${[['system', 'System'], ['light', 'Hell'], ['dark', 'Dunkel']].map(([v, l]) => `<button data-m="${v}" class="${v === mode ? 'on' : ''}">${l}</button>`).join('')}</div></div>
         <div class="setting"><span>Akzentfarbe</span><div class="chips" id="ap-acc">${ACCENTS.map(([v, l]) => `<button class="btn ghost sm" data-a="${v}" style="${v === acc ? 'outline:2px solid var(--primary)' : ''}">${l}</button>`).join('')}</div></div>
         <label class="setting"><span>Gravatar-Avatar verwenden<small>Sendet einen E-Mail-Hash an gravatar.com</small></span><input type="checkbox" id="ap-grav" ${u().gravatar_enabled ? 'checked' : ''}></label></div>`;
-      $('#ap-mode', el).addEventListener('click', async (e) => { const b = e.target.closest('[data-m]'); if (b) { applyTheme(b.dataset.m, u().accent); await patchMe({ theme: b.dataset.m }); P.appearance(el); } });
-      $('#ap-acc', el).addEventListener('click', async (e) => { const b = e.target.closest('[data-a]'); if (b) { applyTheme(u().theme || 'system', b.dataset.a); await patchMe({ accent: b.dataset.a }); P.appearance(el); } });
-      $('#ap-grav', el).addEventListener('change', async (e) => { await patchMe({ gravatar_enabled: e.target.checked }); });
+      // Speichern kann scheitern, etwa wenn die Sitzung gerade abgelaufen ist: dann Meldung statt unbehandeltem Fehler,
+      // und die Anzeige springt auf den gespeicherten Stand zurück (nach dem Abmelden gibt es keinen mehr)
+      const save = async (body, undo) => {
+        try { await patchMe(body); return true; } catch (error) { if (u()) undo(); toast(error.message, true); return false; }
+      };
+      const restoreTheme = () => applyTheme(u().theme || 'system', u().accent);
+      $('#ap-mode', el).addEventListener('click', async (e) => { const b = e.target.closest('[data-m]'); if (b) { applyTheme(b.dataset.m, u().accent); if (await save({ theme: b.dataset.m }, restoreTheme)) P.appearance(el); } });
+      $('#ap-acc', el).addEventListener('click', async (e) => { const b = e.target.closest('[data-a]'); if (b) { applyTheme(u().theme || 'system', b.dataset.a); if (await save({ accent: b.dataset.a }, restoreTheme)) P.appearance(el); } });
+      $('#ap-grav', el).addEventListener('change', async (e) => { const box = e.target; await save({ gravatar_enabled: box.checked }, () => { box.checked = !box.checked; }); });
     },
     async notif(el) {
       const [prefs, n] = await Promise.all([api.get('/me/notification-prefs'), api.get('/notifications')]);
@@ -81,7 +87,10 @@ export async function render(view) {
         const f = e.target.elements;
         try { await api.put('/me/notification-prefs', KINDS.map(([k]) => ({ kind: k, in_app: f[`${k}.in_app`].checked, email: f[`${k}.email`].checked }))); toast('Gespeichert'); } catch (x) { toast(x.message, true); }
       });
-      $('#n-read', el)?.addEventListener('click', async () => { await api.post('/notifications/read'); $('#bell-n').textContent = ''; $('#bell-n').hidden = true; $('#bell').setAttribute('aria-label', 'Benachrichtigungen'); P.notif(el); });
+      $('#n-read', el)?.addEventListener('click', async () => {
+        try { await api.post('/notifications/read'); } catch (error) { toast(error.message, true); return; }
+        $('#bell-n').textContent = ''; $('#bell-n').hidden = true; $('#bell').setAttribute('aria-label', 'Benachrichtigungen'); P.notif(el);
+      });
     },
     async sessions(el) {
       const s = await api.get('/me/sessions');
