@@ -68,7 +68,12 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    image: budget-manager-api:${APP_VERSION:-latest}
+    # Update: git pull, dann docker compose up -d. pull_policy: build baut bei jedem „up“ den ausgecheckten Stand
+    # (dank Cache in Sekunden), die API spielt beim Start die Migrationen ein, der Worker wartet auf sie.
+    # Der Tag ist die Code-Version (beim Release mit package.json hochzählen); alte Versionen bleiben als Image erhalten.
+    # IMAGE_TAG nur für Test-Stacks setzen. Ein APP_VERSION aus älteren .env-Dateien zählt nicht mehr.
+    image: budget-manager-api:${IMAGE_TAG:-1.1.1}
+    pull_policy: build
     environment: *api-env
     env_file:
       - path: .env-impressum
@@ -92,7 +97,9 @@ services:
 
   worker:
     <<: *hardening
-    image: budget-manager-api:${APP_VERSION:-latest}
+    image: budget-manager-api:${IMAGE_TAG:-1.1.1}
+    # Dasselbe Image, das „api“ baut; nie aus einer Registry holen (sonst erst ein irritierendes „pull access denied“)
+    pull_policy: never
     command: ["node", "src/worker.js"]
     environment: *api-env
     volumes:

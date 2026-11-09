@@ -10,7 +10,7 @@ Eine Env-Datei außerhalb des Repositories anlegen, z. B. `/tmp/bm-e2e/test.env`
 APP_URL=http://localhost:18088
 BIND_ADDR=127.0.0.1
 HTTP_PORT=18088
-APP_VERSION=e2e
+IMAGE_TAG=e2e
 TZ=Europe/Berlin
 DB_NAME=budget
 DB_USER=budget
@@ -22,7 +22,7 @@ ADMIN_PASSWORD=E2e-Admin-Passw0rd!x
 ADMIN_NAME=E2E Admin
 ```
 
-`APP_VERSION=e2e` schützt das Image-Tag der produktiven Instanz; `-p bm-e2e` trennt Container und Volumes.
+`IMAGE_TAG=e2e` schützt das Image der produktiven Instanz (ohne heißt es wie die Code-Version, z. B. `budget-manager-api:1.1.1`); `-p bm-e2e` trennt Container und Volumes.
 
 ## Ablauf
 
@@ -46,7 +46,7 @@ docker compose -p bm-e2e --env-file /tmp/bm-e2e/test.env down -v   # aufräumen
 
 ## Zweiter Stack neben einem benutzten Test-Stack
 
-Testet jemand gerade von Hand auf 18088, nicht denselben Stack nehmen: `down -v` löscht dessen Daten, und `crawl.mjs` verändert sie. Stattdessen eine Kopie der Env-Datei mit anderem `HTTP_PORT`, `APP_URL` und `APP_VERSION` anlegen und die Skripte darauf zeigen lassen:
+Testet jemand gerade von Hand auf 18088, nicht denselben Stack nehmen: `down -v` löscht dessen Daten, und `crawl.mjs` verändert sie. Stattdessen eine Kopie der Env-Datei mit anderem `HTTP_PORT`, `APP_URL` und `IMAGE_TAG` anlegen und die Skripte darauf zeigen lassen:
 
 ```bash
 docker compose -p bm-check --env-file /tmp/bm-e2e/check.env up -d --build --wait
