@@ -1,6 +1,6 @@
 # RP-Management-Board
 
-Selbst gehostete Verwaltung persönlicher und geteilter Konten: Buchungen, Ausgaben-Budgets, Daueraufträge, Sparziele, Zeiterfassung mit Gehaltsgutschrift, Sport-Bestenlisten, Berichte, Organisationen mit Rängen, Gruppen und Rechten pro Funktion, Kalender, Notizblock, ToDos mit Deadline-Benachrichtigung, Google-/Outlook-Sync, Objektverwaltung (Fahrzeuge, Häuser, Personen, Schlüssel), ein Aktensystem wie bei Polizei und Rettungsdienst (Fallakten mit Berichten und Freigabe, Strafkatalog und Anklagen, Beweismittel, Fahndungen, Personenakten), Schulungen, Lizenzen, Dokumentationen, Rollen & Rechte, 2FA und verschlüsselte Backups. Konzept: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Anleitung für KI-Assistenten mit allen Anforderungen: [AGENTS.md](AGENTS.md), Tests: [tests/e2e/README.md](tests/e2e/README.md).
+Selbst gehostete Verwaltung persönlicher und geteilter Konten: Buchungen, Ausgaben-Budgets, Daueraufträge, Sparziele, Zeiterfassung mit Gehaltsgutschrift, Sport-Bestenlisten, Berichte, Organisationen mit Rängen, Gruppen und Rechten pro Funktion, Kalender, Notizblock, ToDos mit Deadline-Benachrichtigung, Google-/Outlook-Sync, Objektverwaltung (Fahrzeuge, Häuser, Personen, Schlüssel), ein Aktensystem wie bei Polizei und Rettungsdienst (Fallakten mit Berichten und Freigabe, Strafkatalog und Anklagen, Beweismittel, Fahndungen, Personenakten), Schulungen mit optionalem Test im Tool, Lizenzen, Dokumentationen, Rollen & Rechte, 2FA und verschlüsselte Backups. Konzept: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Anleitung für KI-Assistenten mit allen Anforderungen: [AGENTS.md](AGENTS.md), Tests: [tests/e2e/README.md](tests/e2e/README.md).
 
 ## Architektur
 
@@ -104,7 +104,7 @@ Datenbankmigrationen laufen beim API-Start automatisch; ein manueller Migrations
 
 Zurück auf eine ältere Version geht nur mit einem Backup von vor dem Update, weil Migrationen die Datenbank verändern. Die angezeigte Version unter *Server-Management → Übersicht* kommt aus dem Code.
 
-**Versionen:** 1.1.1 (2026-11-09): Update mit `git pull` und `docker compose up -d`, ohne `.env` anzufassen. 1.1.0 (2026-11-09, Migrationen bis 019): Organisationen mit Rängen, Gruppen und Rechten pro Funktion, Akten, Schulungen, Lizenzen, Dokumentationen, Nachtschichten im Stundenzettel, globale Personen mit CSV-Import und -Export, volles Markdown mit Editor-Leiste. 1.0.0 (2026-11-08, Migration 016).
+**Versionen:** 1.2.0 (2026-11-09, Migrationen bis 021): Aktensystem wie bei Polizei und Rettungsdienst (Fallakten mit Berichten und Freigabe, Strafkatalog und Anklagen, Beweismittel, Fahndungen, Personenakten), optionaler Test im Tool für Schulungen. 1.1.1 (2026-11-09): Update mit `git pull` und `docker compose up -d`, ohne `.env` anzufassen. 1.1.0 (2026-11-09, Migrationen bis 019): Organisationen mit Rängen, Gruppen und Rechten pro Funktion, Akten, Schulungen, Lizenzen, Dokumentationen, Nachtschichten im Stundenzettel, globale Personen mit CSV-Import und -Export, volles Markdown mit Editor-Leiste. 1.0.0 (2026-11-08, Migration 016).
 
 ### Backup & Restore
 
