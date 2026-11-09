@@ -1,14 +1,14 @@
 import { api } from '../api.js';
 import { $, esc, empty, fdatetime, tag, openForm, confirmBox, toast } from '../ui.js';
 import { writableTeams, visibilityField, scopeTag } from './common.js';
-import { markdownBlock, MARKDOWN_HELP } from '../markdown.js';
+import { markdownBlock } from '../markdown.js';
 
 const noteForm = (note, teams) => openForm({
   title: note ? 'Notiz bearbeiten' : 'Neue Notiz',
   wide: true,
   fields: [
     { name: 'title', label: 'Titel', value: note?.title, maxlength: 150, full: true },
-    { name: 'body', label: 'Text', type: 'textarea', value: note?.body, rows: 12, maxlength: 50000, full: true, help: MARKDOWN_HELP },
+    { name: 'body', label: 'Text', type: 'textarea', value: note?.body, rows: 12, maxlength: 50000, full: true, markdown: true },
     visibilityField(teams, note),
   ],
   onSubmit: async (values) => {

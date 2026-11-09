@@ -115,10 +115,5 @@ export async function budgetWatch(budgetId, log) {
   }
 }
 
-export const csvEscape = (v) => {
-  let s = v == null ? '' : String(v);
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; // CSV-Injection verhindern
-  return /[",;\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
-export const toCsv = (rows, cols) =>
-  `\uFEFF${[cols.join(';'), ...rows.map((r) => cols.map((c) => csvEscape(r[c])).join(';'))].join('\r\n')}\r\n`;
+// CSV-Helfer liegen ohne Datenbank in csv.js; hier weitergereicht, damit bestehende Importe gleich bleiben
+export { csvEscape, toCsv } from './csv.js';

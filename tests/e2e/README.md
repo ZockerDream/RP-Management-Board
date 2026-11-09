@@ -78,13 +78,24 @@ node upgrade.mjs after                      # normal neu laden, nichts löschen
 
 ## Ergebnisse von crawl.mjs
 
-Unter `crawl/` entstehen Screenshots, `findings.txt` und je Rolle eine Liste aller Aktionen.
+Unter `crawl/` entstehen `findings.txt`, je Durchlauf eine Liste aller Aktionen und Bildschirmfotos: je Seite und Tab im sicheren Durchlauf und zu jeder Aktion, die etwas Neues gefunden hat (`…-fund-….png`). Am Ende jedes Durchlaufs steht, wie viele Aktionen er in welcher Zeit geschafft hat.
+
+Ein kompletter Lauf (fünf Durchläufe, rund 1.300 Aktionen) dauert etwa 7 Minuten; vor der Überarbeitung waren es weit über eine Stunde. Der Roboter wartet nicht mit festen Pausen, sondern bis keine Anfrage an die App mehr offen ist; er lädt eine Seite per `hashchange` neu, füllt Formulare in einem Schritt und überspringt deaktivierte Knöpfe (in der Aktionsliste als „deaktiviert“). Jeder Durchlauf verteilt die Seiten auf mehrere Browser mit eigener Anmeldung. Die Rollen laufen weiter nacheinander, damit sich etwa die Rangänderungen von Alice nicht mit Carols Durchlauf überschneiden.
+
+| Variable | Wirkung |
+|---|---|
+| `CRAWL_WORKERS=3` | Browser je Durchlauf; `1` ergibt die alte Reihenfolge Seite für Seite |
+| `CRAWL_ROLES=carol,alice` | Nur diese Rollen, je sicher und destruktiv |
+| `CRAWL_SHOTS=pages` | `all` zusätzlich jeder Dialog vor und nach dem Absenden, `none` keine Bildschirmfotos |
+| `ONLY_ADMIN=1` | Nur Admin, sicher und destruktiv |
+
+Mehrere Browser derselben Rolle melden sich jeweils neu an (Login-Limit 10 pro Minute und IP); vor dem Lauf die API neu starten. Ändert ein Browser das Passwort oder setzt 2FA zurück, beendet das die Sitzungen der anderen: `ABGEMELDET` und `401` an beliebiger Stelle sind dann normal, der Roboter meldet sich neu an. Mit `CRAWL_WORKERS=1` lässt sich so ein Fund eindeutig einer Aktion zuordnen. Jede Aktion steht mit ihrer Dauer in der Aktionsliste, die langsamsten Seiten am Ende jedes Durchlaufs.
 
 | Art | Bedeutung |
 |---|---|
 | `SERVER-5XX`, `JS-FEHLER`, `KONSOLE`, `TEXTFEHLER`, `SEITENFEHLER`, `LAYOUT` | Immer ein echter Fehler |
 | `FORMULAR-FEHLER`, `API-4XX`, `FEHLERMELDUNG` | Prüfen: oft korrekte Ablehnung automatisch ausgefüllter Testwerte |
-| `OHNE-WIRKUNG`, `NICHT-KLICKBAR` | Prüfen: oft bereits gewählte oder deaktivierte Elemente oder neu gerenderter Kalender |
+| `OHNE-WIRKUNG`, `NICHT-KLICKBAR` | Prüfen: oft bereits gewählte Elemente oder neu gerenderter Kalender; deaktivierte Knöpfe meldet der Roboter nicht mehr |
 | `ABGEMELDET`, `ROBOTER-ABBRUCH` | Prüfen: Der Roboter füllt auch eigene Benutzerdaten aus |
 
 Der Roboter füllt keine echten 2FA-Codes aus und klickt keine Kamera- oder OAuth-Abläufe zu Ende. Google, Microsoft, SMTP-Versand und GitHub-Tickets brauchen echte Zugangsdaten und sind hier nicht abgedeckt.

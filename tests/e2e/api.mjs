@@ -443,9 +443,64 @@ check('Stufe in der Liste: Leser', (await roleOf(carol, '/vehicles', car.id)) ==
 check('Stufe in der Liste: Mitglied', (await roleOf(bob, '/vehicles', car.id)) === 4);
 check('Stufe in der Liste: Inhaber', (await roleOf(alice, '/vehicles', car.id)) === 4);
 check('Stufe in der Liste: privat', (await roleOf(alice, '/properties', house.id)) === 4);
-const teamPerson = ok('Team-Person', await alice.post('/people', { name: 'Teamer', scope: 'team', team_id: team.id }));
+// Personen sind global: ein altes scope-Feld wird ignoriert, alle sehen und verwenden jede Person
+const teamPerson = ok('Person mit altem scope-Feld', await alice.post('/people', { name: 'Teamer', scope: 'team', team_id: team.id }));
 const teamKey = ok('Team-Schlüssel', await alice.post('/keys', { code: 'TK', label: 'Team-Tor', vehicle_id: car.id, scope: 'team', team_id: team.id, copies: 2 }));
-check('Stufe bei Personen', (await roleOf(carol, '/people', teamPerson.id)) === 2);
+check('Personen haben keine Stufe und keinen Bereich', (await carol.get('/people')).data.some((row) => row.id === teamPerson.id && row.level === undefined && row.team_id === undefined && row.owner_user_id === undefined));
+check('Fremder sieht jede Person', (await dave.get('/people')).data.some((row) => row.id === person.id) && (await dave.get('/people')).data.some((row) => row.id === teamPerson.id));
+const daveCar = ok('Fremder legt eigenes Fahrzeug an', await dave.post('/vehicles', { plate: 'E2E-D', make_model: 'Fiat' }));
+const daveKey = ok('Fremder legt eigenen Schlüssel an', await dave.post('/keys', { code: 'DK', label: 'Daves Tor', vehicle_id: daveCar.id }));
+const daveIssue = ok('Fremder gibt Schlüssel an Alices Person aus', await dave.post(`/keys/${daveKey.id}/assign`, { person_id: person.id }));
+check('Alice sieht Daves Ausgabe nicht', !(await alice.get('/assets/log')).data.some((row) => row.label === 'Daves Tor'));
+check('Schlüsselzahl nur aus sichtbaren Schlüsseln', (await alice.get('/people')).data.find((row) => row.id === person.id).keys === 0 && (await dave.get('/people')).data.find((row) => row.id === person.id).keys === 1);
+invalid('Person mit Schlüssel lässt sich nicht löschen', await alice.del(`/people/${person.id}`));
+ok('Fremder nimmt Schlüssel zurück', await dave.post(`/assignments/${daveIssue.id}/return`, {}));
+ok('Fremder ändert Person', await dave.patch(`/people/${teamPerson.id}`, { function: 'Torwart' }));
+check('Änderung an Personen im Audit-Log', psql(`SELECT count(*) FROM audit_log WHERE action IN ('people.created','people.updated') AND entity_id='${teamPerson.id}'`) === '2');
+invalid('Unbekannte Person nicht ausgeben', await alice.post(`/keys/${key.id}/assign`, { person_id: '00000000-0000-4000-8000-000000000000' }));
+invalid('Unbekannte Person nicht als Verantwortliche', await alice.patch(`/properties/${house.id}`, { responsible_person_id: '00000000-0000-4000-8000-000000000000' }));
+const daveHouse = ok('Fremder setzt Alices Person als Verantwortliche', await dave.post('/properties', { name: 'Daves Haus', responsible_person_id: person.id }));
+check('Verantwortliche Person gespeichert', (await dave.get('/properties')).data.find((row) => row.id === daveHouse.id)?.responsible_person_id === person.id);
+// Ändern und Löschen regeln allein die Rollenrechte
+const readerRole = ok('Rolle nur Personen lesen', await admin.post('/admin/roles', { name: 'Personen-Leser', description: '', permissions: ['person:read'], data_scope: 'own' }));
+ok('Dave nur Personen lesen', await admin.patch(`/admin/users/${uD.id}`, { role_ids: [readerRole.id] }));
+check('Leser sieht Personen', (await dave.get('/people')).data.some((row) => row.id === person.id));
+denied('Leser ändert Person nicht', await dave.patch(`/people/${person.id}`, { name: 'x' }), [403]);
+denied('Leser legt keine Person an', await dave.post('/people', { name: 'x' }), [403]);
+denied('Leser löscht keine Person', await dave.del(`/people/${teamPerson.id}`), [403]);
+denied('Leser exportiert keine Personen', await dave.raw('/people/export.csv'), [403]);
+denied('Leser importiert keine Personen', await dave.post('/people/import', { csv: 'Name\nX', preview: true }), [403]);
+ok('Dave wieder User', await admin.patch(`/admin/users/${uD.id}`, { role_ids: [userRole.id] }));
+ok('Rolle Personen-Leser löschen', await admin.del(`/admin/roles/${readerRole.id}`));
+const tempPerson = ok('Person zum Löschen', await bob.post('/people', { name: 'Kurzzeit' }));
+ok('Fremder löscht Person ohne Unterlagen', await dave.del(`/people/${tempPerson.id}`));
+check('Löschen im Audit-Log', psql(`SELECT count(*) FROM audit_log WHERE action='people.deleted' AND entity_id='${tempPerson.id}'`) === '1');
+denied('Gelöschte Person nicht mehr ändern', await alice.patch(`/people/${tempPerson.id}`, { name: 'x' }), [404]);
+// CSV-Export und -Import der globalen Liste
+const peopleExport = await bob.raw('/people/export.csv');
+const exportText = peopleExport.buf.toString('utf8');
+check('Personen-Export', peopleExport.status === 200 && /text\/csv/.test(peopleExport.headers.get('content-type')) && /personen\.csv/.test(peopleExport.headers.get('content-disposition')));
+check('Export mit Kopfzeile und allen Personen', exportText.startsWith('\uFEFFID;Name;Art;Funktion;Telefon;E-Mail;Aktiv;Notiz\r\n') && exportText.includes(`${person.id};Hans;Mitarbeiter;`) && exportText.includes(teamPerson.id), exportText.slice(0, 300));
+check('Export im Audit-Log', psql(`SELECT count(*) FROM audit_log WHERE action='people.exported' AND user_id='${uB.id}'`) === '1');
+const importCsv = `Name;Art;Telefon;Aktiv;ID\nImport Anna;Extern;+49 30 1;ja;\nhans;;;;\n;Familie;;;\nTeamer;;0171 2;;${teamPerson.id}`;
+const preview = ok('Import prüfen', await bob.post('/people/import', { csv: importCsv, preview: true }));
+check('Vorschau zählt richtig', preview.preview && preview.created === 1 && preview.updated === 1 && preview.skipped === 1 && preview.errors === 1, JSON.stringify(preview));
+check('Vorschau nennt Zeilen und Gründe', preview.problems.some((p) => p.line === 3 && p.kind === 'skipped') && preview.problems.some((p) => p.line === 4 && p.kind === 'error' && /Name/.test(p.message)), JSON.stringify(preview.problems));
+check('Vorschau schreibt nichts', psql("SELECT count(*) FROM people WHERE name='Import Anna'") === '0');
+const imported = ok('Import', await bob.post('/people/import', { csv: importCsv }));
+check('Import legt an und ändert', imported.created === 1 && imported.updated === 1 && !imported.preview, JSON.stringify(imported));
+const anna = (await carol.get('/people')).data.find((p) => p.name === 'Import Anna');
+check('Importierte Person für alle sichtbar', anna?.kind === 'external' && anna.phone === '+49 30 1' && anna.active === true, JSON.stringify(anna));
+check('Import ändert nur die Spalten der Datei', (await alice.get('/people')).data.some((p) => p.id === teamPerson.id && p.phone === '0171 2' && p.function === 'Torwart' && p.name === 'Teamer'));
+check('Import im Audit-Log', psql(`SELECT details->>'created' FROM audit_log WHERE action='people.imported' ORDER BY created_at DESC LIMIT 1`) === '1');
+const again = ok('Gleiche Datei nochmal', await bob.post('/people/import', { csv: importCsv }));
+check('Zweiter Import legt nichts doppelt an', again.created === 0 && again.updated === 0 && again.unchanged === 1 && again.skipped === 2, JSON.stringify(again));
+const roundTrip = ok('Export wieder einlesen', await bob.post('/people/import', { csv: (await bob.raw('/people/export.csv')).buf.toString('utf8'), preview: true }));
+check('Export und Import passen zusammen', roundTrip.created === 0 && roundTrip.updated === 0 && roundTrip.errors === 0 && roundTrip.unchanged === roundTrip.rows, JSON.stringify(roundTrip).slice(0, 300));
+invalid('Import ohne Spalte Name', await bob.post('/people/import', { csv: 'Vorname;Nachname\nA;B' }));
+invalid('Import mit offenem Anführungszeichen', await bob.post('/people/import', { csv: 'Name\n"offen' }));
+invalid('Leerer Import', await bob.post('/people/import', { csv: '' }));
+ok('Importierte Person wieder löschen', await bob.del(`/people/${anna.id}`));
 check('Stufe bei Schlüsseln', (await roleOf(carol, '/keys', teamKey.id)) === 2);
 const teamIssue = ok('Team-Schlüssel ausgeben', await alice.post(`/keys/${teamKey.id}/assign`, { person_id: teamPerson.id }));
 denied('Viewer gibt nicht aus', await carol.post(`/keys/${teamKey.id}/assign`, { person_id: teamPerson.id }));
@@ -457,7 +512,8 @@ ok('Schlüssel nur umbenennen', await alice.patch(`/keys/${teamKey.id}`, { label
 const keptKey = (await alice.get('/keys')).data.find((row) => row.id === teamKey.id);
 check('Schlüssel behält Kopien und Team', keptKey.copies === 2 && keptKey.team_id === team.id && keptKey.kind === 'Haustür', JSON.stringify(keptKey).slice(0, 200));
 ok('Person nur umbenennen', await alice.patch(`/people/${teamPerson.id}`, { name: 'Teamer 2' }));
-check('Person behält Team', (await alice.get('/people')).data.find((row) => row.id === teamPerson.id).team_id === team.id);
+const keptPerson = (await alice.get('/people')).data.find((row) => row.id === teamPerson.id);
+check('Person behält Funktion, Art und Status', keptPerson.function === 'Torwart' && keptPerson.kind === 'employee' && keptPerson.active === true, JSON.stringify(keptPerson));
 ok('Haus-Kosten bleiben bei Namensänderung', await alice.patch(`/properties/${house.id}`, { name: 'Haus A3' }));
 check('Haus behält Kosten', Number((await alice.get('/properties')).data.find((row) => row.id === house.id).cost_amount) === 150);
 check('Eintrag behält Notiz und Pause', (await alice.get(`/work-hours?from=${today}&to=${today}`)).data.items.some((row) => row.id === we.id && row.note === 'x' && row.break_minutes === 30));
@@ -672,16 +728,17 @@ const upload = async (who, path, content, name, type) => {
   if (res.status >= 500) fives.push(`POST ${path} -> ${res.status}`);
   return { status: res.status, data: await res.json().catch(() => null) };
 };
-const orgPerson = ok('Team-Person', await alice.post('/people', { name: 'Max Muster', kind: 'external', email: '', scope: 'team', team_id: team.id }));
-const orgPerson2 = ok('Zweite Team-Person', await bob.post('/people', { name: 'Erika Beispiel', kind: 'external', email: '', scope: 'team', team_id: team.id }));
-const privatePerson = ok('Private Person', await alice.post('/people', { name: 'Paula Privat', kind: 'family', email: '' }));
+const orgPerson = ok('Person', await alice.post('/people', { name: 'Max Muster', kind: 'external', email: '' }));
+const orgPerson2 = ok('Zweite Person', await bob.post('/people', { name: 'Erika Beispiel', kind: 'external', email: '' }));
+// Von Dave angelegt, der nicht in der Organisation ist: Personen sind trotzdem überall verwendbar
+const otherPerson = ok('Person eines Fremden', await dave.post('/people', { name: 'Paula Privat', kind: 'family', email: '' }));
 
 const caseFile = ok('Akte anlegen', await bob.post('/case-files', { title: 'Einbruch Lager', description: 'Sachverhalt', team_id: team.id, people: [{ person_id: orgPerson.id, role: 'Beschuldigter' }] }));
 check('Aktenzeichen automatisch', /^\d{4}-0001$/.test(caseFile.file_number), caseFile.file_number);
 const caseFile2 = ok('Zweite Akte', await alice.post('/case-files', { title: 'Zweite Akte', team_id: team.id }));
 check('Aktenzeichen fortlaufend', /^\d{4}-0002$/.test(caseFile2.file_number), caseFile2.file_number);
 invalid('Aktenzeichen doppelt', await alice.post('/case-files', { title: 'Dritte', team_id: team.id, file_number: caseFile.file_number }));
-invalid('Private Person in Team-Akte', await alice.post('/case-files', { title: 'X', team_id: team.id, people: [{ person_id: privatePerson.id }] }));
+invalid('Unbekannte Person in Akte', await alice.post('/case-files', { title: 'X', team_id: team.id, people: [{ person_id: '00000000-0000-4000-8000-000000000000' }] }));
 invalid('Akte ohne Titel', await alice.post('/case-files', { title: '', team_id: team.id }));
 denied('Viewer legt keine Akte an', await carol.post('/case-files', { title: 'X', team_id: team.id }));
 check('Viewer sieht Team-Akte', (await carol.get('/case-files')).data.some((f) => f.id === caseFile.id && f.level === 2));
@@ -691,9 +748,9 @@ denied('Viewer ändert Akte nicht', await carol.patch(`/case-files/${caseFile.id
 denied('Fremder löscht Akte nicht', await dave.del(`/case-files/${caseFile.id}`));
 ok('Person beteiligen', await bob.post(`/case-files/${caseFile.id}/people`, { person_id: orgPerson2.id, role: 'Zeuge' }));
 const daveFile = ok('Fremder legt eigene Akte an', await dave.post('/case-files', { title: 'Daves Akte' }));
-invalid('Fremde Person in eigener Akte', await dave.post(`/case-files/${daveFile.id}/people`, { person_id: orgPerson.id }));
+ok('Fremder beteiligt dieselbe Person an eigener Akte', await dave.post(`/case-files/${daveFile.id}/people`, { person_id: orgPerson.id }));
 const caseEntry = ok('Eintrag', await bob.post(`/case-files/${caseFile.id}/entries`, { kind: 'Vermerk', body: 'Zeuge befragt', person_id: orgPerson2.id }));
-invalid('Eintrag zu unbeteiligter Person', await bob.post(`/case-files/${caseFile.id}/entries`, { body: 'x', person_id: privatePerson.id }));
+invalid('Eintrag zu unbeteiligter Person', await bob.post(`/case-files/${caseFile.id}/entries`, { body: 'x', person_id: otherPerson.id }));
 invalid('Leerer Eintrag', await bob.post(`/case-files/${caseFile.id}/entries`, { body: '' }));
 denied('Viewer schreibt keinen Eintrag', await carol.post(`/case-files/${caseFile.id}/entries`, { body: 'x' }));
 denied('Fremder ändert keinen Eintrag', await dave.patch(`/case-file-entries/${caseEntry.id}`, { body: 'x' }));
@@ -724,7 +781,9 @@ invalid('Gültigkeit 0 Monate', await alice.post('/license-types', { name: 'X', 
 const license = ok('Lizenz ausstellen', await bob.post('/licenses', { type_id: licType.id, person_id: orgPerson.id, number: 'WS-1', issued_on: dayAt(-360) }));
 check('Standard-Gültigkeit ergibt Ablauf in Kürze', license.valid_until >= dayAt(0) && license.valid_until <= dayAt(10), license.valid_until);
 check('Lizenz läuft bald ab', (await carol.get('/licenses')).data.find((l) => l.id === license.id)?.state === 'expiring');
-invalid('Private Person für Team-Lizenzart', await bob.post('/licenses', { type_id: licType.id, person_id: privatePerson.id }));
+const otherLicense = ok('Person eines Fremden für Team-Lizenzart', await bob.post('/licenses', { type_id: licType.id, person_id: otherPerson.id, number: 'WS-2' }));
+check('Lizenz zeigt Namen der Person', (await carol.get('/licenses')).data.find((l) => l.id === otherLicense.id)?.person_name === 'Paula Privat');
+invalid('Unbekannte Person für Lizenz', await bob.post('/licenses', { type_id: licType.id, person_id: '00000000-0000-4000-8000-000000000000' }));
 invalid('Gültig bis vor Ausstellung', await bob.post('/licenses', { type_id: licType.id, person_id: orgPerson.id, issued_on: '2026-05-01', valid_until: '2026-04-01' }));
 const unlimitedLicense = ok('Unbefristete Lizenz', await bob.post('/licenses', { type_id: licType.id, person_id: orgPerson2.id, valid_until: null }));
 check('Unbefristet bleibt ohne Ablauf', unlimitedLicense.valid_until === null);
@@ -747,7 +806,7 @@ const userRecord = ok('Benutzer eintragen', await bob.post(`/trainings/${trainin
 invalid('Doppelt für denselben Termin', await bob.post(`/trainings/${training.id}/records`, { session_id: trainingSession.id, user_id: uC.id }));
 invalid('Fremder Benutzer als Teilnehmer', await bob.post(`/trainings/${training.id}/records`, { user_id: uD.id }));
 invalid('Benutzer und Person zugleich', await bob.post(`/trainings/${training.id}/records`, { user_id: uC.id, person_id: orgPerson.id }));
-invalid('Private Person in Team-Schulung', await bob.post(`/trainings/${training.id}/records`, { person_id: privatePerson.id }));
+ok('Person eines Fremden in Team-Schulung', await bob.post(`/trainings/${training.id}/records`, { person_id: otherPerson.id }));
 const personRecord = ok('Person bestanden', await bob.post(`/trainings/${training.id}/records`, { session_id: trainingSession.id, person_id: orgPerson.id, result: 'passed' }));
 check('Gültig 24 Monate ab Termin', personRecord.valid_until?.slice(0, 4) === String(Number(dayAt(-1).slice(0, 4)) + 2), personRecord.valid_until);
 ok('Ergebnis erfassen', await bob.patch(`/training-records/${userRecord.id}`, { result: 'passed', valid_until: dayAt(10) }));
@@ -757,7 +816,7 @@ denied('Viewer trägt nicht ein', await carol.post(`/trainings/${training.id}/re
 denied('Fremder öffnet Schulung nicht', await dave.get(`/trainings/${training.id}`));
 denied('Fremder ändert Nachweis nicht', await dave.patch(`/training-records/${userRecord.id}`, { result: 'failed' }));
 const candidates = ok('Wählbare Teilnehmer', await bob.get(`/trainings/${training.id}/candidates`));
-check('Teilnehmer: Mitglieder und Team-Personen', candidates.users.some((u) => u.id === uC.id) && candidates.people.some((p) => p.id === orgPerson.id) && !candidates.people.some((p) => p.id === privatePerson.id));
+check('Teilnehmer: Mitglieder und alle aktiven Personen', candidates.users.some((u) => u.id === uC.id) && !candidates.users.some((u) => u.id === uD.id) && candidates.people.some((p) => p.id === orgPerson.id) && candidates.people.some((p) => p.id === otherPerson.id));
 const trainingOverview = ok('Schulungsübersicht', await alice.get('/trainings/overview'));
 check('Übersicht nennt Nachweise', trainingOverview.some((r) => r.training_id === training.id && r.participant === 'Max Muster' && r.state === 'valid')
   && trainingOverview.some((r) => r.training_id === training.id && r.user_id === uC.id && r.state === 'expiring'));
@@ -769,7 +828,8 @@ check('Kalender zeigt Ablauf des Nachweises', orgCalendar.some((e) => e.type ===
 
 const personOverview = ok('Personenübersicht', await carol.get(`/people/${orgPerson.id}/record`));
 check('Personenübersicht vollständig', personOverview.case_files.length === 1 && personOverview.licenses.length === 1 && personOverview.trainings.length === 1, JSON.stringify(personOverview).slice(0, 240));
-denied('Fremder sieht Personenübersicht nicht', await dave.get(`/people/${orgPerson.id}/record`));
+const daveOverview = ok('Fremder öffnet Personenübersicht', await dave.get(`/people/${orgPerson.id}/record`));
+check('Fremder sieht nur eigene Unterlagen der Person', daveOverview.case_files.length === 1 && daveOverview.case_files[0].id === daveFile.id && daveOverview.licenses.length === 0 && daveOverview.trainings.length === 0, JSON.stringify(daveOverview).slice(0, 240));
 
 const docCategory = ok('Doku-Kategorie', await alice.post('/doc-categories', { name: 'Gesetze', team_id: team.id }));
 denied('Viewer legt keine Kategorie an', await carol.post('/doc-categories', { name: 'X', team_id: team.id }));
@@ -786,25 +846,26 @@ check('Änderung gespeichert', (await carol.get(`/doc-pages/${docPage.id}`)).dat
 ok('Seite löschen', await bob.del(`/doc-pages/${docPage.id}`));
 ok('Leere Kategorie löschen', await alice.del(`/doc-categories/${docCategory.id}`));
 
-// Ein ganzes Team lässt sich mit Personen, Akten, Lizenzen und Nachweisen löschen
+// Ein ganzes Team lässt sich mit Akten, Lizenzen und Nachweisen löschen; die (globale) Person bleibt
 const dropTeam = ok('Team zum Löschen', await alice.post('/teams', { name: 'E2E Löschteam' }));
-const dropPerson = ok('Person im Löschteam', await alice.post('/people', { name: 'Lotte Löschbar', kind: 'external', email: '', scope: 'team', team_id: dropTeam.id }));
+const dropPerson = ok('Person für das Löschteam', await alice.post('/people', { name: 'Lotte Löschbar', kind: 'external', email: '' }));
 const dropFile = ok('Akte im Löschteam', await alice.post('/case-files', { title: 'Löschakte', team_id: dropTeam.id, people: [{ person_id: dropPerson.id }] }));
 ok('Eintrag zur Person', await alice.post(`/case-files/${dropFile.id}/entries`, { body: 'Vermerk', person_id: dropPerson.id }));
 const dropType = ok('Lizenzart im Löschteam', await alice.post('/license-types', { name: 'Angelschein', team_id: dropTeam.id }));
 ok('Lizenz im Löschteam', await alice.post('/licenses', { type_id: dropType.id, person_id: dropPerson.id }));
 const dropTraining = ok('Schulung im Löschteam', await alice.post('/trainings', { name: 'Löschkurs', team_id: dropTeam.id }));
 ok('Nachweis im Löschteam', await alice.post(`/trainings/${dropTraining.id}/records`, { person_id: dropPerson.id, result: 'passed' }));
-invalid('Person mit Unterlagen wechselt die Sichtbarkeit nicht', await alice.patch(`/people/${dropPerson.id}`, { scope: 'personal' }));
-const movable = ok('Person ohne Unterlagen', await alice.post('/people', { name: 'Moritz Mobil', kind: 'external', email: '', scope: 'team', team_id: dropTeam.id }));
-ok('Person ohne Unterlagen wechselt die Sichtbarkeit', await alice.patch(`/people/${movable.id}`, { scope: 'personal' }));
-check('Gewechselte Person ist privat', psql(`SELECT (team_id IS NULL AND owner_user_id='${uA.id}')::text FROM people WHERE id='${movable.id}'`) === 'true');
+invalid('Person mit Unterlagen lässt sich nicht löschen', await alice.del(`/people/${dropPerson.id}`));
 ok('Team mit Unterlagen löschen', await alice.del(`/teams/${dropTeam.id}`));
-check('Unterlagen des Teams sind weg', psql(`SELECT (SELECT count(*) FROM people WHERE id='${dropPerson.id}') + (SELECT count(*) FROM case_files WHERE id='${dropFile.id}') + (SELECT count(*) FROM licenses WHERE person_id='${dropPerson.id}') + (SELECT count(*) FROM training_records WHERE person_id='${dropPerson.id}')`) === '0');
+check('Unterlagen des Teams sind weg', psql(`SELECT (SELECT count(*) FROM case_files WHERE id='${dropFile.id}') + (SELECT count(*) FROM licenses WHERE person_id='${dropPerson.id}') + (SELECT count(*) FROM training_records WHERE person_id='${dropPerson.id}')`) === '0');
+check('Person bleibt nach dem Löschen des Teams', psql(`SELECT count(*) FROM people WHERE id='${dropPerson.id}'`) === '1');
+ok('Person ohne Unterlagen jetzt löschbar', await alice.del(`/people/${dropPerson.id}`));
 
 // ---------- Organisationen: Ränge, Gruppen, Rechte pro Funktion
 const catalog = ok('Rechte-Katalog', await alice.get('/teams/catalog'));
-check('Katalog hat alle Funktionen', catalog.modules.length === 15 && catalog.levels.length === 5, JSON.stringify(catalog.modules.map((m) => m.key)));
+check('Katalog hat alle Funktionen', catalog.modules.length === 14 && catalog.levels.length === 5, JSON.stringify(catalog.modules.map((m) => m.key)));
+check('Personen sind keine Funktion der Organisation', !catalog.modules.some((m) => m.key === 'person'));
+check('Keine Personen-Rechte in Organisationen', psql("SELECT count(*) FROM team_permissions WHERE module='person'") === '0');
 const org = ok('Organisation anlegen', await alice.post('/teams', { name: 'E2E Wache' }));
 const orgOf = async (who) => (await who.get('/teams')).data.find((t) => t.id === org.id);
 let orgView = await orgOf(alice);

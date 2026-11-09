@@ -2,7 +2,6 @@
 import { z } from 'zod';
 import { one } from './db.js';
 import { bad } from './authz.js';
-import { visibleSql } from './org.js';
 
 export const uuid = z.string().uuid();
 export const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
@@ -11,11 +10,10 @@ export const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) =>
 }, 'Ungültiges Datum');
 export const clockTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Uhrzeit im Format HH:MM');
 
-// Eine Person gehört zum selben Bereich wie der Datensatz: dasselbe Team oder privat bei derselben Person
-export async function assertPersonInScope(personId, scope) {
-  const person = await one('SELECT id, owner_user_id, team_id, active FROM people WHERE id=$1', [personId]);
-  const same = person && (scope.team_id ? person.team_id === scope.team_id : person.owner_user_id === scope.owner_user_id);
-  if (!same) throw bad(scope.team_id ? 'Person gehört nicht zu dieser Organisation' : 'Person ist nicht deine private Person');
+// Personen sind global (Migration 019): Jede vorhandene Person darf in jedem Bereich verwendet werden
+export async function assertPerson(personId) {
+  const person = await one('SELECT id, name, active FROM people WHERE id=$1', [personId]);
+  if (!person) throw bad('Person nicht gefunden');
   return person;
 }
 
@@ -27,5 +25,5 @@ export async function assertUserInScope(userId, scope) {
   if (!ok) throw bad(scope.team_id ? 'Benutzer ist nicht Mitglied dieser Organisation' : 'Privat kann nur die eigene Teilnahme erfasst werden');
 }
 
-// Die Person, die ein Datensatz betrifft, sehen nur Benutzer mit Leserecht für Personen; sonst bleibt der Name leer
-export const personJoin = (alias, column, n = '$1') => `LEFT JOIN people ${alias} ON ${alias}.id=${column} AND ${visibleSql(alias, 'person', n)}`;
+// Die Person, die ein Datensatz betrifft: Wer den Datensatz sieht, sieht auch ihren Namen
+export const personJoin = (alias, column) => `LEFT JOIN people ${alias} ON ${alias}.id=${column}`;

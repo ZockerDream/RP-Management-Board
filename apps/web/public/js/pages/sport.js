@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { $, esc, empty, openForm, confirmBox, toast, todayStr, fdate } from '../ui.js';
 import { state } from '../app.js';
-import { markdownBlock, MARKDOWN_HELP } from '../markdown.js';
+import { markdownBlock } from '../markdown.js';
 
 const SPORTS = {
   run: { label: 'Laufen', title: 'Laufstrecke' },
@@ -50,7 +50,7 @@ export async function render(view, sportType = 'run') {
       ...(route ? [] : [{ name: 'team_id', label: 'Organisation', type: 'select', options: teams.map((team) => ({ v: team.id, l: team.name })), value: teams[0]?.id }]),
       { name: 'checkpoints', label: 'Checkpoints', type: 'number', min: 0, step: 1, value: route?.checkpoints ?? 0, required: true },
       { name: 'distance_km', label: 'Distanz (km, optional)', type: 'number', min: 0, step: 0.01, value: route?.distance_km ?? '' },
-      { name: 'notes', label: 'Notizen', type: 'textarea', value: route?.notes || '', full: true, help: MARKDOWN_HELP },
+      { name: 'notes', label: 'Notizen', type: 'textarea', value: route?.notes || '', full: true, markdown: true },
     ],
     onSubmit: async (v) => {
       const body = { name: v.name.trim(), checkpoints: Number(v.checkpoints), distance_km: v.distance_km === '' ? null : Number(v.distance_km), notes: v.notes };

@@ -2,7 +2,7 @@ import { api } from '../api.js';
 import { $, esc, empty, fdate, tag, openForm, confirmBox, toast, todayStr } from '../ui.js';
 import { can } from '../app.js';
 import { writableTeams, visibilityField, scopeTag } from './common.js';
-import { markdownBlock, MARKDOWN_HELP } from '../markdown.js';
+import { markdownBlock } from '../markdown.js';
 
 const RESULT = { registered: ['', 'Angemeldet'], passed: ['ok', 'Bestanden'], failed: ['bad', 'Nicht bestanden'], absent: ['warn', 'Nicht erschienen'] };
 const STATE = { valid: ['ok', 'Gültig'], expiring: ['warn', 'Läuft bald ab'], expired: ['bad', 'Abgelaufen'] };
@@ -16,7 +16,7 @@ const trainingForm = (training, teams) => openForm({
     { name: 'name', label: 'Name', value: training?.name, required: true, maxlength: 150, full: true },
     { name: 'validity_months', label: 'Gültigkeit in Monaten', type: 'number', min: 1, step: 1, value: training?.validity_months ?? '', help: 'Leer heißt: Ein bestandener Nachweis gilt unbefristet.' },
     ...(training ? [{ name: 'active', label: 'Aktiv', type: 'checkbox', value: training.active }] : [visibilityField(teams, null)]),
-    { name: 'description', label: 'Beschreibung und Inhalte', type: 'textarea', rows: 8, value: training?.description, maxlength: 20000, full: true, help: MARKDOWN_HELP },
+    { name: 'description', label: 'Beschreibung und Inhalte', type: 'textarea', rows: 8, value: training?.description, maxlength: 20000, full: true, markdown: true },
   ],
   onSubmit: async (values) => {
     const body = { name: values.name.trim(), description: values.description, validity_months: values.validity_months ? Number(values.validity_months) : null };
@@ -54,7 +54,7 @@ async function recordForm(training, record, presetSession) {
   if (!record) {
     const candidates = await api.get(`/trainings/${training.id}/candidates`);
     const options = [...candidates.users.map((u) => ({ v: `user:${u.id}`, l: `${u.name} (Benutzer)` })), ...candidates.people.map((p) => ({ v: `person:${p.id}`, l: `${p.name} (Person)` }))];
-    if (!options.length) { toast('Keine Teilnehmer verfügbar. Lege Personen im selben Bereich an.', true); return false; }
+    if (!options.length) { toast('Keine Teilnehmer verfügbar. Lege Personen unter „Personen“ an.', true); return false; }
     fields.push({ name: 'participant', label: 'Teilnehmer', type: 'select', options, full: true });
   } else fields.push({ type: 'html', html: `<p>Teilnehmer: <b>${esc(record.participant || '–')}</b></p>` });
   fields.push(

@@ -2,7 +2,7 @@ import { api } from '../api.js';
 import { $, esc, empty, fdate, fdatetime, tag, openForm, confirmBox, toast, todayStr, debounce } from '../ui.js';
 import { can } from '../app.js';
 import { visibilityField, scopeTag } from './common.js';
-import { markdownBlock, MARKDOWN_HELP } from '../markdown.js';
+import { markdownBlock } from '../markdown.js';
 
 export const CASE_STATUS = { open: ['ok', 'Offen'], dormant: ['warn', 'Ruhend'], closed: ['', 'Abgeschlossen'] };
 const KIND_SUGGESTIONS = ['Vermerk', 'Vernehmung', 'Verstoß', 'Beweismittel', 'Auszeichnung', 'Gespräch', 'Entscheidung'];
@@ -29,7 +29,7 @@ const fileForm = (file, teams, types) => {
       { name: 'opened_on', label: 'Eröffnet am', type: 'date', value: file?.opened_on || todayStr(), required: true },
       ...(file ? [{ name: 'closed_on', label: 'Abgeschlossen am', type: 'date', value: file.closed_on || '', help: 'Nur bei Status „Abgeschlossen“; leer heißt heute.' }] : [visibilityField(teams, null)]),
       ...(!file || canRetype ? [{ name: 'type_id', label: 'Aktenart', type: 'select', options: typeOptions(choosable), value: file?.type_id || '', help: file ? 'Eine andere Art ändert, wer die Akte sieht.' : 'Die Art muss zum gewählten Bereich gehören.' }] : []),
-      { name: 'description', label: 'Sachverhalt', type: 'textarea', rows: 8, value: file?.description, maxlength: 20000, full: true, help: MARKDOWN_HELP },
+      { name: 'description', label: 'Sachverhalt', type: 'textarea', rows: 8, value: file?.description, maxlength: 20000, full: true, markdown: true },
     ],
     onSubmit: async (values) => {
       const body = { title: values.title.trim(), file_number: values.file_number.trim(), status: values.status, opened_on: values.opened_on, description: values.description };
@@ -76,11 +76,10 @@ async function typeForm(type, teams) {
   });
 }
 
-const sameScope = (file, person) => (file.team_id ? person.team_id === file.team_id : !person.team_id && person.owner_user_id === file.owner_user_id);
-
 async function personForm(file) {
-  const people = (await api.get('/people')).filter((p) => sameScope(file, p) && p.active && !file.people.some((x) => x.person_id === p.id));
-  if (!people.length) { toast(file.team_id ? 'Keine weitere aktive Person in dieser Organisation. Lege sie unter „Personen“ mit Sichtbarkeit Organisation an.' : 'Keine weitere aktive private Person. Lege sie unter „Personen“ an.', true); return false; }
+  // Personen sind global: Jede aktive Person lässt sich beteiligen
+  const people = (await api.get('/people')).filter((p) => p.active && !file.people.some((x) => x.person_id === p.id));
+  if (!people.length) { toast('Keine weitere aktive Person. Lege sie unter „Personen“ an.', true); return false; }
   return openForm({
     title: 'Person beteiligen',
     fields: [
@@ -98,7 +97,7 @@ const entryForm = (file, entry) => openForm({
     { name: 'entry_date', label: 'Datum', type: 'date', value: entry?.entry_date || todayStr(), required: true },
     { name: 'kind', label: 'Art', value: entry?.kind, maxlength: 60, placeholder: KIND_SUGGESTIONS.slice(0, 3).join(', ') },
     { name: 'person_id', label: 'Betrifft Person', type: 'select', options: [{ v: '', l: '– Keine bestimmte Person –' }, ...file.people.filter((p) => p.name).map((p) => ({ v: p.person_id, l: `${p.name}${p.role ? ` (${p.role})` : ''}` }))], value: entry?.person_id || '' },
-    { name: 'body', label: 'Text', type: 'textarea', rows: 10, value: entry?.body, maxlength: 20000, required: true, full: true, help: MARKDOWN_HELP },
+    { name: 'body', label: 'Text', type: 'textarea', rows: 10, value: entry?.body, maxlength: 20000, required: true, full: true, markdown: true },
   ],
   onSubmit: async (values) => {
     const body = { entry_date: values.entry_date, kind: values.kind.trim(), person_id: values.person_id || null, body: values.body };

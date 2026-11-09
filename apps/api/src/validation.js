@@ -33,6 +33,8 @@ const LABELS = {
   // Organisationen
   is_owner: 'Inhaber', level: 'Recht', module: 'Funktion', move: 'Verschieben', rank_id: 'Rang', rank_ids: 'Ränge', restricted: 'Beschränkt',
   scope_id: 'Bereich', subject: 'Recht für', subject_id: 'Recht für', user_ids: 'Mitglieder',
+  // Personen-Import
+  csv: 'CSV-Datei', preview: 'Vorschau',
 };
 
 function subject(path) {

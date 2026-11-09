@@ -54,7 +54,6 @@ export async function render(view, params) {
       ['property:read', 'property', '/properties', 'Häuser', (item) => item.name],
       ['vehicle:read', 'vehicle', '/vehicles', 'Fahrzeuge', (item) => `${item.make_model} (${item.plate})`],
       ['key:read', 'key', '/keys', 'Schlüssel', (item) => `${item.label} (${item.code})`],
-      ['person:read', 'person', '/people', 'Personen', (item) => item.name],
     ].filter(([permission, module]) => can(permission) && t.levels[module] >= 2);
     const objects = await Promise.all(objectKinds.map(async ([, , path, label, title]) => ({
       label, items: (await api.get(path)).filter((item) => item.team_id === t.id).map((item) => title(item)),

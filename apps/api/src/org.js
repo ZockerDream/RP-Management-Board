@@ -7,7 +7,8 @@ import { forbidden, notFound } from './authz.js';
 export const LEVEL = { NONE: 0, PARTICIPATE: 1, READ: 2, WRITE: 3, MANAGE: 4 };
 export const LEVEL_LABELS = ['Kein Zugriff', 'Teilnehmen', 'Lesen', 'Lesen & Schreiben', 'Verwalten'];
 
-// Muss zu seed_team_ranks() in Migration 018 passen. scope: Rechte zusätzlich pro Aktenart bzw. Doku-Kategorie
+// Muss zu seed_team_ranks() in der neuesten Migration passen (zuletzt 019). Personen sind global und fehlen hier absichtlich.
+// scope: Rechte zusätzlich pro Aktenart bzw. Doku-Kategorie
 export const ORG_MODULES = [
   { key: 'members', label: 'Mitglieder & Ränge', levels: [0, 2, 3, 4], hints: { 2: 'Mitgliederliste sehen', 3: 'Mitglieder einladen, entfernen, Ränge und Gruppen zuweisen', 4: 'Ränge, Gruppen und Rechte verwalten' } },
   { key: 'budget', label: 'Konten & Buchungen', levels: [0, 2, 3, 4], hints: { 2: 'Konten und Buchungen sehen', 3: 'Buchen, Konten anlegen und ändern, Daueraufträge, Sparziele', 4: 'Konten löschen' } },
@@ -18,7 +19,6 @@ export const ORG_MODULES = [
   { key: 'sport', label: 'Sport', levels: [0, 2, 3], hints: { 2: 'Bestenliste sehen, eigene Ergebnisse eintragen', 3: 'Strecken verwalten, fremde Ergebnisse löschen' } },
   { key: 'vehicle', label: 'Fahrzeuge', levels: [0, 2, 3, 4], hints: { 2: 'Fahrzeuge sehen', 3: 'Fahrzeuge anlegen und ändern', 4: 'Fahrzeuge löschen' } },
   { key: 'property', label: 'Häuser', levels: [0, 2, 3, 4], hints: { 2: 'Häuser sehen, Tür-PIN nach Passwort', 3: 'Häuser und Tür-PINs anlegen und ändern', 4: 'Häuser löschen' } },
-  { key: 'person', label: 'Personen', levels: [0, 2, 3, 4], hints: { 2: 'Personen sehen', 3: 'Personen anlegen und ändern', 4: 'Personen löschen' } },
   { key: 'key', label: 'Schlüssel', levels: [0, 2, 3, 4], hints: { 2: 'Schlüssel sehen', 3: 'Schlüssel anlegen, ändern, ausgeben, zurücknehmen', 4: 'Schlüssel löschen' } },
   { key: 'casefile', label: 'Akten', scope: 'Aktenart', levels: [0, 2, 3, 4], hints: { 2: 'Akten lesen', 3: 'Akten anlegen, Einträge, Personen und Anhänge', 4: 'Akten löschen und beschränken, Aktenarten verwalten' } },
   { key: 'training', label: 'Schulungen', levels: [0, 1, 2, 3, 4], hints: { 1: 'Schulungen und Termine sehen, sich an- und abmelden', 2: 'Teilnehmer, Ergebnisse und Übersicht sehen', 3: 'Termine, Teilnehmer und Ergebnisse eintragen', 4: 'Schulungen anlegen, ändern, löschen' } },

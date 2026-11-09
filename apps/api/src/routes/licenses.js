@@ -5,7 +5,7 @@ import { LEVEL, levelSql, visibleSql, recordLevel, recordOwner } from '../org.js
 import { audit } from '../audit.js';
 import { patchSchema } from '../validation.js';
 import { addInterval, today } from '../lib.js';
-import { uuid, isoDate, assertPersonInScope, personJoin } from '../records.js';
+import { uuid, isoDate, assertPerson, personJoin } from '../records.js';
 
 export const EXPIRY_WARNING_DAYS = 30;
 
@@ -109,7 +109,7 @@ export default async function routes(app) {
   app.post('/licenses', authz('license:create'), async (req) => {
     const b = licenseFields.extend({ type_id: uuid, person_id: uuid }).parse(req.body);
     const { type } = await loadType(req, b.type_id, LEVEL.WRITE);
-    await assertPersonInScope(b.person_id, type);
+    await assertPerson(b.person_id);
     const issuedOn = b.issued_on || today();
     // Ohne Angabe gilt die Standard-Gültigkeit der Lizenzart; null heißt unbefristet
     const validUntil = 'valid_until' in b ? b.valid_until ?? null : type.validity_months ? addInterval(issuedOn, 'monthly', type.validity_months) : null;
