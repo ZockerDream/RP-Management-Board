@@ -481,7 +481,7 @@ denied('Gelöschte Person nicht mehr ändern', await alice.patch(`/people/${temp
 const peopleExport = await bob.raw('/people/export.csv');
 const exportText = peopleExport.buf.toString('utf8');
 check('Personen-Export', peopleExport.status === 200 && /text\/csv/.test(peopleExport.headers.get('content-type')) && /personen\.csv/.test(peopleExport.headers.get('content-disposition')));
-check('Export mit Kopfzeile und allen Personen', exportText.startsWith('\uFEFFID;Name;Art;Funktion;Telefon;E-Mail;Aktiv;Notiz\r\n') && exportText.includes(`${person.id};Hans;Mitarbeiter;`) && exportText.includes(teamPerson.id), exportText.slice(0, 300));
+check('Export mit Kopfzeile und allen Personen', exportText.startsWith('\uFEFFID;Name;Art;Funktion;Telefon;E-Mail;Aktiv;Notiz;Geburtsdatum;Geschlecht;Adresse;Staatsangehörigkeit;Größe;Merkmale;Alias\r\n') && exportText.includes(`${person.id};Hans;Mitarbeiter;`) && exportText.includes(teamPerson.id), exportText.slice(0, 300));
 check('Export im Audit-Log', psql(`SELECT count(*) FROM audit_log WHERE action='people.exported' AND user_id='${uB.id}'`) === '1');
 const importCsv = `Name;Art;Telefon;Aktiv;ID\nImport Anna;Extern;+49 30 1;ja;\nhans;;;;\n;Familie;;;\nTeamer;;0171 2;;${teamPerson.id}`;
 const preview = ok('Import prüfen', await bob.post('/people/import', { csv: importCsv, preview: true }));
@@ -835,6 +835,123 @@ const personOverview = ok('Personenübersicht', await carol.get(`/people/${orgPe
 check('Personenübersicht vollständig', personOverview.case_files.length === 1 && personOverview.licenses.length === 1 && personOverview.trainings.length === 1, JSON.stringify(personOverview).slice(0, 240));
 const daveOverview = ok('Fremder öffnet Personenübersicht', await dave.get(`/people/${orgPerson.id}/record`));
 check('Fremder sieht nur eigene Unterlagen der Person', daveOverview.case_files.length === 1 && daveOverview.case_files[0].id === daveFile.id && daveOverview.licenses.length === 0 && daveOverview.trainings.length === 0, JSON.stringify(daveOverview).slice(0, 240));
+
+// ---------- Aktensystem: Fallakte, Fahrzeuge, Verknüpfung, Strafkatalog, Anklagepunkte, Beweismittel, Fahndung, Berichte, Personenakte
+// Alice Inhaberin, Bob Mitglied (Akten: Verwalten), Carol Leserin, Dave fremd
+const hitFile = ok('Fallakte mit Priorität, Ort, Zeit und Sachbearbeitung', await bob.post('/case-files', {
+  title: 'Raubüberfall Bank', team_id: team.id, priority: 'urgent', location: 'Pacific Standard Bank', incident_at: '2026-11-08T21:30:00.000Z', lead_user_id: uB.id,
+  people: [{ person_id: orgPerson.id, role: 'Tatverdächtiger' }, { person_id: orgPerson2.id, role: 'Zeugin' }],
+}));
+invalid('Sachbearbeitung muss Mitglied sein', await bob.patch(`/case-files/${hitFile.id}`, { lead_user_id: uD.id }));
+invalid('Unbekannte Priorität', await bob.patch(`/case-files/${hitFile.id}`, { priority: 'sofort' }));
+let hit = ok('Fallakte im Detail', await carol.get(`/case-files/${hitFile.id}`));
+check('Neue Felder der Akte', hit.priority === 'urgent' && hit.location === 'Pacific Standard Bank' && hit.lead_name === 'bob' && String(hit.incident_at).startsWith('2026-11-08T21:30')
+  && ['links', 'vehicles', 'evidence', 'charges', 'warrants', 'reports'].every((k) => Array.isArray(hit[k])), JSON.stringify(hit).slice(0, 300));
+check('Dringende Akten stehen oben', (await carol.get('/case-files')).data[0]?.id === hitFile.id);
+check('Filter nach Priorität', (await carol.get('/case-files?priority=urgent')).data.every((f) => f.priority === 'urgent'));
+
+ok('Fahrzeug erfassen', await bob.post(`/case-files/${hitFile.id}/vehicles`, { plate: 'ls-1234', description: 'Schwarzer Sultan', role: 'Fluchtfahrzeug', owner_person_id: orgPerson.id }));
+invalid('Fahrzeug ohne Angaben', await bob.post(`/case-files/${hitFile.id}/vehicles`, { role: 'x' }));
+denied('Leserin erfasst kein Fahrzeug', await carol.post(`/case-files/${hitFile.id}/vehicles`, { plate: 'X-1' }), [403]);
+check('Suche findet die Akte über das Kennzeichen', (await carol.get('/case-files?q=LS-12')).data.some((f) => f.id === hitFile.id));
+
+ok('Akten verknüpfen', await bob.post(`/case-files/${hitFile.id}/links`, { linked_id: caseFile.id, note: 'Selbe Täter' }));
+check('Verknüpfung gilt in beide Richtungen', (await carol.get(`/case-files/${caseFile.id}`)).data.links.some((l) => l.id === hitFile.id && l.note === 'Selbe Täter'));
+const alicePrivateFile = ok('Private Akte', await alice.post('/case-files', { title: 'Privat' }));
+invalid('Verknüpfen nur im selben Bereich', await alice.post(`/case-files/${hitFile.id}/links`, { linked_id: alicePrivateFile.id }));
+invalid('Nicht mit sich selbst', await bob.post(`/case-files/${hitFile.id}/links`, { linked_id: hitFile.id }));
+
+denied('Leserin pflegt keinen Strafkatalog', await carol.post('/penal-codes', { team_id: team.id, code: 'X', title: 'X' }), [403]);
+const robbery = ok('Strafkatalog-Eintrag', await alice.post('/penal-codes', { team_id: team.id, code: '§ 249', title: 'Raub', category: 'Verbrechen', fine: '5000', jail: 30 }));
+invalid('Paragraph doppelt', await alice.post('/penal-codes', { team_id: team.id, code: '§ 249', title: 'Noch mal' }));
+const penalPreview = ok('Strafkatalog-CSV prüfen', await alice.post('/penal-codes/import', { team_id: team.id, preview: true, csv: 'Paragraph;Bezeichnung;Geldstrafe;Haft\n§ 249;Schwerer Raub;7.500,00;45\n§ 315;Gefährlicher Eingriff;2000;10\n;Ohne;;' }));
+check('Vorschau zählt und schreibt nichts', penalPreview.created === 1 && penalPreview.updated === 1 && penalPreview.errors === 1 && (await carol.get(`/penal-codes?team_id=${team.id}`)).data.length === 1, JSON.stringify(penalPreview));
+ok('Strafkatalog per CSV', await alice.post('/penal-codes/import', { team_id: team.id, csv: 'Paragraph;Bezeichnung;Geldstrafe;Haft\n§ 249;Schwerer Raub;7.500,00;45\n§ 315;Gefährlicher Eingriff;2000;10' }));
+check('CSV aktualisiert Vorhandenes und legt Neues an', (await carol.get(`/penal-codes?team_id=${team.id}`)).data.map((c) => `${c.code}:${c.title}:${c.fine}:${c.jail}`).join() === '§ 249:Schwerer Raub:7500.00:45,§ 315:Gefährlicher Eingriff:2000.00:10');
+check('Fremder sieht den Strafkatalog nicht', !(await dave.get('/penal-codes')).data.some((c) => c.team_id === team.id));
+
+const charge = ok('Anklagepunkt aus dem Katalog', await bob.post(`/case-files/${hitFile.id}/charges`, { person_id: orgPerson.id, penal_code_id: robbery.id, count: 2 }));
+invalid('Anklage nur gegen Beteiligte', await bob.post(`/case-files/${hitFile.id}/charges`, { person_id: otherPerson.id, penal_code_id: robbery.id }));
+invalid('Anklage ohne Tatbestand', await bob.post(`/case-files/${hitFile.id}/charges`, { person_id: orgPerson.id }));
+ok('Freier Anklagepunkt', await bob.post(`/case-files/${hitFile.id}/charges`, { person_id: orgPerson.id, code: '§ 1', title: 'Sonstiges', fine: '100' }));
+hit = (await carol.get(`/case-files/${hitFile.id}`)).data;
+check('Anklagepunkt hält den Katalogstand fest', hit.charges.some((c) => c.id === charge.id && c.title === 'Schwerer Raub' && c.fine === '7500.00' && c.jail === 45 && c.count === 2 && c.status === 'open'));
+denied('Leserin entscheidet nicht', await carol.post(`/case-file-charges/${charge.id}/decision`, { status: 'convicted' }), [403]);
+ok('Verurteilt', await bob.post(`/case-file-charges/${charge.id}/decision`, { status: 'convicted', note: 'Geständig' }));
+invalid('Entschiedenes lässt sich nicht ändern', await bob.patch(`/case-file-charges/${charge.id}`, { count: 1 }));
+
+const evidence = ok('Beweismittel', await bob.post(`/case-files/${hitFile.id}/evidence`, { description: 'Pistole, Kaliber 9 mm', kind: 'Waffe', storage: 'Asservatenkammer Fach 3', found_where: 'Fluchtfahrzeug', person_id: orgPerson.id }));
+check('Beweismittel nummeriert', evidence.number === 1);
+ok('Übergabe ans Labor', await bob.post(`/case-file-evidence/${evidence.id}/log`, { status: 'analysis', action: 'Übergabe an Labor', note: 'Ballistik' }));
+invalid('Protokoll ohne Inhalt', await bob.post(`/case-file-evidence/${evidence.id}/log`, {}));
+ok('Lagerort ändern', await bob.patch(`/case-file-evidence/${evidence.id}`, { storage: 'Labor Regal 2' }));
+const evidenceRow = (await carol.get(`/case-files/${hitFile.id}`)).data.evidence[0];
+check('Lückenlose Übergabekette', evidenceRow.status === 'analysis' && evidenceRow.log.map((l) => l.action).join('|') === 'Sichergestellt|Status: In Untersuchung|Lagerort geändert', JSON.stringify(evidenceRow.log));
+denied('Leserin löscht kein Beweismittel', await carol.del(`/case-file-evidence/${evidence.id}`), [403]);
+
+const warrant = ok('Haftbefehl', await bob.post(`/case-files/${hitFile.id}/warrants`, { kind: 'arrest', person_id: orgPerson.id, reason: 'Dringender Tatverdacht Raub' }));
+invalid('Fahrzeugfahndung braucht ein Kennzeichen', await bob.post(`/case-files/${hitFile.id}/warrants`, { kind: 'vehicle', reason: 'x' }));
+invalid('Haftbefehl braucht eine Person', await bob.post(`/case-files/${hitFile.id}/warrants`, { kind: 'arrest', reason: 'x' }));
+ok('Fahrzeugfahndung', await bob.post(`/case-files/${hitFile.id}/warrants`, { kind: 'vehicle', plate: 'ls-1234', reason: 'Fluchtfahrzeug' }));
+check('Fahndungsliste', (await carol.get('/warrants')).data.filter((w) => w.case_file_id === hitFile.id).length === 2);
+check('Abfrage nach Kennzeichen', (await carol.get('/warrants?q=LS-1234')).data.some((w) => w.kind === 'vehicle' && w.file_number === hitFile.file_number));
+check('Fremder sieht keine Fahndungen', !(await dave.get('/warrants')).data.some((w) => w.case_file_id === hitFile.id));
+
+const templateSet = ok('Standardvorlagen Polizei', await alice.post('/report-templates/defaults', { team_id: team.id, set: 'police' }));
+check('Fünf Vorlagen, beim zweiten Mal keine doppelt', templateSet.created === 5 && (await alice.post('/report-templates/defaults', { team_id: team.id, set: 'police' })).data.created === 0);
+denied('Leserin pflegt keine Vorlagen', await carol.post('/report-templates', { team_id: team.id, name: 'X' }), [403]);
+const arrestTemplate = (await bob.get('/report-templates')).data.find((t) => t.name === 'Festnahmebericht' && t.team_id === team.id);
+const report = ok('Bericht als Entwurf', await bob.post(`/case-files/${hitFile.id}/reports`, { kind: arrestTemplate.name, title: 'Festnahme am Hafen', body: arrestTemplate.body, person_ids: [orgPerson.id] }));
+invalid('Bericht nur über Beteiligte', await bob.post(`/case-files/${hitFile.id}/reports`, { title: 'X', person_ids: [otherPerson.id] }));
+check('Entwurf sieht die Leserin nicht', !(await carol.get(`/case-files/${hitFile.id}`)).data.reports.some((r) => r.id === report.id));
+check('Entwurf sieht, wer freigibt', (await alice.get(`/case-files/${hitFile.id}`)).data.reports.some((r) => r.id === report.id && r.status === 'draft'));
+ok('Einreichen', await bob.post(`/case-file-reports/${report.id}/submit`));
+check('Freigabe wird gemeldet', psql(`SELECT count(*) FROM notifications WHERE user_id='${uA.id}' AND kind='report_review'`) === '1');
+check('Offene Freigaben', (await alice.get('/case-file-reports/pending')).data.some((r) => r.id === report.id));
+invalid('Eingereichtes nicht ändern', await bob.patch(`/case-file-reports/${report.id}`, { title: 'x' }));
+denied('Vier-Augen-Prinzip', await bob.post(`/case-file-reports/${report.id}/review`, { decision: 'approve' }), [403]);
+invalid('Zurückgeben braucht eine Begründung', await alice.post(`/case-file-reports/${report.id}/review`, { decision: 'return' }));
+ok('Zurückgeben', await alice.post(`/case-file-reports/${report.id}/review`, { decision: 'return', note: 'Uhrzeit der Festnahme fehlt' }));
+check('Zurück im Entwurf mit Anmerkung', (await bob.get(`/case-files/${hitFile.id}`)).data.reports.some((r) => r.id === report.id && r.status === 'draft' && r.review_note === 'Uhrzeit der Festnahme fehlt'));
+check('Verfasser wird benachrichtigt', psql(`SELECT count(*) FROM notifications WHERE user_id='${uB.id}' AND kind='report_decided'`) === '1');
+ok('Korrigieren', await bob.patch(`/case-file-reports/${report.id}`, { body: `${arrestTemplate.body}\n\nFestnahme um 21:45 Uhr` }));
+ok('Erneut einreichen', await bob.post(`/case-file-reports/${report.id}/submit`));
+ok('Freigeben', await alice.post(`/case-file-reports/${report.id}/review`, { decision: 'approve' }));
+invalid('Freigegebener Bericht ist gesperrt', await bob.patch(`/case-file-reports/${report.id}`, { title: 'x' }));
+invalid('Freigegebener Bericht bleibt', await alice.del(`/case-file-reports/${report.id}`));
+const amendment = ok('Nachtrag', await bob.post(`/case-files/${hitFile.id}/reports`, { title: 'Nachtrag zur Festnahme', body: 'Zeuge nachträglich vernommen', amends_report_id: report.id }));
+check('Nachtrag verweist auf den Bericht', (await bob.get(`/case-files/${hitFile.id}`)).data.reports.some((r) => r.id === amendment.id && r.number === 2 && r.amends_number === 1));
+const privateReport = ok('Privater Bericht', await alice.post(`/case-files/${alicePrivateFile.id}/reports`, { title: 'Notiz', body: 'Text' }));
+check('Privat ist Einreichen gleich Freigeben', (await alice.post(`/case-file-reports/${privateReport.id}/submit`)).data.status === 'approved');
+
+denied('Leserin schreibt keine Personenakte', await carol.put(`/person-files/${orgPerson.id}`, { team_id: team.id, warnings: ['Bewaffnet'] }), [403]);
+ok('Personenakte mit Warnhinweisen', await bob.put(`/person-files/${orgPerson.id}`, { team_id: team.id, warnings: ['Bewaffnet', 'Fluchtgefahr', 'Bewaffnet'], notes: 'Bekannt aus der Hafengegend', blood_type: '0+' }));
+const personFile = ok('Personenakte lesen', await carol.get(`/person-files/${orgPerson.id}?team_id=${team.id}`));
+check('Personenakte vollständig', personFile.file.warnings.join() === 'Bewaffnet,Fluchtgefahr' && personFile.file.blood_type === '0+' && personFile.level === 2
+  && personFile.warrants.some((w) => w.kind === 'arrest' && w.status === 'active') && personFile.case_files.some((c) => c.id === hitFile.id && c.role === 'Tatverdächtiger')
+  && personFile.totals.convictions === 1 && personFile.totals.jail === 90 && personFile.totals.fine === '15000.00'
+  && personFile.reports.length === 1 && personFile.evidence.length === 1 && personFile.vehicles.length === 1, JSON.stringify(personFile.totals));
+const personList = ok('Personenakten-Liste', await carol.get(`/person-files?team_id=${team.id}`));
+check('Gesuchte stehen oben', personList[0]?.id === orgPerson.id && personList[0].wanted === 1 && personList[0].warnings.includes('Bewaffnet'));
+check('Filter: nur Gesuchte', (await carol.get(`/person-files?team_id=${team.id}&only=wanted`)).data.every((p) => p.wanted > 0));
+denied('Fremder liest die Personenakte der Organisation nicht', await dave.get(`/person-files/${orgPerson.id}?team_id=${team.id}`), [404]);
+const davePersonFile = ok('Fremder sieht privat nur eigene Unterlagen', await dave.get(`/person-files/${orgPerson.id}`));
+check('Private Sicht ohne Organisationsdaten', davePersonFile.file === null && !davePersonFile.warrants.length && davePersonFile.case_files.every((c) => c.id === daveFile.id));
+
+ok('Stammdaten der Person', await bob.patch(`/people/${orgPerson.id}`, { birth_date: '1990-05-17', height_cm: 182, aliases: 'Der Schatten', features: 'Tattoo am Hals' }));
+invalid('Ungültiges Geburtsdatum', await bob.patch(`/people/${orgPerson.id}`, { birth_date: '1990-02-31' }));
+check('Suche über den Alias', (await carol.get('/case-files?q=Schatten')).data.some((f) => f.id === hitFile.id));
+const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('e2e-foto')]);
+ok('Foto hochladen', await upload(bob, `/people/${orgPerson.id}/photo`, png, 'foto.png', 'image/png'));
+invalid('Kein PDF als Foto', await upload(bob, `/people/${orgPerson.id}/photo`, pdfBytes, 'x.pdf', 'application/pdf'));
+const photo = await carol.raw(`/people/${orgPerson.id}/photo`);
+check('Foto abrufen', photo.status === 200 && photo.buf.subarray(1, 4).toString() === 'PNG');
+check('Liste kennt das Foto', (await carol.get(`/person-files?team_id=${team.id}`)).data.find((p) => p.id === orgPerson.id)?.has_photo === true);
+invalid('Person mit Fahndung und Akten lässt sich nicht löschen', await alice.del(`/people/${orgPerson.id}`));
+
+ok('Haftbefehl vollstreckt', await bob.post(`/warrants/${warrant.id}/close`, { status: 'executed', note: 'Festnahme am Hafen' }));
+check('Vollstreckt steht nicht mehr in der Fahndungsliste', !(await carol.get('/warrants')).data.some((w) => w.id === warrant.id) && (await carol.get('/warrants?status=all')).data.some((w) => w.id === warrant.id && w.status === 'executed'));
+check('Aktensystem im Audit-Log', psql(`SELECT count(DISTINCT action) FROM audit_log WHERE action IN ('report.approved','report.returned','warrant.issued','warrant.executed','person_file.updated','casefile.charge_decided','casefile.evidence_logged','penal_code.imported')`) === '8');
 
 const docCategory = ok('Doku-Kategorie', await alice.post('/doc-categories', { name: 'Gesetze', team_id: team.id }));
 denied('Viewer legt keine Kategorie an', await carol.post('/doc-categories', { name: 'X', team_id: team.id }));

@@ -6,9 +6,11 @@ import { audit } from '../audit.js';
 import { patchSchema } from '../validation.js';
 import { today } from '../lib.js';
 import { receiveUpload, sendUpload, removeUpload } from '../uploads.js';
-import { uuid, isoDate, assertPerson, personJoin } from '../records.js';
+import { uuid, isoDate, isoDateTime, assertPerson, personJoin } from '../records.js';
+import { fileLevelSql, loadFile, assertInvolved } from '../casefile-access.js';
 
 const STATUS = ['open', 'dormant', 'closed'];
+export const PRIORITIES = ['low', 'normal', 'high', 'urgent'];
 const fileFields = z.object({
   file_number: z.string().trim().max(40).default(''),
   title: z.string().trim().min(1).max(200),
@@ -16,6 +18,10 @@ const fileFields = z.object({
   status: z.enum(STATUS).default('open'),
   opened_on: isoDate.optional(),
   closed_on: isoDate.nullish(),
+  priority: z.enum(PRIORITIES).default('normal'),
+  location: z.string().trim().max(200).default(''),
+  incident_at: isoDateTime.nullish(),
+  lead_user_id: uuid.nullish(),
 });
 const createBody = fileFields.extend({
   team_id: uuid.nullish(),
@@ -46,8 +52,14 @@ const uniqueNumber = (e) => {
   throw e;
 };
 
-// Stufe für eine Akte: Aktenart und Beschränkung rechnet case_file_level() (Migration 018)
-const fileLevelSql = (alias, n = '$1') => `case_file_level(${alias}.id, ${n})`;
+// Sachbearbeitung: ein Mitglied der Organisation, privat nur man selbst
+async function checkLead(scope, userId) {
+  if (!userId) return;
+  const ok = scope.team_id
+    ? await one('SELECT 1 FROM team_members WHERE team_id=$1 AND user_id=$2', [scope.team_id, userId])
+    : userId === scope.owner_user_id;
+  if (!ok) throw bad(scope.team_id ? 'Die Sachbearbeitung muss Mitglied der Organisation sein' : 'Privat kannst nur du die Akte bearbeiten');
+}
 
 // Aktenart im selben Bereich wie die Akte; ohne Art gelten die Rechte für Akten allgemein
 async function typeInScope(typeId, scope) {
@@ -59,39 +71,37 @@ async function typeInScope(typeId, scope) {
 }
 
 export default async function routes(app) {
-  // Lesen ab 2, Einträge, Personen und Anhänge ab 3, Löschen, Aktenart wechseln und Beschränken mit 4
-  async function loadFile(req, id, need = LEVEL.READ) {
-    const file = await one(`SELECT c.*, ${fileLevelSql('c', '$2')} AS level FROM case_files c WHERE c.id=$1`, [id, req.user.id]);
-    if (!file || file.level < LEVEL.READ) throw notFound();
-    if (file.level < need) throw forbidden(needMessage('casefile', need));
-    const { level, ...rest } = file;
-    return { file: rest, level };
-  }
+  // Lesen ab 2, Einträge, Personen und Anhänge ab 3, Löschen, Aktenart wechseln und Beschränken mit 4 (loadFile in casefile-access.js)
   const write = LEVEL.WRITE;
   const checkDates = (opened, closed) => {
     if (closed && opened && closed < opened) throw bad('Abgeschlossen am liegt vor dem Eröffnungsdatum');
   };
 
   app.get('/case-files', authz('casefile:read'), async (req) => {
-    const f = z.object({ status: z.enum(STATUS).optional(), type_id: uuid.optional(), q: z.string().max(100).optional() }).parse(req.query);
+    const f = z.object({ status: z.enum(STATUS).optional(), type_id: uuid.optional(), priority: z.enum(PRIORITIES).optional(), q: z.string().max(100).optional() }).parse(req.query);
     const params = [req.user.id];
     const where = [`${fileLevelSql('c')} >= 2`];
     if (f.status) { params.push(f.status); where.push(`c.status=$${params.length}`); }
     if (f.type_id) { params.push(f.type_id); where.push(`c.type_id=$${params.length}`); }
+    if (f.priority) { params.push(f.priority); where.push(`c.priority=$${params.length}`); }
+    // Suche auch über Ort, Personen (mit Alias) und Kennzeichen beteiligter Fahrzeuge
     if (f.q) {
       params.push(`%${f.q}%`);
-      where.push(`(c.title ILIKE $${params.length} OR c.file_number ILIKE $${params.length} OR c.description ILIKE $${params.length}
-        OR EXISTS (SELECT 1 FROM case_file_people cp JOIN people pe ON pe.id=cp.person_id WHERE cp.case_file_id=c.id AND pe.name ILIKE $${params.length}))`);
+      where.push(`(c.title ILIKE $${params.length} OR c.file_number ILIKE $${params.length} OR c.description ILIKE $${params.length} OR c.location ILIKE $${params.length}
+        OR EXISTS (SELECT 1 FROM case_file_people cp JOIN people pe ON pe.id=cp.person_id WHERE cp.case_file_id=c.id AND (pe.name ILIKE $${params.length} OR pe.aliases ILIKE $${params.length}))
+        OR EXISTS (SELECT 1 FROM case_file_vehicles v WHERE v.case_file_id=c.id AND (v.plate ILIKE $${params.length} OR v.description ILIKE $${params.length})))`);
     }
     return many(
       `SELECT c.id, c.file_number, c.title, c.status, c.opened_on, c.closed_on, c.team_id, t.name team_name, c.updated_at, ${fileLevelSql('c')} AS level,
-         c.type_id, ct.name type_name, c.restricted,
+         c.type_id, ct.name type_name, c.restricted, c.priority, c.location, c.incident_at, lu.name lead_name,
+         (SELECT count(*)::int FROM warrants w WHERE w.case_file_id=c.id AND w.status='active') active_warrants,
+         (SELECT count(*)::int FROM case_file_reports r WHERE r.case_file_id=c.id AND r.status='submitted') reports_pending,
          (SELECT count(*)::int FROM case_file_entries e WHERE e.case_file_id=c.id) entries,
          (SELECT max(e.entry_date) FROM case_file_entries e WHERE e.case_file_id=c.id) last_entry,
          (SELECT COALESCE(json_agg(pe.name ORDER BY pe.name), '[]') FROM case_file_people cp JOIN people pe ON pe.id=cp.person_id WHERE cp.case_file_id=c.id) people
-       FROM case_files c LEFT JOIN teams t ON t.id=c.team_id LEFT JOIN case_file_types ct ON ct.id=c.type_id
+       FROM case_files c LEFT JOIN teams t ON t.id=c.team_id LEFT JOIN case_file_types ct ON ct.id=c.type_id LEFT JOIN users lu ON lu.id=c.lead_user_id
        WHERE ${where.join(' AND ')}
-       ORDER BY c.status='closed', c.updated_at DESC LIMIT 500`,
+       ORDER BY c.status='closed', array_position(ARRAY['urgent','high','normal','low'], c.priority), c.updated_at DESC LIMIT 500`,
       params,
     );
   });
@@ -105,12 +115,14 @@ export default async function routes(app) {
     checkDates(openedOn, closedOn);
     for (const p of b.people) await assertPerson(p.person_id);
     if (new Set(b.people.map((p) => p.person_id)).size !== b.people.length) throw bad('Eine Person ist doppelt angegeben');
+    await checkLead(scope, b.lead_user_id);
     const created = await tx(async (client) => {
       const number = b.file_number || await nextFileNumber(client, scope);
       const row = (await client.query(
-        `INSERT INTO case_files(owner_user_id,team_id,file_number,title,description,status,opened_on,closed_on,created_by,type_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, file_number`,
-        [scope.owner_user_id, scope.team_id, number, b.title, b.description, b.status, openedOn, closedOn, req.user.id, b.type_id || null],
+        `INSERT INTO case_files(owner_user_id,team_id,file_number,title,description,status,opened_on,closed_on,created_by,type_id,priority,location,incident_at,lead_user_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id, file_number`,
+        [scope.owner_user_id, scope.team_id, number, b.title, b.description, b.status, openedOn, closedOn, req.user.id, b.type_id || null,
+          b.priority, b.location, b.incident_at || null, b.lead_user_id || null],
       )).rows[0];
       for (const p of b.people) await client.query('INSERT INTO case_file_people(case_file_id,person_id,role) VALUES ($1,$2,$3)', [row.id, p.person_id, p.role]);
       return row;
@@ -121,7 +133,7 @@ export default async function routes(app) {
 
   app.get('/case-files/:id', authz('casefile:read'), async (req) => {
     const { file, level } = await loadFile(req, req.params.id);
-    const [team, type, access, people, entries, attachments] = await Promise.all([
+    const [team, type, access, people, entries, attachments, lead, members, links, vehicles, evidence, charges, warrants, reports, owner] = await Promise.all([
       file.team_id ? one('SELECT name FROM teams WHERE id=$1', [file.team_id]) : null,
       file.type_id ? one('SELECT name FROM case_file_types WHERE id=$1', [file.type_id]) : null,
       // Wer eine beschränkte Akte sehen darf, zeigt die Akte nur denen, die sie verwalten
@@ -138,13 +150,46 @@ export default async function routes(app) {
         WHERE e.case_file_id=$1 ORDER BY e.entry_date DESC, e.created_at DESC`, [file.id]),
       many(`SELECT a.id, a.original_name, a.mime, a.size, a.created_at, u.name uploaded_by_name FROM case_file_attachments a
         LEFT JOIN users u ON u.id=a.uploaded_by WHERE a.case_file_id=$1 ORDER BY a.created_at`, [file.id]),
+      file.lead_user_id ? one('SELECT name FROM users WHERE id=$1', [file.lead_user_id]) : null,
+      // Auswahl für die Sachbearbeitung nur für die, die die Akte ändern dürfen
+      level >= LEVEL.WRITE && file.team_id
+        ? many('SELECT u.id, u.name FROM team_members tm JOIN users u ON u.id=tm.user_id WHERE tm.team_id=$1 AND u.deleted_at IS NULL ORDER BY u.name', [file.team_id])
+        : [],
+      // Verknüpfte Akten nur, soweit man sie selbst sehen darf
+      many(`SELECT l.linked_id id, l.note, c.file_number, c.title, c.status FROM case_file_links l JOIN case_files c ON c.id=l.linked_id
+        WHERE l.case_file_id=$1 AND ${fileLevelSql('c', '$2')} >= 2 ORDER BY c.file_number`, [file.id, req.user.id]),
+      many(`SELECT v.*, pe.name owner_name FROM case_file_vehicles v LEFT JOIN people pe ON pe.id=v.owner_person_id
+        WHERE v.case_file_id=$1 ORDER BY v.created_at`, [file.id]),
+      many(`SELECT ev.*, pe.name person_name, u.name created_by_name,
+          (SELECT COALESCE(json_agg(json_build_object('at', l.at, 'action', l.action, 'note', l.note, 'user_name', lu.name) ORDER BY l.at), '[]')
+             FROM case_file_evidence_log l LEFT JOIN users lu ON lu.id=l.user_id WHERE l.evidence_id=ev.id) log
+        FROM case_file_evidence ev LEFT JOIN people pe ON pe.id=ev.person_id LEFT JOIN users u ON u.id=ev.created_by
+        WHERE ev.case_file_id=$1 ORDER BY ev.number`, [file.id]),
+      many(`SELECT ch.*, pe.name person_name, du.name decided_by_name FROM case_file_charges ch JOIN people pe ON pe.id=ch.person_id
+        LEFT JOIN users du ON du.id=ch.decided_by WHERE ch.case_file_id=$1 ORDER BY pe.name, ch.created_at`, [file.id]),
+      many(`SELECT w.*, pe.name person_name, cu.name created_by_name, xu.name closed_by_name FROM warrants w
+        LEFT JOIN people pe ON pe.id=w.person_id LEFT JOIN users cu ON cu.id=w.created_by LEFT JOIN users xu ON xu.id=w.closed_by
+        WHERE w.case_file_id=$1 ORDER BY w.status='active' DESC, w.issued_on DESC`, [file.id]),
+      // Entwürfe sieht nur, wer sie schreibt oder Berichte freigeben darf
+      many(`SELECT r.*, au.name author_name, ap.name approved_by_name, am.number amends_number,
+          (SELECT COALESCE(json_agg(json_build_object('id', pe.id, 'name', pe.name) ORDER BY pe.name), '[]')
+             FROM case_file_report_people rp JOIN people pe ON pe.id=rp.person_id WHERE rp.report_id=r.id) people
+        FROM case_file_reports r LEFT JOIN users au ON au.id=r.author_id LEFT JOIN users ap ON ap.id=r.approved_by
+          LEFT JOIN case_file_reports am ON am.id=r.amends_report_id
+        WHERE r.case_file_id=$1 AND (r.status <> 'draft' OR r.author_id=$2 OR $3::boolean) ORDER BY r.number`, [file.id, req.user.id, level >= LEVEL.MANAGE]),
+      // Inhaber dürfen eigene Berichte freigeben (Vier-Augen-Prinzip sonst)
+      file.team_id ? one('SELECT 1 FROM team_members WHERE team_id=$1 AND user_id=$2 AND is_owner', [file.team_id, req.user.id]) : null,
     ]);
-    return { ...file, team_name: team?.name || null, type_name: type?.name || null, level, access, people, entries, attachments };
+    return {
+      ...file, team_name: team?.name || null, type_name: type?.name || null, lead_name: lead?.name || null, level, access, people, entries, attachments,
+      members, links, vehicles, evidence, charges, warrants, reports, owner: file.team_id ? !!owner : true,
+    };
   });
 
   app.patch('/case-files/:id', authz('casefile:update'), async (req) => {
     const { file, level } = await loadFile(req, req.params.id, write);
     const b = patchSchema(fileFields).extend({ type_id: uuid.nullish() }).parse(req.body);
+    if ('lead_user_id' in b) await checkLead(file, b.lead_user_id);
     // Eine andere Aktenart ändert, wer die Akte sieht: dafür „Verwalten“ hier und Schreibrecht für die neue Art
     const typeChanged = 'type_id' in b && (b.type_id || null) !== file.type_id;
     if (typeChanged) {
@@ -157,9 +202,12 @@ export default async function routes(app) {
     // Abschließen setzt das Datum, Wiedereröffnen löscht es
     const closedOn = status === 'closed' ? ('closed_on' in b ? b.closed_on : file.closed_on) || today() : null;
     checkDates(openedOn, closedOn);
+    const keep = (key) => (key in b ? b[key] ?? null : file[key]);
     await q(
-      `UPDATE case_files SET file_number=$2, title=$3, description=$4, status=$5, opened_on=$6, closed_on=$7, type_id=$8, updated_at=now() WHERE id=$1`,
-      [file.id, b.file_number || file.file_number, b.title ?? file.title, b.description ?? file.description, status, openedOn, closedOn, typeChanged ? b.type_id || null : file.type_id],
+      `UPDATE case_files SET file_number=$2, title=$3, description=$4, status=$5, opened_on=$6, closed_on=$7, type_id=$8,
+         priority=$9, location=$10, incident_at=$11, lead_user_id=$12, updated_at=now() WHERE id=$1`,
+      [file.id, b.file_number || file.file_number, b.title ?? file.title, b.description ?? file.description, status, openedOn, closedOn, typeChanged ? b.type_id || null : file.type_id,
+        b.priority ?? file.priority, b.location ?? file.location, keep('incident_at'), keep('lead_user_id')],
     ).catch(uniqueNumber);
     const changes = { ...(status !== file.status ? { status } : {}), ...(typeChanged ? { type: b.type_id || null } : {}) };
     await audit(req, 'casefile.updated', 'case_file', file.id, Object.keys(changes).length ? changes : undefined);
@@ -203,12 +251,7 @@ export default async function routes(app) {
     return { ok: true };
   });
 
-  // ---- Einträge
-  const assertInvolved = async (fileId, personId) => {
-    if (personId && !(await one('SELECT 1 FROM case_file_people WHERE case_file_id=$1 AND person_id=$2', [fileId, personId]))) {
-      throw bad('Person ist nicht an dieser Akte beteiligt');
-    }
-  };
+  // ---- Einträge (assertInvolved aus casefile-access.js)
   async function loadEntry(req) {
     const entry = await one('SELECT * FROM case_file_entries WHERE id=$1', [req.params.id]);
     if (!entry) throw notFound();

@@ -27,3 +27,6 @@ export async function assertUserInScope(userId, scope) {
 
 // Die Person, die ein Datensatz betrifft: Wer den Datensatz sieht, sieht auch ihren Namen
 export const personJoin = (alias, column) => `LEFT JOIN people ${alias} ON ${alias}.id=${column}`;
+
+// Zeitpunkt mit Zeitzone, wie ihn der Browser aus einem datetime-local-Feld per toISOString() schickt
+export const isoDateTime = z.string().max(40).refine((value) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value) && !Number.isNaN(Date.parse(value)), 'Ungültiger Zeitpunkt');

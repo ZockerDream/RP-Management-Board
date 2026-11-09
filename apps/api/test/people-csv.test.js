@@ -5,9 +5,11 @@ import { peopleCsv, readPeopleCsv, planPeopleImport, MAX_IMPORT_ROWS } from '../
 
 const ID1 = '11111111-1111-4111-8111-111111111111';
 const ID2 = '22222222-2222-4222-8222-222222222222';
+const blank = { birth_date: null, gender: '', address: '', nationality: '', height_cm: null, features: '', aliases: '' };
 const existing = [
-  { id: ID1, name: 'Max Muster', kind: 'external', function: 'Zeuge', phone: '+49 170 1', email: 'max@example.com', active: true, note: 'Zeile 1\nZeile 2; mit "Zitat"' },
-  { id: ID2, name: 'Erika Beispiel', kind: 'family', function: '', phone: '', email: '', active: false, note: '=SUMME(A1)' },
+  { id: ID1, name: 'Max Muster', kind: 'external', function: 'Zeuge', phone: '+49 170 1', email: 'max@example.com', active: true, note: 'Zeile 1\nZeile 2; mit "Zitat"',
+    ...blank, birth_date: '1990-12-31', gender: 'männlich', address: 'Grove Street 1; Los Santos', height_cm: 182, features: 'Narbe linke Wange', aliases: '"Maxi"' },
+  { id: ID2, name: 'Erika Beispiel', kind: 'family', function: '', phone: '', email: '', active: false, note: '=SUMME(A1)', ...blank },
 ];
 const plan = (text, list = existing, canUpdate = true) => planPeopleImport(readPeopleCsv(text).rows, list, { canUpdate });
 
@@ -29,7 +31,7 @@ test('parseCsv detects comma and tab and rejects an open quote', () => {
 
 test('export and re-import is a no-op, including guarded formulas, quotes and line breaks', () => {
   const csv = peopleCsv(existing);
-  assert.match(csv, /^﻿ID;Name;Art;Funktion;Telefon;E-Mail;Aktiv;Notiz\r\n/);
+  assert.match(csv, /^﻿ID;Name;Art;Funktion;Telefon;E-Mail;Aktiv;Notiz;Geburtsdatum;Geschlecht;Adresse;Staatsangehörigkeit;Größe;Merkmale;Alias\r\n/);
   assert.match(csv, /;Extern;/);
   assert.match(csv, /'\+49 170 1/, 'Telefonnummern mit + werden wie alle Exporte gegen Formeln geschützt');
   assert.match(csv, /'=SUMME/);
@@ -42,7 +44,7 @@ test('rows with ID update only changed fields; rows without ID create, existing 
   const result = plan(`ID;Name;Funktion;Aktiv\n${ID1};Max Muster;Beschuldigter;ja\n${ID2};Erika Beispiel;;JA\n;Neu Person;Fahrer;nein\n;max muster;x;\n;Neu Person;y;`);
   assert.deepEqual(result.update, [{ line: 2, id: ID1, changes: { function: 'Beschuldigter' } }, { line: 3, id: ID2, changes: { active: true } }]);
   assert.equal(result.create.length, 1);
-  assert.deepEqual(result.create[0], { line: 4, name: 'Neu Person', kind: 'employee', function: 'Fahrer', phone: '', email: '', active: false, note: '' });
+  assert.deepEqual(result.create[0], { line: 4, name: 'Neu Person', kind: 'employee', function: 'Fahrer', phone: '', email: '', active: false, note: '', ...blank });
   assert.equal(result.skipped, 2);
   assert.deepEqual(result.problems.map((p) => [p.line, p.kind]), [[5, 'skipped'], [6, 'skipped']]);
 });
@@ -63,6 +65,13 @@ test('invalid rows become errors with line numbers and German messages', () => {
   for (const part of ['Name darf nicht leer sein', 'Art „Polizist“ ist unbekannt', 'Aktiv „vielleicht“', 'E-Mail ist keine gültige E-Mail-Adresse', 'ID „nicht-uuid“ ist ungültig', 'Keine Person mit dieser ID', 'Name darf höchstens 100 Zeichen']) {
     assert.ok(messages.includes(part), `${part} in ${messages}`);
   }
+});
+
+test('master data: German dates, heights in cm and invalid values', () => {
+  const result = plan(`Name;Geburtsdatum;Größe;Staatsangehörigkeit\nNeu A;1.2.1985;175 cm;deutsch\nNeu B;31.02.1990;;\nNeu C;;groß;\nNeu D;1985-02-01;300;`);
+  assert.deepEqual(result.create.map((p) => [p.name, p.birth_date, p.height_cm, p.nationality]), [['Neu A', '1985-02-01', 175, 'deutsch']]);
+  assert.deepEqual(result.problems.map((p) => p.line), [3, 4, 5]);
+  assert.match(result.problems.map((p) => p.message).join(' | '), /Geburtsdatum.*\| Größe „groß“.*\| Größe/);
 });
 
 test('without update right only unchanged rows with ID pass', () => {

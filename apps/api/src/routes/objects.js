@@ -9,6 +9,7 @@ import { decrypt, encrypt, totpValid, verifyPassword } from '../security.js';
 import { patchSchema } from '../validation.js';
 import { LEVEL, levelSql, visibleSql, recordLevel, recordOwner } from '../org.js';
 import { assertPerson } from '../records.js';
+import { removeUpload } from '../uploads.js';
 import { personSchema, PERSON_FIELDS, peopleCsv, readPeopleCsv, planPeopleImport } from '../people.js';
 import { CsvError } from '../csv.js';
 
@@ -159,11 +160,14 @@ const withStatus = (k) => ({ ...k, status: k.lost > 0 ? 'lost' : k.overdue > 0 ?
 // Unterlagen zu einer Person: Sie bleiben vollständig, deshalb lässt sich die Person nicht löschen
 async function personRecords(personId) {
   const r = await one(
-    `SELECT EXISTS (SELECT 1 FROM case_file_people WHERE person_id=$1) OR EXISTS (SELECT 1 FROM case_file_entries WHERE person_id=$1) files,
+    `SELECT EXISTS (SELECT 1 FROM case_file_people WHERE person_id=$1) OR EXISTS (SELECT 1 FROM case_file_entries WHERE person_id=$1)
+              OR EXISTS (SELECT 1 FROM case_file_report_people WHERE person_id=$1) OR EXISTS (SELECT 1 FROM case_file_charges WHERE person_id=$1)
+              OR EXISTS (SELECT 1 FROM case_file_evidence WHERE person_id=$1) OR EXISTS (SELECT 1 FROM case_file_vehicles WHERE owner_person_id=$1) files,
+            EXISTS (SELECT 1 FROM warrants WHERE person_id=$1) warrants, EXISTS (SELECT 1 FROM person_files WHERE person_id=$1) person_files,
             EXISTS (SELECT 1 FROM licenses WHERE person_id=$1) licenses, EXISTS (SELECT 1 FROM training_records WHERE person_id=$1) trainings`,
     [personId],
   );
-  return [r.files && 'Akten', r.licenses && 'Lizenzen', r.trainings && 'Schulungsnachweise'].filter(Boolean);
+  return [r.files && 'Akten', r.warrants && 'Fahndungen', r.person_files && 'Personenakten', r.licenses && 'Lizenzen', r.trainings && 'Schulungsnachweise'].filter(Boolean);
 }
 
 export default async function routes(app) {
@@ -174,7 +178,7 @@ export default async function routes(app) {
       FROM people pe ORDER BY pe.active DESC, pe.name`, [req.user.id]));
   app.post('/people', authz('person:create'), async (req) => {
     const b = personSchema.parse(req.body);
-    const row = await one('INSERT INTO people(name,kind,function,phone,email,active,note) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id', [b.name, b.kind, b.function, b.phone, b.email, b.active, b.note]);
+    const row = await one(`INSERT INTO people(${PERSON_FIELDS.join(',')}) VALUES (${PERSON_FIELDS.map((_, i) => `$${i + 1}`).join(',')}) RETURNING id`, PERSON_FIELDS.map((k) => b[k]));
     await audit(req, 'people.created', 'people', row.id, { name: b.name });
     return row;
   });
@@ -196,6 +200,7 @@ export default async function routes(app) {
     const linked = await personRecords(person.id);
     if (linked.length) throw bad(`Person hat noch ${linked.join(', ')} – deaktiviere sie stattdessen`);
     await q('DELETE FROM people WHERE id=$1', [person.id]);
+    if (person.photo_key) removeUpload(person.photo_key);
     await audit(req, 'people.deleted', 'people', person.id, { name: person.name });
     return { ok: true };
   });
@@ -226,7 +231,7 @@ export default async function routes(app) {
     if (b.preview || (!plan.create.length && !plan.update.length)) return result;
     await tx(async (c) => {
       if (plan.create.length) {
-        const types = { active: 'boolean' };
+        const types = { active: 'boolean', birth_date: 'date', height_cm: 'smallint' };
         await c.query(
           `INSERT INTO people(${PERSON_FIELDS.join(',')}) SELECT * FROM unnest(${PERSON_FIELDS.map((k, i) => `$${i + 1}::${types[k] || 'text'}[]`).join(',')})`,
           PERSON_FIELDS.map((k) => plan.create.map((p) => p[k])),

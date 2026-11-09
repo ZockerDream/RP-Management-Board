@@ -151,18 +151,31 @@ async function formKey(o, props, vehicles) {
   });
 }
 // Personen sind global: keine Sichtbarkeit, alle mit „Personen lesen“ sehen und nutzen sie
-function formPerson(o) {
+// Stammdaten: global wie die Person; auch die Personenakte (Akten) bearbeitet sie mit diesem Formular
+export const GENDERS = ['weiblich', 'männlich', 'divers'];
+export function formPerson(o) {
   return openForm({
-  title: o ? 'Person bearbeiten' : 'Neue Person', fields: [
-    { name: 'name', label: 'Name', value: o?.name, required: true },
+  title: o ? 'Person bearbeiten' : 'Neue Person', wide: true, fields: [
+    { name: 'name', label: 'Name', value: o?.name, required: true, maxlength: 100 },
+    { name: 'aliases', label: 'Alias, Spitzname', value: o?.aliases, maxlength: 300 },
     { name: 'kind', label: 'Art', type: 'select', options: Object.entries(PKIND).map(([v, l]) => ({ v, l })), value: o?.kind || 'employee' },
-    { name: 'function', label: 'Funktion', value: o?.function },
-    { name: 'phone', label: 'Telefon', value: o?.phone },
-    { name: 'email', label: 'E-Mail', type: 'email', value: o?.email, full: true },
+    { name: 'function', label: 'Funktion, Beruf', value: o?.function, maxlength: 100 },
+    { name: 'birth_date', label: 'Geburtsdatum', type: 'date', value: o?.birth_date || '' },
+    { name: 'gender', label: 'Geschlecht', value: o?.gender, maxlength: 30, suggestions: GENDERS },
+    { name: 'height_cm', label: 'Größe in cm', type: 'number', min: 30, max: 260, value: o?.height_cm ?? '' },
+    { name: 'nationality', label: 'Staatsangehörigkeit', value: o?.nationality, maxlength: 60 },
+    { name: 'address', label: 'Adresse', value: o?.address, maxlength: 300, full: true },
+    { name: 'phone', label: 'Telefon', value: o?.phone, maxlength: 40 },
+    { name: 'email', label: 'E-Mail', type: 'email', value: o?.email },
+    { name: 'features', label: 'Besondere Merkmale', type: 'textarea', rows: 2, value: o?.features, maxlength: 1000, full: true, placeholder: 'z. B. Tattoo am Hals, Narbe linke Wange' },
     { name: 'active', label: 'Aktiv', type: 'checkbox', value: o ? o.active : true },
-    { name: 'note', label: 'Notiz', type: 'textarea', value: o?.note, full: true, help: 'Für alle Benutzer mit Zugriff auf Personen sichtbar.' },
+    { name: 'note', label: 'Notiz', type: 'textarea', value: o?.note, full: true, help: 'Stammdaten und Notiz sehen alle Benutzer mit Zugriff auf Personen. Was nur eine Organisation wissen soll, gehört in deren Personenakte.' },
   ],
-  onSubmit: (v) => save('people', o, { name: v.name.trim(), kind: v.kind, function: v.function, phone: v.phone, email: v.email, active: v.active, note: v.note }),
+  onSubmit: (v) => save('people', o, {
+    name: v.name.trim(), aliases: v.aliases.trim(), kind: v.kind, function: v.function.trim(), birth_date: v.birth_date || null, gender: v.gender.trim(),
+    height_cm: v.height_cm ? Number(v.height_cm) : null, nationality: v.nationality.trim(), address: v.address.trim(), phone: v.phone.trim(), email: v.email.trim(),
+    features: v.features.trim(), active: v.active, note: v.note,
+  }),
   });
 }
 
@@ -304,7 +317,7 @@ export async function render(view, params, section) {
     async people(el) {
       await fetchAll();
       const tools = `${can('person:export') ? '<button class="btn ghost sm" id="p-csv">CSV-Export</button>' : ''}${can('person:create') ? '<button class="btn ghost sm" id="p-import">CSV-Import</button>' : ''}`;
-      el.innerHTML = `<div class="card">${tools ? `<div class="toolbar">${tools}</div>` : ''}${D.people.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Art</th><th>Funktion</th><th>Kontakt</th><th>Schlüssel</th><th>Status</th><th></th></tr></thead><tbody>${D.people.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td>${PKIND[p.kind]}</td><td>${esc(p.function)}</td><td>${esc(p.email || p.phone || '–')}</td><td>${p.keys}</td><td><span class="tag ${p.active ? 'ok' : 'warn'}">${p.active ? 'Aktiv' : 'Inaktiv'}</span></td><td style="white-space:nowrap"><button class="btn ghost sm" data-record="${p.id}">Übersicht</button> ${actions(p, 'person')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Personen.')}</div>`;
+      el.innerHTML = `<div class="card">${tools ? `<div class="toolbar">${tools}</div>` : ''}${D.people.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Art</th><th>Funktion</th><th>Kontakt</th><th>Schlüssel</th><th>Status</th><th></th></tr></thead><tbody>${D.people.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td>${PKIND[p.kind]}</td><td>${esc(p.function)}</td><td>${esc(p.email || p.phone || '–')}</td><td>${p.keys}</td><td><span class="tag ${p.active ? 'ok' : 'warn'}">${p.active ? 'Aktiv' : 'Inaktiv'}</span></td><td style="white-space:nowrap">${can('casefile:read') ? `<a class="btn ghost sm" href="#/casefiles?person=${p.id}">Personenakte</a>` : `<button class="btn ghost sm" data-record="${p.id}">Übersicht</button>`} ${actions(p, 'person')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Personen.')}</div>`;
     },
     async costs(el) {
       const c = await api.get('/assets/costs');
