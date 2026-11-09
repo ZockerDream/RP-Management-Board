@@ -720,9 +720,9 @@ check('Export ohne Notizen anderer', !expNew.notes.some((n) => n.id === noteTeam
 ok('Team-ToDo für die Browser-Tests', await bob.post('/todos', { title: 'Team-Protokoll', due_date: dayAt(5), team_id: team.id }));
 const systemInfo = (await admin.get('/admin/system')).data;
 const jobNames = systemInfo.jobs.map((job) => job.name);
-// Die angezeigte Version kommt aus package.json, nicht aus APP_VERSION (das nur das Image benennt)
+// Die angezeigte Version kommt aus package.json
 const codeVersion = JSON.parse(readFileSync(new URL('../../apps/api/package.json', import.meta.url), 'utf8')).version;
-check('Systemübersicht zeigt die Code-Version', systemInfo.version === codeVersion, `${systemInfo.version} / ${systemInfo.image}`);
+check('Systemübersicht zeigt die Code-Version', systemInfo.version === codeVersion, systemInfo.version);
 check('Job erscheint in der Systemübersicht', jobNames.includes('todos.remind'), jobNames.join());
 
 // ---------- Akten, Lizenzen, Schulungen, Dokumentationen (Alice Owner, Bob Editor, Carol Viewer, Dave fremd)

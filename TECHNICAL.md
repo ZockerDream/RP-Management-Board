@@ -236,7 +236,7 @@ Der Server liefert für `[from, to]` die Vereinigung aus eigenen Terminen und ab
 - **Logging:** JSON auf stdout, keine Passwörter oder Tokens.
 - **Backups:** verschlüsselter Dump; Wiederherstellung per `src/cli/backup.js restore` ohne das Schema `pgboss`, danach `docker compose restart api worker`.
 - **Updates:** `./scripts/update.sh`; Migrationen vorwärtskompatibel halten. Kein Cache-Löschen nötig, siehe Abschnitt 3.
-- **Tests:** `npm test` in `apps/api` (Unit). End-to-End immer in einem eigenen Compose-Projekt mit eigenen Volumes und eigenem `APP_VERSION`, nie gegen die produktive Instanz; siehe [tests/e2e/README.md](tests/e2e/README.md).
+- **Tests:** `npm test` in `apps/api` (Unit). End-to-End immer in einem eigenen Compose-Projekt mit eigenen Volumes und eigenem `IMAGE_TAG`, nie gegen die produktive Instanz; siehe [tests/e2e/README.md](tests/e2e/README.md).
 
 ## 10. Grenzen
 
