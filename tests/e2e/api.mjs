@@ -1,5 +1,6 @@
 // API-E2E gegen den isolierten Stack. Jede 5xx-Antwort zählt automatisch als Fehler.
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 const BASE = process.env.BASE || 'http://localhost:18088';
 const results = { pass: 0, fail: [] };
@@ -717,7 +718,11 @@ const expNew = ok('DSGVO-Export mit Notizen und ToDos', await alice.get('/me/exp
 check('Export enthält Notizen, ToDos, Tickets', expNew.notes.some((n) => n.id === noteSolo.id) && expNew.todos.some((t) => t.id === todoSolo.id) && expNew.bug_reports.some((b) => String(b.id) === String(bug.id)));
 check('Export ohne Notizen anderer', !expNew.notes.some((n) => n.id === noteTeam.id));
 ok('Team-ToDo für die Browser-Tests', await bob.post('/todos', { title: 'Team-Protokoll', due_date: dayAt(5), team_id: team.id }));
-const jobNames = (await admin.get('/admin/system')).data.jobs.map((job) => job.name);
+const systemInfo = (await admin.get('/admin/system')).data;
+const jobNames = systemInfo.jobs.map((job) => job.name);
+// Die angezeigte Version kommt aus package.json, nicht aus APP_VERSION (das nur das Image benennt)
+const codeVersion = JSON.parse(readFileSync(new URL('../../apps/api/package.json', import.meta.url), 'utf8')).version;
+check('Systemübersicht zeigt die Code-Version', systemInfo.version === codeVersion, `${systemInfo.version} / ${systemInfo.image}`);
 check('Job erscheint in der Systemübersicht', jobNames.includes('todos.remind'), jobNames.join());
 
 // ---------- Akten, Lizenzen, Schulungen, Dokumentationen (Alice Owner, Bob Editor, Carol Viewer, Dave fremd)

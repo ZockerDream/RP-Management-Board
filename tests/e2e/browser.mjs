@@ -502,6 +502,25 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await go(page, '#/settings');
   for (const t of await page.$$('#view [data-tab]')) { await t.click(); await page.waitForTimeout(200); check(`Einstellungen Tab ${await t.getAttribute('data-tab')}`, !(await viewErr(page))); }
   await page.screenshot({ path: `${out}/alice-settings.png` });
+  // Speichern der Darstellung scheitert (wie bei gerade abgelaufener Sitzung): Meldung, alter Stand, kein unbehandelter Fehler
+  at('alice darstellung fehler');
+  await page.click('#view [data-tab=appearance]');
+  await page.waitForTimeout(200);
+  const themeBefore = await page.evaluate(() => document.documentElement.dataset.theme);
+  await page.route('**/api/me', (route) => (route.request().method() === 'PATCH'
+    ? route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'conflict', message: 'Testfehler beim Speichern' }) })
+    : route.continue()));
+  const problemsBefore = problems.length;
+  await page.click(`#ap-mode [data-m=${themeBefore === 'dark' ? 'light' : 'dark'}]`);
+  await page.waitForTimeout(500);
+  check('Darstellung: Fehler beim Speichern wird gemeldet', /Testfehler beim Speichern/.test(await page.textContent('#toasts')));
+  check('Darstellung: Modus springt auf den gespeicherten zurück', (await page.evaluate(() => document.documentElement.dataset.theme)) === themeBefore);
+  const gravatarBefore = await page.isChecked('#ap-grav');
+  await page.click('#ap-grav');
+  await page.waitForTimeout(400);
+  check('Gravatar: Haken springt zurück, wenn Speichern scheitert', (await page.isChecked('#ap-grav')) === gravatarBefore);
+  check('Darstellung: kein unbehandelter Fehler', problems.length === problemsBefore, problems.slice(problemsBefore).join(' | '));
+  await page.unroute('**/api/me');
 
   // Abmelden
   at('alice logout');
