@@ -831,6 +831,66 @@ const orgCalendar = ok('Kalender mit Schulung und Lizenz', await carol.get(`/cal
 check('Kalender zeigt Schulungstermin', orgCalendar.some((e) => e.type === 'training' && e.title === 'Schulung: Erste Hilfe' && e.start === '18:00'));
 check('Kalender zeigt Ablauf des Nachweises', orgCalendar.some((e) => e.type === 'training' && e.date === dayAt(10)));
 
+// ---------- Test im Tool (Schulungen): Alice verwaltet, Bob Mitglied, Carol Leserin, Dave fremd
+const examTraining = ok('Schulung mit Test', await alice.post('/trainings', { name: 'Waffensachkunde', team_id: team.id, validity_months: 12, exam_required: true, exam_pass_percent: 75, exam_max_attempts: 2 }));
+check('Test steht in der Liste', (await carol.get('/trainings')).data.some((t) => t.id === examTraining.id && t.exam_required));
+const emptyExam = (await carol.get(`/trainings/${examTraining.id}`)).data.exam;
+check('Ohne Fragen kein Start', emptyExam.can_start === false && /keine Fragen/.test(emptyExam.reason) && emptyExam.pass_percent === 75, JSON.stringify(emptyExam));
+denied('Leserin pflegt keine Fragen', await carol.post(`/trainings/${examTraining.id}/questions`, { text: 'X', options: [{ text: 'a', correct: true }, { text: 'b' }] }), [403]);
+invalid('Einfachauswahl: genau eine richtige', await alice.post(`/trainings/${examTraining.id}/questions`, { text: 'X', options: [{ text: 'a', correct: true }, { text: 'b', correct: true }] }));
+invalid('Mindestens zwei Antworten', await alice.post(`/trainings/${examTraining.id}/questions`, { text: 'X', options: [{ text: 'a', correct: true }] }));
+ok('Frage Einfachauswahl', await alice.post(`/trainings/${examTraining.id}/questions`, { text: 'Darf eine geladene Waffe offen getragen werden?', options: [{ text: 'Ja' }, { text: 'Nein', correct: true }] }));
+const multiQuestion = ok('Frage Mehrfachauswahl', await alice.post(`/trainings/${examTraining.id}/questions`, { kind: 'multiple', text: 'Was gehört zur sicheren Aufbewahrung?', points: 3, options: [{ text: 'Waffenschrank', correct: true }, { text: 'Getrennte Munition', correct: true }, { text: 'Handschuhfach' }] }));
+ok('Frage ändern', await alice.patch(`/training-questions/${multiQuestion.id}`, { explanation: 'Schrank und getrennte Munition' }));
+const examQuestions = ok('Fragen mit Lösung für Verwaltende', await alice.get(`/trainings/${examTraining.id}/questions`));
+denied('Lösung sieht nur, wer verwaltet', await carol.get(`/trainings/${examTraining.id}/questions`), [403]);
+const rightAnswers = Object.fromEntries(examQuestions.map((x) => [x.id, x.options.filter((o) => o.correct).map((o) => o.id)]));
+const wrongAnswers = Object.fromEntries(examQuestions.map((x) => [x.id, x.options.filter((o) => !o.correct).map((o) => o.id).slice(0, 1)]));
+invalid('Mit Test kein manuelles Bestanden für Benutzer', await bob.post(`/trainings/${examTraining.id}/records`, { user_id: uC.id, result: 'passed' }));
+ok('Personen ohne Zugang weiter von Hand', await bob.post(`/trainings/${examTraining.id}/records`, { person_id: orgPerson2.id, result: 'passed' }));
+const examAttempt = ok('Test starten', await carol.post(`/trainings/${examTraining.id}/exam/start`));
+check('Fragen ohne Lösung', examAttempt.questions.length === 2 && !JSON.stringify(examAttempt.questions).includes('correct') && !examAttempt.deadline);
+check('Erneuter Start setzt den offenen Versuch fort', (await carol.post(`/trainings/${examTraining.id}/exam/start`)).data.id === examAttempt.id);
+denied('Fremder macht den Test nicht', await dave.post(`/trainings/${examTraining.id}/exam/start`), [404]);
+denied('Fremden Versuch nicht abgeben', await bob.post(`/training-attempts/${examAttempt.id}/submit`, { answers: rightAnswers }), [404]);
+const examFailed = ok('Abgabe mit Fehlern', await carol.post(`/training-attempts/${examAttempt.id}/submit`, { answers: wrongAnswers }));
+check('Nicht bestanden, ein Versuch übrig', examFailed.passed === false && examFailed.percent === 0 && examFailed.attempts_left === 1, JSON.stringify(examFailed));
+invalid('Abgegeben ist abgegeben', await carol.post(`/training-attempts/${examAttempt.id}/submit`, { answers: rightAnswers }));
+check('Nachweis nicht bestanden', psql(`SELECT result FROM training_records WHERE training_id='${examTraining.id}' AND user_id='${uC.id}'`) === 'failed');
+const secondAttempt = ok('Zweiter Versuch', await carol.post(`/trainings/${examTraining.id}/exam/start`));
+const examPassed = ok('Bestanden', await carol.post(`/training-attempts/${secondAttempt.id}/submit`, { answers: rightAnswers }));
+check('Bestanden mit 100 %', examPassed.passed && examPassed.percent === 100 && examPassed.correct === 2 && examPassed.total === 2, JSON.stringify(examPassed));
+check('Derselbe Nachweis ist jetzt bestanden und gilt 12 Monate', psql(`SELECT count(*) || ' ' || min(result) || ' ' || bool_and(valid_until > CURRENT_DATE + 300)::text FROM training_records WHERE training_id='${examTraining.id}' AND user_id='${uC.id}'`) === '1 passed true');
+check('Nach dem Bestehen kein neuer Start', /schon bestanden/.test((await carol.get(`/trainings/${examTraining.id}`)).data.exam.reason));
+for (let i = 0; i < 2; i++) {
+  const bobAttempt = ok(`Bob Versuch ${i + 1}`, await bob.post(`/trainings/${examTraining.id}/exam/start`));
+  ok(`Bob gibt falsch ab ${i + 1}`, await bob.post(`/training-attempts/${bobAttempt.id}/submit`, { answers: wrongAnswers }));
+}
+invalid('Keine Versuche mehr', await bob.post(`/trainings/${examTraining.id}/exam/start`));
+const examDetail = ok('Versuche für Ausbilder', await alice.get(`/trainings/${examTraining.id}`));
+check('Alle Versuche sichtbar', examDetail.exam.all.length === 4 && examDetail.exam.questions === 2 && examDetail.exam.points === 4);
+check('Leserin sieht Versuche, aber nur Auswertungen', (await carol.get(`/trainings/${examTraining.id}`)).data.exam.all.length === 4);
+const attemptDetail = ok('Antworten im Einzelnen', await alice.get(`/training-attempts/${secondAttempt.id}`));
+check('Antworten mit Lösung für Ausbilder', attemptDetail.questions.length === 2 && attemptDetail.questions.every((x) => x.correct) && attemptDetail.questions.some((x) => x.options.some((o) => o.correct && o.chosen)));
+const ownSummary = ok('Eigener Versuch', await carol.get(`/training-attempts/${secondAttempt.id}`));
+check('Teilnehmende sehen nur die Auswertung', ownSummary.questions === undefined && ownSummary.percent === 100);
+denied('Leserin setzt nicht zurück', await carol.post(`/trainings/${examTraining.id}/exam/reset`, { user_id: uB.id }), [403]);
+ok('Versuche zurücksetzen', await alice.post(`/trainings/${examTraining.id}/exam/reset`, { user_id: uB.id }));
+check('Nach dem Zurücksetzen wieder starten', (await bob.post(`/trainings/${examTraining.id}/exam/start`)).status === 200);
+
+const timedTraining = ok('Schulung mit Zeitlimit und Teilnahmepflicht', await alice.post('/trainings', { name: 'Funkprüfung', team_id: team.id, exam_required: true, exam_time_limit: 5, exam_after_session: true, exam_shuffle: false }));
+ok('Frage', await alice.post(`/trainings/${timedTraining.id}/questions`, { text: 'Rufname der Leitstelle?', options: [{ text: 'Florian', correct: true }, { text: 'Heros' }] }));
+invalid('Test erst nach der Teilnahme', await carol.post(`/trainings/${timedTraining.id}/exam/start`));
+const timedSession = ok('Termin heute', await alice.post(`/trainings/${timedTraining.id}/sessions`, { session_date: dayAt(0) }));
+ok('Teilnahme eingetragen', await alice.post(`/trainings/${timedTraining.id}/records`, { session_id: timedSession.id, user_id: uC.id }));
+const timedAttempt = ok('Test mit Zeitlimit', await carol.post(`/trainings/${timedTraining.id}/exam/start`));
+check('Mit Abgabefrist', !!timedAttempt.deadline && new Date(timedAttempt.deadline) - new Date(timedAttempt.started_at) === 300000);
+psql(`UPDATE training_attempts SET deadline=now() - interval '2 minutes' WHERE id='${timedAttempt.id}'`);
+const lateResult = ok('Zu späte Abgabe', await carol.post(`/training-attempts/${timedAttempt.id}/submit`, { answers: {} }));
+check('Zu spät zählt als nicht bestanden', lateResult.status === 'expired' && lateResult.passed === false);
+check('Ergebnis am Termin eingetragen', psql(`SELECT result FROM training_records WHERE session_id='${timedSession.id}' AND user_id='${uC.id}'`) === 'failed');
+ok('Schulung ohne Test bleibt wie bisher', await bob.patch(`/training-records/${userRecord.id}`, { result: 'passed' }));
+
 const personOverview = ok('Personenübersicht', await carol.get(`/people/${orgPerson.id}/record`));
 check('Personenübersicht vollständig', personOverview.case_files.length === 1 && personOverview.licenses.length === 1 && personOverview.trainings.length === 1, JSON.stringify(personOverview).slice(0, 240));
 const daveOverview = ok('Fremder öffnet Personenübersicht', await dave.get(`/people/${orgPerson.id}/record`));

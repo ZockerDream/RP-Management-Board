@@ -7,6 +7,7 @@ import { patchSchema } from '../validation.js';
 import { addInterval, today } from '../lib.js';
 import { uuid, isoDate, clockTime, assertPerson, assertUserInScope, personJoin } from '../records.js';
 import { EXPIRY_WARNING_DAYS } from './licenses.js';
+import { examInfo, examBlocksManualPass, EXAM_PASS_MESSAGE } from './training-exams.js';
 
 const RESULTS = ['registered', 'passed', 'failed', 'absent'];
 const trainingFields = z.object({
@@ -14,7 +15,15 @@ const trainingFields = z.object({
   description: z.string().max(20000).default(''),
   validity_months: z.number().int().min(1).max(1200).nullish(),
   active: z.boolean().default(true),
+  // Test im Tool (Migration 021): ohne Test reichen Teilnahme und „bestanden“ durch den Ausbilder
+  exam_required: z.boolean().default(false),
+  exam_pass_percent: z.number().int().min(1).max(100).default(70),
+  exam_time_limit: z.number().int().min(1).max(600).nullish(),
+  exam_max_attempts: z.number().int().min(1).max(100).nullish(),
+  exam_shuffle: z.boolean().default(true),
+  exam_after_session: z.boolean().default(false),
 });
+const EXAM_COLUMNS = ['exam_required', 'exam_pass_percent', 'exam_time_limit', 'exam_max_attempts', 'exam_shuffle', 'exam_after_session'];
 const sessionFields = z.object({
   session_date: isoDate,
   start_time: clockTime.nullish(),
@@ -73,7 +82,7 @@ export default async function routes(app) {
   }
 
   app.get('/trainings', authz('training:read'), async (req) => many(
-    `SELECT x.id, x.name, x.description, x.validity_months, x.active, x.team_id, x.team_name, x.level, x.next_session,
+    `SELECT x.id, x.name, x.description, x.validity_months, x.active, x.team_id, x.team_name, x.level, x.next_session, x.exam_required,
        CASE WHEN x.level >= 2 THEN x.valid_records END valid_records, CASE WHEN x.level >= 2 THEN x.registered END registered
      FROM (
        SELECT tr.*, t.name team_name, ${levelSql('tr', 'training')} AS level,
@@ -102,8 +111,9 @@ export default async function routes(app) {
     const b = trainingFields.extend({ team_id: uuid.nullish() }).parse(req.body);
     const scope = await recordOwner(req.user.id, b.team_id, 'training', LEVEL.MANAGE);
     const row = await one(
-      'INSERT INTO trainings(owner_user_id,team_id,name,description,validity_months,active,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
-      [scope.owner_user_id, scope.team_id, b.name, b.description, b.validity_months ?? null, b.active, req.user.id],
+      `INSERT INTO trainings(owner_user_id,team_id,name,description,validity_months,active,created_by,${EXAM_COLUMNS.join(',')})
+       VALUES ($1,$2,$3,$4,$5,$6,$7,${EXAM_COLUMNS.map((_, i) => `$${i + 8}`).join(',')}) RETURNING id`,
+      [scope.owner_user_id, scope.team_id, b.name, b.description, b.validity_months ?? null, b.active, req.user.id, ...EXAM_COLUMNS.map((k) => b[k] ?? null)],
     );
     await audit(req, 'training.created', 'training', row.id, { name: b.name });
     return row;
@@ -119,7 +129,7 @@ export default async function routes(app) {
         many('SELECT r.session_id, r.result FROM training_records r WHERE r.training_id=$1 AND r.user_id=$2 AND r.session_id IS NOT NULL', [training.id, req.user.id]),
       ]);
       return {
-        ...training, team_name: team?.name || null, level, sessions, records: [],
+        ...training, team_name: team?.name || null, level, sessions, records: [], exam: await examInfo(training, req.user.id, level),
         my_sessions: mine.map((r) => ({ session_id: r.session_id, withdrawable: r.result === 'registered' })),
       };
     }
@@ -135,7 +145,7 @@ export default async function routes(app) {
     ]);
     const my = records.filter((r) => r.user_id === req.user.id && r.session_id);
     return {
-      ...training, team_name: team?.name || null, level, sessions, records,
+      ...training, team_name: team?.name || null, level, sessions, records, exam: await examInfo(training, req.user.id, level),
       my_sessions: my.map((r) => ({ session_id: r.session_id, withdrawable: r.result === 'registered' })),
     };
   });
@@ -153,12 +163,14 @@ export default async function routes(app) {
   app.patch('/trainings/:id', authz('training:update'), async (req) => {
     const { training } = await loadTraining(req, req.params.id, LEVEL.MANAGE);
     const b = patchSchema(trainingFields).parse(req.body);
+    const keep = (k) => (k in b ? b[k] ?? null : training[k]);
     await q(
-      'UPDATE trainings SET name=$2, description=$3, validity_months=$4, active=$5, updated_at=now() WHERE id=$1',
+      `UPDATE trainings SET name=$2, description=$3, validity_months=$4, active=$5, ${EXAM_COLUMNS.map((k, i) => `${k}=$${i + 6}`).join(', ')}, updated_at=now() WHERE id=$1`,
       [training.id, b.name ?? training.name, b.description ?? training.description,
-        'validity_months' in b ? b.validity_months ?? null : training.validity_months, b.active ?? training.active],
+        'validity_months' in b ? b.validity_months ?? null : training.validity_months, b.active ?? training.active,
+        ...EXAM_COLUMNS.map((k) => (k === 'exam_time_limit' || k === 'exam_max_attempts' ? keep(k) : b[k] ?? training[k]))],
     );
-    await audit(req, 'training.updated', 'training', training.id);
+    await audit(req, 'training.updated', 'training', training.id, 'exam_required' in b ? { exam_required: b.exam_required } : undefined);
     return { ok: true };
   });
 
@@ -236,6 +248,7 @@ export default async function routes(app) {
     if (Boolean(b.user_id) === Boolean(b.person_id)) throw bad('Wähle genau einen Teilnehmer: Benutzer oder Person');
     if (b.user_id) await assertUserInScope(b.user_id, training);
     else await assertPerson(b.person_id);
+    if (examBlocksManualPass(training, b.user_id, b.result)) throw bad(EXAM_PASS_MESSAGE);
     const session = await loadSession(training.id, b.session_id);
     const { completedOn, validUntil } = await resolveRecord(training, { ...b, valid_until: 'valid_until' in req.body ? b.valid_until : undefined }, session);
     try {
@@ -263,6 +276,8 @@ export default async function routes(app) {
       // Ohne neue Angabe bleibt ein vorhandenes Ablaufdatum; bei neu bestanden folgt es aus der Schulung
       valid_until: 'valid_until' in b ? b.valid_until : row.result === 'passed' ? row.valid_until : undefined,
     };
+    // Mit Test im Tool wird ein Benutzer nur über den Test bestanden; ein schon bestandener Nachweis bleibt änderbar
+    if (row.result !== 'passed' && examBlocksManualPass(training, row.user_id, merged.result)) throw bad(EXAM_PASS_MESSAGE);
     const { completedOn, validUntil } = await resolveRecord(training, merged, session);
     try {
       await q(

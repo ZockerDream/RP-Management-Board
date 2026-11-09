@@ -3,13 +3,16 @@ import { $, esc, empty, fdate, tag, openForm, confirmBox, toast, todayStr } from
 import { can } from '../app.js';
 import { writableTeams, visibilityField, scopeTag } from './common.js';
 import { markdownBlock } from '../markdown.js';
+import { examCardHtml, drawQuestions, questionForm, takeExam, attemptDetail } from './training-exam.js';
 
 const RESULT = { registered: ['', 'Angemeldet'], passed: ['ok', 'Bestanden'], failed: ['bad', 'Nicht bestanden'], absent: ['warn', 'Nicht erschienen'] };
 const STATE = { valid: ['ok', 'Gültig'], expiring: ['warn', 'Läuft bald ab'], expired: ['bad', 'Abgelaufen'] };
 const timeText = (s) => (s.start_time ? `${s.start_time.slice(0, 5)}${s.end_time ? `–${s.end_time.slice(0, 5)}` : ''}` : 'ganztägig');
 const sessionLabel = (s) => `${fdate(s.session_date)} · ${timeText(s)}${s.location ? ` · ${s.location}` : ''}`;
 
-const trainingForm = (training, teams) => openForm({
+const EXAM_FIELDS = ['exam_pass_percent', 'exam_time_limit', 'exam_max_attempts', 'exam_shuffle', 'exam_after_session'];
+const trainingForm = (training, teams) => {
+  const done = openForm({
   title: training ? 'Schulung bearbeiten' : 'Neue Schulung',
   wide: true,
   fields: [
@@ -17,9 +20,20 @@ const trainingForm = (training, teams) => openForm({
     { name: 'validity_months', label: 'Gültigkeit in Monaten', type: 'number', min: 1, step: 1, value: training?.validity_months ?? '', help: 'Leer heißt: Ein bestandener Nachweis gilt unbefristet.' },
     ...(training ? [{ name: 'active', label: 'Aktiv', type: 'checkbox', value: training.active }] : [visibilityField(teams, null)]),
     { name: 'description', label: 'Beschreibung und Inhalte', type: 'textarea', rows: 8, value: training?.description, maxlength: 20000, full: true, markdown: true },
+    // Test im Tool: ohne Haken reichen Teilnahme und „bestanden“ durch den Ausbilder
+    { name: 'exam_required', label: 'Test im Tool nötig zum Bestehen', type: 'checkbox', value: training?.exam_required, full: true },
+    { name: 'exam_pass_percent', label: 'Bestanden ab (Prozent)', type: 'number', min: 1, max: 100, value: training?.exam_pass_percent ?? 70 },
+    { name: 'exam_time_limit', label: 'Zeitlimit in Minuten', type: 'number', min: 1, max: 600, value: training?.exam_time_limit ?? '', help: 'Leer: ohne Zeitlimit' },
+    { name: 'exam_max_attempts', label: 'Versuche je Person', type: 'number', min: 1, max: 100, value: training?.exam_max_attempts ?? '', help: 'Leer: unbegrenzt' },
+    { name: 'exam_shuffle', label: 'Fragen und Antworten mischen', type: 'checkbox', value: training ? training.exam_shuffle : true },
+    { name: 'exam_after_session', label: 'Test erst nach Teilnahme an einem Termin', type: 'checkbox', value: training?.exam_after_session, full: true },
   ],
   onSubmit: async (values) => {
-    const body = { name: values.name.trim(), description: values.description, validity_months: values.validity_months ? Number(values.validity_months) : null };
+    const body = {
+      name: values.name.trim(), description: values.description, validity_months: values.validity_months ? Number(values.validity_months) : null,
+      exam_required: values.exam_required, exam_pass_percent: Number(values.exam_pass_percent) || 70, exam_time_limit: values.exam_time_limit ? Number(values.exam_time_limit) : null,
+      exam_max_attempts: values.exam_max_attempts ? Number(values.exam_max_attempts) : null, exam_shuffle: values.exam_shuffle, exam_after_session: values.exam_after_session,
+    };
     if (training) {
       await api.patch(`/trainings/${training.id}`, { ...body, active: values.active });
       return training.id;
@@ -28,7 +42,15 @@ const trainingForm = (training, teams) => openForm({
     toast('Schulung angelegt');
     return created.id;
   },
-});
+  });
+  // Einstellungen des Tests nur zeigen, wenn ein Test nötig ist
+  const modal = $('#modals .modal:last-child');
+  const toggle = $('#f-exam_required', modal);
+  const sync = () => EXAM_FIELDS.forEach((n) => { $(`#f-${n}`, modal).closest('label').hidden = !toggle.checked; });
+  toggle.addEventListener('change', sync);
+  sync();
+  return done;
+};
 
 const sessionForm = (training, session) => openForm({
   title: session ? 'Termin bearbeiten' : 'Neuer Termin',
@@ -98,7 +120,7 @@ export async function render(view, params) {
 
   function drawList() {
     $('#t-main').innerHTML = `<div class="card">${trainings.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Schulung</th><th>Nächster Termin</th><th>Gültige Nachweise</th><th>Angemeldet</th><th>Sichtbarkeit</th><th></th></tr></thead><tbody>
-      ${trainings.map((t) => `<tr><td><b>${esc(t.name)}</b>${t.active ? '' : ` ${tag('', 'Inaktiv')}`}<br><small class="muted">${t.validity_months ? `gilt ${t.validity_months} Monate` : 'unbefristet'}</small></td>
+      ${trainings.map((t) => `<tr><td><b>${esc(t.name)}</b>${t.exam_required ? ` ${tag('warn', 'Test')}` : ''}${t.active ? '' : ` ${tag('', 'Inaktiv')}`}<br><small class="muted">${t.validity_months ? `gilt ${t.validity_months} Monate` : 'unbefristet'}</small></td>
         <td>${t.next_session ? fdate(t.next_session) : '–'}</td><td>${t.valid_records ?? '–'}</td><td>${t.registered ?? '–'}</td><td>${scopeTag(t)}</td>
         <td><button class="btn ghost sm" data-open="${t.id}">Öffnen</button></td></tr>`).join('')}</tbody></table></div>`
       : empty('Noch keine Schulungen angelegt.')}</div>`;
@@ -118,6 +140,7 @@ export async function render(view, params) {
         <div class="row"><button class="btn ghost sm" id="t-back">Zurück</button>${t.level >= 4 && can('training:update') ? '<button class="btn ghost sm" id="t-edit">Bearbeiten</button>' : ''}
         ${t.level >= 4 && can('training:delete') ? '<button class="btn ghost sm" id="t-del">Löschen</button>' : ''}</div></div>
         ${t.description ? markdownBlock(t.description) : ''}</div>
+      ${examCardHtml(t, { manage: t.level >= 4 && can('training:update'), write: w })}
       <div class="card"><div class="card-head"><h2>Termine</h2>${w ? '<button class="btn ghost sm" id="s-new">Neuer Termin</button>' : ''}</div>
         ${t.sessions.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Datum</th><th>Zeit</th><th>Ort</th><th>Ausbilder</th>${t.level >= 2 ? '<th>Teilnehmer</th>' : ''}<th></th></tr></thead><tbody>
         ${t.sessions.map((s) => `<tr><td>${fdate(s.session_date)}</td><td>${timeText(s)}</td><td>${esc(s.location || '–')}</td><td>${esc(s.instructor || '–')}</td>${t.level >= 2 ? `<td>${s.participants}</td>` : ''}
@@ -154,9 +177,12 @@ export async function render(view, params) {
     detail = null;
     drawList();
   }
+  let questionsOpen = false;
   async function openTraining(id) {
+    if (detail?.id !== id) questionsOpen = false;
     detail = await api.get(`/trainings/${id}`);
     drawDetail();
+    if (questionsOpen && $('#exam-questions')) await drawQuestions($('#exam-questions'), detail);
     history.replaceState(null, '', `#/trainings?id=${id}`);
   }
 
@@ -171,6 +197,29 @@ export async function render(view, params) {
     const d = target.dataset;
     try {
       if (target.id === 't-new') { const id = await trainingForm(null, teams); if (id) await openTraining(id); }
+      // Test im Tool
+      else if (d.examStart !== undefined) {
+        // Eigenes Element: Beim Zurück ersetzt openTraining es samt seinen Listenern und dem Countdown
+        const box = document.createElement('div');
+        $('#t-main').replaceChildren(box);
+        try {
+          await takeExam(box, detail, () => openTraining(detail.id).catch((error) => toast(error.message, true)));
+        } catch (error) {
+          drawDetail();
+          throw error;
+        }
+        box.scrollIntoView({ block: 'start' });
+      }
+      else if (d.examQuestions !== undefined) { questionsOpen = !questionsOpen; if (questionsOpen) await drawQuestions($('#exam-questions'), detail); else $('#exam-questions').innerHTML = ''; }
+      else if (d.qNew !== undefined) { if (await questionForm(detail)) await openTraining(detail.id); }
+      else if (d.qEdit) { if (await questionForm(detail, $('#exam-questions').questions.find((q) => q.id === d.qEdit))) await openTraining(detail.id); }
+      else if (d.qDel && await confirmBox('Frage löschen', 'Die Frage wird gelöscht. Abgegebene Versuche behalten ihr Ergebnis.')) { await api.del(`/training-questions/${d.qDel}`); await openTraining(detail.id); }
+      else if (d.attempt) await attemptDetail(d.attempt);
+      else if (d.examReset && await confirmBox('Versuche zurücksetzen', 'Die bisherigen Versuche zählen danach nicht mehr; die Person kann den Test erneut machen.', 'Zurücksetzen')) {
+        await api.post(`/trainings/${detail.id}/exam/reset`, { user_id: d.examReset });
+        toast('Versuche zurückgesetzt');
+        await openTraining(detail.id);
+      }
       else if (d.open) await openTraining(d.open);
       else if (d.enroll) { await api.post(`/training-sessions/${d.enroll}/enroll`); toast('Angemeldet'); await openTraining(detail.id); }
       else if (d.unenroll) { await api.del(`/training-sessions/${d.unenroll}/enroll`); toast('Abgemeldet'); await openTraining(detail.id); }
