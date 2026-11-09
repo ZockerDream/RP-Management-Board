@@ -106,7 +106,11 @@ app.addHook('onSend', async (req, reply) => {
   if (req.url.startsWith('/api/') || req.url.startsWith('/health')) reply.header('cache-control', 'no-store');
 });
 
-await waitForDb();
+// Klartext statt Stacktrace, damit "docker compose logs" die Lösung lesbar zeigt
+await waitForDb().catch((e) => {
+  console.error(e.message);
+  process.exit(1);
+});
 await migrate(app.log);
 await seed(app.log);
 

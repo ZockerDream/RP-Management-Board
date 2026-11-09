@@ -28,6 +28,22 @@ docker compose up -d
 
 Für direkten Zugriff ohne Reverse-Proxy `APP_URL` auf `http://<server-ip>:8080` setzen. Für HTTPS hinter einem bereits vorhandenen Proxy `APP_URL` auf die öffentliche `https://`-Adresse setzen; dadurch werden Refresh-Cookies als `Secure` markiert. Der erste Start baut die Images, legt das Schema an und erzeugt den Admin-Benutzer aus `ADMIN_EMAIL`/`ADMIN_PASSWORD`. Danach unter `APP_URL` anmelden und das Passwort ändern. Status: `docker compose ps` (alle Services `healthy`).
 
+### Wenn die App nicht startet
+
+Meldet `docker compose up -d` `container budget-manager-api-1 is unhealthy`, steht der Grund in `docker compose logs api`.
+
+**„Die Datenbank lehnt die Anmeldung als … ab“** (oder „Die Datenbank … gibt es nicht“): PostgreSQL übernimmt `DB_USER`, `DB_PASSWORD` und `DB_NAME` nur beim allerersten Start, solange das Volume `budget-manager_db_data` leer ist. Das Log der Datenbank zeigt dann `Database directory appears to contain a database; Skipping initialization`. Ursache ist meist eine von zwei:
+
+- Die Werte in `.env` wurden nach dem ersten Start geändert.
+- Auf dem Host lief schon einmal eine Installation dieser App. Der Projektname ist fest, deshalb teilen sich alle Installationen auf einem Host die Volumes `budget-manager_*`, egal in welchem Verzeichnis sie liegen.
+
+So geht es weiter:
+
+- **Daten behalten:** die alten Werte wieder in `.env` eintragen (Standard war `DB_USER=budget`). Das Passwort lässt sich danach per `ALTER USER` ändern, siehe „Secrets rotieren“.
+- **Daten dürfen weg:** Bei einer neuen Installation ohne Daten setzt `docker compose down -v` alles zurück, danach `docker compose up -d`. Achtung: Das löscht Datenbank, Uploads und Backups jeder Installation dieser App auf dem Host. Wann das Volume angelegt wurde, zeigt `docker volume inspect budget-manager_db_data --format '{{.CreatedAt}}'`.
+
+`./scripts/gen-secrets.sh` warnt, wenn es das Volume schon gibt.
+
 ### Optionaler eigener Reverse-Proxy
 
 Ein vorhandener NGINX kann den veröffentlichten App-Port (`HTTP_PORT`, Standard 8080) für HTTPS verwenden. Der App-Container liefert UI und API auf demselben Ursprung aus; der Proxy muss daher keine `/api`-Weiterleitung zu einem separaten API-Dienst einrichten. Für einen Proxy auf demselben Host `BIND_ADDR=127.0.0.1` setzen. Wenn der Proxy `X-Forwarded-*`-Header setzt, `TRUST_PROXY` auf dessen vertrauenswürdige IP-Adresse(n) oder CIDR(s) setzen (mehrere kommasepariert). Standardmäßig werden solche Header nicht vertraut. `TRUST_PROXY=true` nur verwenden, wenn ausschließlich der Proxy den App-Port erreichen kann.
@@ -71,7 +87,7 @@ docker compose logs -f api worker        # Logs
 docker compose down                     # Stoppen (Daten bleiben in Volumes)
 ```
 
-Persistente Daten liegen in den Docker-Volumes `db_data`, `uploads`, `backups`.
+Persistente Daten liegen in den Docker-Volumes `budget-manager_db_data`, `budget-manager_uploads` und `budget-manager_backups`. Der Name hängt am festen Projektnamen, nicht am Verzeichnis.
 
 ### Bestehende Git-Installation aktualisieren
 

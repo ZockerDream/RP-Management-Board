@@ -9,7 +9,10 @@ const log = {
   error: (o, m) => console.error(JSON.stringify({ level: 'error', msg: m, err: o?.err?.message })),
 };
 
-await waitForDb();
+await waitForDb().catch((e) => {
+  console.error(e.message);
+  process.exit(1);
+});
 const boss = new PgBoss({ connectionString: config.databaseUrl, schema: 'pgboss' });
 boss.on('error', (e) => log.error({ err: e }, 'pg-boss'));
 await boss.start();

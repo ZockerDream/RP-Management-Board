@@ -32,16 +32,54 @@ export async function tx(fn) {
   }
 }
 
-export async function waitForDb(retries = 30) {
+// Fehler, die durch Warten nicht verschwinden: Anmeldung abgelehnt (28P01, 28000), Datenbank fehlt (3D000)
+const PERMANENT_DB_ERRORS = new Set(['28P01', '28000', '3D000']);
+
+// Erklärt, warum die API nicht an die Datenbank kommt. Häufigster Fall bei einer neuen Installation: Das Volume
+// db_data stammt aus einem früheren Start mit anderen DB_USER/DB_PASSWORD/DB_NAME; PostgreSQL übernimmt diese
+// Werte nur, wenn das Volume beim Start noch leer ist.
+export function dbStartError(e, databaseUrl = config.databaseUrl) {
+  let user = '?';
+  let name = '?';
+  try {
+    const url = new URL(databaseUrl);
+    user = decodeURIComponent(url.username);
+    name = decodeURIComponent(url.pathname.slice(1));
+  } catch {
+    // ungültige URL: Meldung ohne Namen
+  }
+  const reason = e?.message || String(e);
+  const volume = [
+    'PostgreSQL übernimmt DB_USER, DB_PASSWORD und DB_NAME aus .env nur beim allerersten Start, solange das',
+    'Datenbank-Volume (bei Docker Compose: budget-manager_db_data) leer ist. Wurde es schon einmal mit anderen',
+    'Werten gestartet, gelten weiter die alten. Das Volume gehört allen Installationen dieser App auf demselben',
+    'Host, egal in welchem Verzeichnis.',
+    'Lösung: die alten Werte wieder in .env eintragen. Nur wenn die Daten darin weg dürfen:',
+    '"docker compose down -v" löscht Datenbank, Uploads und Backups, danach "docker compose up -d".',
+    'Details: README.md, Abschnitt „Wenn die App nicht startet“.',
+  ];
+  if (e?.code === '28P01' || e?.code === '28000') {
+    return new Error([`Die Datenbank lehnt die Anmeldung als „${user}“ ab (${reason}).`, ...volume].join('\n'));
+  }
+  if (e?.code === '3D000') {
+    return new Error([`Die Datenbank „${name}“ gibt es nicht (${reason}).`, ...volume].join('\n'));
+  }
+  return new Error(`Datenbank nicht erreichbar (${reason})`);
+}
+
+export async function waitForDb(retries = 30, delayMs = 2000) {
+  let last;
   for (let i = 0; i < retries; i++) {
     try {
       await pool.query('SELECT 1');
       return;
-    } catch {
-      await new Promise((r) => setTimeout(r, 2000));
+    } catch (e) {
+      last = e;
+      if (PERMANENT_DB_ERRORS.has(e?.code)) break;
+      await new Promise((r) => setTimeout(r, delayMs));
     }
   }
-  throw new Error('Datenbank nicht erreichbar');
+  throw dbStartError(last);
 }
 
 export async function migrate(log = console) {
