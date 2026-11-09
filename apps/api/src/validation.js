@@ -35,6 +35,13 @@ const LABELS = {
   scope_id: 'Bereich', subject: 'Recht für', subject_id: 'Recht für', user_ids: 'Mitglieder',
   // Personen-Import
   csv: 'CSV-Datei', preview: 'Vorschau',
+  // Personen-Stammdaten und Aktensystem
+  birth_date: 'Geburtsdatum', gender: 'Geschlecht', nationality: 'Staatsangehörigkeit', height_cm: 'Größe', features: 'Merkmale', aliases: 'Alias',
+  priority: 'Priorität', incident_at: 'Tatzeit', lead_user_id: 'Sachbearbeitung', owner_person_id: 'Halter', linked_id: 'Akte',
+  occurred_at: 'Zeitpunkt', person_ids: 'Personen', review_note: 'Anmerkung', template_id: 'Vorlage', penal_code_id: 'Tatbestand', count: 'Anzahl',
+  fine: 'Geldstrafe', jail: 'Haft', points: 'Punkte', category: 'Kategorie', storage: 'Lagerort', found_at: 'Fundzeit', found_where: 'Fundort',
+  action: 'Vorgang', reason: 'Begründung', close_note: 'Vermerk', warnings: 'Warnhinweise', blood_type: 'Blutgruppe',
+  allergies: 'Allergien', conditions: 'Vorerkrankungen', medications: 'Medikamente', emergency_contact: 'Notfallkontakt',
 };
 
 function subject(path) {

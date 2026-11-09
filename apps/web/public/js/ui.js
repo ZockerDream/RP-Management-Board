@@ -59,7 +59,9 @@ function fieldHtml(f) {
   else if (f.type === 'multi') {
     input = `<div class="stack" style="gap:6px;max-height:150px;overflow:auto">${(f.options || []).map((o) => `<label class="row start" style="font-weight:400;color:var(--text)"><input type="checkbox" name="${f.name}" value="${esc(o.v)}" ${(val || []).includes(o.v) ? 'checked' : ''}> ${esc(o.l)}</label>`).join('')}</div>`;
   } else if (f.type === 'textarea') input = `<textarea ${common} rows="${f.rows || 3}" ${f.maxlength ? `maxlength="${f.maxlength}"` : ''}${f.markdown ? ' data-md' : ''}>${esc(val)}</textarea>`;
-  else input = `<input type="${f.type || 'text'}" ${common} value="${esc(val)}" ${f.step ? `step="${f.step}"` : ''} ${f.min !== undefined ? `min="${f.min}"` : ''} ${f.maxlength ? `maxlength="${f.maxlength}"` : ''} ${f.autocomplete ? `autocomplete="${f.autocomplete}"` : ''} ${f.accept ? `accept="${esc(f.accept)}"` : ''}>`;
+  else input = `<input type="${f.type || 'text'}" ${common} value="${esc(val)}" ${f.step ? `step="${f.step}"` : ''} ${f.min !== undefined ? `min="${f.min}"` : ''} ${f.max !== undefined ? `max="${f.max}"` : ''} ${f.maxlength ? `maxlength="${f.maxlength}"` : ''} ${f.autocomplete ? `autocomplete="${f.autocomplete}"` : ''} ${f.accept ? `accept="${esc(f.accept)}"` : ''} ${f.suggestions ? `list="${id}-list"` : ''}>`;
+  // Vorschläge zum Antippen, freie Eingabe bleibt möglich (z. B. Rollen in einer Akte)
+  if (f.suggestions) input += `<datalist id="${id}-list">${f.suggestions.map((s) => `<option value="${esc(s)}"></option>`).join('')}</datalist>`;
   if (f.type === 'password') input = `<span class="password-control">${input}${passwordToggleButton(f.label)}</span>`;
   // Markdown-Felder bekommen eine Werkzeugleiste; ein <label> drumherum würde Klicks in die Vorschau auf das Textfeld lenken
   if (f.markdown) return `<div class="${cls} md-field"><label for="${id}">${esc(f.label)}</label>${input}${f.help ? `<small class="muted">${esc(f.help)}</small>` : ''}</div>`;
@@ -150,3 +152,18 @@ export const debounce = (fn, ms = 300) => {
 };
 
 export const parseAmount = (v) => String(v).trim().replace(/\./g, (m, i, s) => (s.includes(',') ? '' : m)).replace(',', '.');
+
+// Nur diesen Bereich drucken (Akte, Bericht, Personenakte); alles andere blendet das Druck-CSS aus.
+// Zugeklappte Abschnitte (<details>) werden dafür geöffnet, alle Tabs einer Akte erscheinen untereinander.
+export function printArea(el) {
+  el.querySelectorAll('details').forEach((d) => { d.open = true; });
+  document.body.classList.add('printing');
+  el.classList.add('print-area');
+  const done = () => {
+    el.classList.remove('print-area');
+    document.body.classList.remove('printing');
+    window.removeEventListener('afterprint', done);
+  };
+  window.addEventListener('afterprint', done);
+  window.print();
+}

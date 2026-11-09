@@ -4,18 +4,26 @@ import { z } from 'zod';
 import { patchSchema, validationMessage } from './validation.js';
 import { parseCsv, csvUnguard, toCsv, CsvError } from './csv.js';
 
-const str = (n) => z.string().max(n);
+const str = (n) => z.string().trim().max(n);
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}, 'Ungültiges Datum');
+// Stammdaten sind wie die Person global; was ein Bereich über die Person führt, steht in ihrer Personenakte (person_files)
 export const personSchema = z.object({
   name: z.string().trim().min(1).max(100), kind: z.enum(['employee', 'external', 'family']).default('employee'), function: str(100).default(''),
-  phone: str(40).default(''), email: z.union([z.string().email(), z.literal('')]).default(''), active: z.boolean().default(true), note: str(2000).default(''),
+  phone: str(40).default(''), email: z.union([z.string().email(), z.literal('')]).default(''), active: z.boolean().default(true), note: z.string().max(2000).default(''),
+  birth_date: isoDate.nullable().default(null), gender: str(30).default(''), address: str(300).default(''), nationality: str(60).default(''),
+  height_cm: z.number().int().min(30).max(260).nullable().default(null), features: str(1000).default(''), aliases: str(300).default(''),
 });
-export const PERSON_FIELDS = ['name', 'kind', 'function', 'phone', 'email', 'active', 'note'];
+export const PERSON_FIELDS = ['name', 'kind', 'function', 'phone', 'email', 'active', 'note', 'birth_date', 'gender', 'address', 'nationality', 'height_cm', 'features', 'aliases'];
 export const KIND_LABELS = { employee: 'Mitarbeiter', external: 'Extern', family: 'Familie' };
 export const MAX_IMPORT_ROWS = 10000;
 const MAX_PROBLEMS = 200;
 
 // ---- Export: deutsche Überschriften und Werte, damit die Datei in Excel lesbar ist und unverändert wieder importiert werden kann
-const COLUMNS = [['id', 'ID'], ['name', 'Name'], ['kind', 'Art'], ['function', 'Funktion'], ['phone', 'Telefon'], ['email', 'E-Mail'], ['active', 'Aktiv'], ['note', 'Notiz']];
+const COLUMNS = [['id', 'ID'], ['name', 'Name'], ['kind', 'Art'], ['function', 'Funktion'], ['phone', 'Telefon'], ['email', 'E-Mail'], ['active', 'Aktiv'], ['note', 'Notiz'],
+  ['birth_date', 'Geburtsdatum'], ['gender', 'Geschlecht'], ['address', 'Adresse'], ['nationality', 'Staatsangehörigkeit'], ['height_cm', 'Größe'], ['features', 'Merkmale'], ['aliases', 'Alias']];
 export function peopleCsv(people) {
   const rows = people.map((p) => Object.fromEntries(COLUMNS.map(([key, label]) => [label,
     key === 'kind' ? KIND_LABELS[p.kind] || p.kind : key === 'active' ? (p.active ? 'ja' : 'nein') : p[key]])));
@@ -28,6 +36,9 @@ const norm = (s) => s.toLowerCase().replace(/[^a-z0-9äöüß]/g, '');
 const HEADERS = {
   id: ['id'], name: ['name'], kind: ['art', 'kind', 'typ'], function: ['funktion', 'function'], phone: ['telefon', 'phone', 'tel'],
   email: ['email', 'mail'], active: ['aktiv', 'active'], note: ['notiz', 'note', 'notizen', 'bemerkung'],
+  birth_date: ['geburtsdatum', 'geboren', 'birthdate', 'birthday'], gender: ['geschlecht', 'gender'], address: ['adresse', 'anschrift', 'address'],
+  nationality: ['staatsangehörigkeit', 'nationalität', 'nationality'], height_cm: ['größe', 'groesse', 'height', 'größecm'], features: ['merkmale', 'besonderemerkmale', 'features'],
+  aliases: ['alias', 'aliase', 'aliasnamen', 'aliases'],
 };
 const KINDS = { mitarbeiter: 'employee', mitarbeiterin: 'employee', employee: 'employee', extern: 'external', externe: 'external', external: 'external', familie: 'family', family: 'family' };
 const YES = new Set(['ja', 'j', 'yes', 'y', 'true', 'wahr', '1', 'x', 'aktiv', 'active']);
@@ -53,6 +64,14 @@ function readRow(cells, columns) {
       const v = raw.toLowerCase();
       if (!YES.has(v) && !NO.has(v)) return { id, name: at('name'), error: `Aktiv „${raw.slice(0, 40)}“ ist weder ja noch nein` };
       values.active = YES.has(v);
+    } else if (key === 'birth_date') {
+      // ISO wie im Export oder deutsch wie in Excel (31.12.1990)
+      const german = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(raw);
+      values.birth_date = !raw ? null : german ? `${german[3]}-${german[2].padStart(2, '0')}-${german[1].padStart(2, '0')}` : raw;
+    } else if (key === 'height_cm') {
+      const n = raw.replace(/\s*cm$/i, '');
+      if (raw && !/^\d{2,3}$/.test(n)) return { id, name: at('name'), error: `Größe „${raw.slice(0, 20)}“ ist keine Zahl in Zentimetern` };
+      values.height_cm = raw ? Number(n) : null;
     } else values[key] = raw;
   }
   return { id: id.toLowerCase(), name: values.name, values };

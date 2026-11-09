@@ -14,9 +14,11 @@ const ALLOWED = new Map([
 
 export const uploadPath = (storageKey) => path.join(config.uploadDir, path.basename(storageKey));
 
-export async function receiveUpload(req) {
+// images: nur PNG und JPEG (z. B. Fotos in der Personenakte)
+export async function receiveUpload(req, { images = false } = {}) {
   const part = await req.file();
   if (!part) throw bad('Datei fehlt');
+  if (images && !part.mimetype.startsWith('image/')) throw bad('Nur PNG und JPEG erlaubt');
   if (!ALLOWED.has(part.mimetype)) throw bad('Nur PDF, PNG und JPEG erlaubt');
   fs.mkdirSync(config.uploadDir, { recursive: true, mode: 0o700 });
   const key = crypto.randomUUID();

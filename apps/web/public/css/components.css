@@ -333,3 +333,41 @@ button.list-item:hover { background: var(--surface-2); }
 .case-entry .memo-body { max-height: none; }
 .person-record h3 { margin: 18px 0 2px; font-size: 15px; }
 .person-record a { color: var(--text); font-weight: 600; }
+
+/* Drucken einer Akte, eines Berichts oder einer Personenakte (printArea in ui.js) */
+@media print {
+  body.printing * { visibility: hidden; }
+  body.printing .print-area, body.printing .print-area * { visibility: visible; }
+  body.printing .print-area { position: absolute; left: 0; top: 0; width: 100%; color: #000; background: #fff; }
+  body.printing .print-area button, body.printing .print-area .no-print, body.printing .print-area .tabs { display: none !important; }
+  body.printing .print-area .tab-panel { display: block !important; }
+  body.printing .print-area .card { box-shadow: none; border: 1px solid #ccc; break-inside: avoid; }
+}
+
+/* Aktensystem: Fallakte, Personenakte, Berichte, Beweismittel, Fahndungen */
+.row.wrap { flex-wrap: wrap; justify-content: flex-start; gap: 6px; }
+.case-meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px 18px; margin: 12px 0 4px; }
+.case-meta dt { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.case-meta dd { margin: 2px 0 0; font-weight: 500; overflow-wrap: anywhere; }
+.note.bad-note { background: var(--bad-soft); color: var(--bad); margin: 10px 0; }
+.case-detail > .tabs { margin: 4px 0 14px; }
+.case-report, .case-evidence { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.case-report:last-child, .case-evidence:last-child { border-bottom: 0; }
+.case-report > small, .case-evidence > small { display: block; margin-top: 4px; }
+.case-report details, .case-evidence details { margin-top: 8px; }
+.case-report summary, .case-evidence summary { cursor: pointer; color: var(--primary); font-size: 13px; }
+.case-report .note { margin: 8px 0 0; }
+.case-log { margin: 8px 0 0; padding-left: 20px; font-size: 13px; }
+.case-log li { margin-bottom: 6px; }
+.case-sums { margin: 6px 0 16px; }
+.case-warrant.active { border-left: 3px solid var(--bad); padding-left: 10px; }
+.person-head { display: flex; gap: 18px; align-items: flex-start; }
+.person-photo { flex: none; width: 120px; height: 150px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border); display: grid; place-items: center; overflow: hidden; color: var(--muted); font-size: 12px; }
+.person-photo img { width: 100%; height: 100%; object-fit: cover; }
+.person-file > .card, .person-file > .grid, .person-file > .note { margin-bottom: 16px; }
+@media (max-width: 720px) {
+  .person-head { flex-direction: column; }
+  .person-photo { width: 96px; height: 120px; }
+}
+.person-head .card-head select, .toolbar #pc-area, .toolbar #rt-area, .toolbar #pf-area { width: auto; max-width: 240px; }
+.person-head h2 { font-size: 22px; }

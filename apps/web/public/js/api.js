@@ -61,6 +61,8 @@ export const api = {
   put: (p, b) => request('PUT', p, b ?? {}),
   patch: (p, b) => request('PATCH', p, b ?? {}),
   del: (p) => request('DELETE', p),
+  // Datei mit Anmeldung laden, z. B. ein Foto (ein <img src="/api/…"> hätte kein Token)
+  blob: (p) => request('GET', p, undefined, { blob: true }),
   async download(path, filename) {
     const blob = await request('GET', path, undefined, { blob: true });
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: filename });
