@@ -140,14 +140,14 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.waitForSelector('.modal.open .auth-error:not([hidden])');
   check('Leere Notiz wird abgelehnt', /erforderlich/.test(await page.textContent('.modal.open .auth-error')));
   await page.fill('.modal.open [name=title]', 'UI Notiz');
-  await page.fill('.modal.open [name=body]', 'Zeile 1\nZeile 2 mit **fett** und [Link](https://example.org)\n\n<b>kein HTML</b>');
+  await page.fill('.modal.open [name=body]', 'Zeile 1\nZeile 2 mit **fett** und [Link](https://example.org)\n\n<i onclick="alert(1)">kein HTML</i>');
   await submit(page);
   const noteCard = page.locator('#n-list .memo', { hasText: 'UI Notiz' });
   check('Notiz angelegt', await noteCard.count() === 1);
   // Notizen sind Markdown: Zeilenumbruch bleibt, **fett** und Links werden formatiert, HTML wird nur angezeigt
   check('Zeilenumbrüche bleiben', await noteCard.locator('.memo-body').evaluate((n) => n.querySelectorAll('p br').length === 1 && /Zeile 1/.test(n.textContent) && /Zeile 2/.test(n.textContent)));
-  check('Markdown in Notizen', await noteCard.locator('.memo-body').evaluate((n) => n.querySelector('b')?.textContent === 'fett' && n.querySelector('a[href="https://example.org"][rel~=noopener]') !== null));
-  check('HTML in Notizen wird nicht ausgeführt', await noteCard.locator('.memo-body').evaluate((n) => n.textContent.includes('<b>kein HTML</b>') && n.querySelectorAll('b').length === 1));
+  check('Markdown in Notizen', await noteCard.locator('.memo-body').evaluate((n) => n.querySelector('strong')?.textContent === 'fett' && n.querySelector('a[href="https://example.org"][rel~=noopener]') !== null));
+  check('HTML mit Attributen wird nur angezeigt', await noteCard.locator('.memo-body').evaluate((n) => n.textContent.includes('<i onclick="alert(1)">kein HTML</i>') && !n.querySelector('[onclick], i')));
   await noteCard.locator('[data-edit]').click();
   check('Notiz vorbefüllt mit dem Rohtext', (await page.inputValue('.modal.open [name=body]')).startsWith('Zeile 1\nZeile 2 mit **fett**'));
   await page.selectOption('.modal.open [name=team_id]', { label: 'Organisation: E2E Team' });
@@ -172,6 +172,66 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await submit(page);
   check('Notiz gelöscht', await noteCard.count() === 0);
 
+  // Markdown-Editor: Werkzeugleiste, Tastenkürzel, Listen fortsetzen, Vorschau, Nebeneinander, Vollbild, Hilfe
+  at('alice markdown editor');
+  await page.click('#n-new');
+  check('Editor mit Werkzeugleiste', await page.locator('.modal.open .md-toolbar [data-md-tool]').count() >= 18);
+  await page.fill('.modal.open [name=title]', 'Editor Notiz');
+  const mdBody = page.locator('.modal.open [name=body]');
+  await mdBody.fill('wichtig');
+  await mdBody.selectText();
+  await page.click('.modal.open [data-md-tool=bold]');
+  check('Fett-Knopf umschließt die Auswahl', (await mdBody.inputValue()) === '**wichtig**', await mdBody.inputValue());
+  await page.click('.modal.open [data-md-tool=bold]');
+  check('Zweiter Klick nimmt Fett zurück', (await mdBody.inputValue()) === 'wichtig', await mdBody.inputValue());
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+B' : 'Control+B');
+  check('Strg+B formatiert fett', (await mdBody.inputValue()) === '**wichtig**', await mdBody.inputValue());
+  await mdBody.press('End');
+  await page.keyboard.type('\n\n- eins');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('zwei');
+  check('Enter setzt die Liste fort', (await mdBody.inputValue()).endsWith('- eins\n- zwei'), await mdBody.inputValue());
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  check('Enter im leeren Punkt beendet die Liste', !(await mdBody.inputValue()).endsWith('- '), JSON.stringify(await mdBody.inputValue()));
+  await page.keyboard.type('Fußnote[^1]\n\n[^1]: Mehr dazu');
+  await page.click('.modal.open [data-md-tool=table]');
+  check('Tabelle eingefügt und erste Überschrift markiert', /\| Spalte 1 \| Spalte 2 \|\n\| --- \| --- \|/.test(await mdBody.inputValue()) && await mdBody.evaluate((t) => t.value.slice(t.selectionStart, t.selectionEnd) === 'Spalte 1'));
+  await page.keyboard.type('Name');
+  await page.click('.modal.open [data-md-tool=preview]');
+  const previewOk = await page.evaluate(() => {
+    const m = document.querySelector('.modal.open');
+    const p = m.querySelector('.md-preview');
+    return !p.hidden && m.querySelector('[name=body]').hidden && p.querySelector('strong')?.textContent === 'wichtig'
+      && p.querySelectorAll('ul > li').length === 2 && p.querySelector('th')?.textContent === 'Name' && !!p.querySelector('.md-footnotes');
+  });
+  check('Vorschau zeigt das Ergebnis', previewOk);
+  check('In der Vorschau ruhen die Formatknöpfe', await page.locator('.modal.open [data-md-tool=bold]').isDisabled());
+  await page.click('.modal.open [data-md-tool=split]');
+  await mdBody.press('Control+End');
+  await page.keyboard.type('\n\n> [!TIP]');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Neu getippt');
+  check('Enter setzt das Zitat fort', (await mdBody.inputValue()).endsWith('> [!TIP]\n> Neu getippt'), JSON.stringify((await mdBody.inputValue()).slice(-40)));
+  await until(page, () => !!document.querySelector('.modal.open .md-preview .md-alert-tip'));
+  check('Nebeneinander: Vorschau folgt beim Tippen', await page.locator('.modal.open [name=body]').isVisible() && /Neu getippt/.test(await page.textContent('.modal.open .md-preview')));
+  await page.click('.modal.open [data-md-tool=fullscreen]');
+  check('Vollbild', await page.evaluate(() => { const e = document.querySelector('.modal.open .md-editor'); const r = e.getBoundingClientRect(); return e.classList.contains('md-fullscreen') && r.width >= innerWidth - 1 && r.height >= innerHeight - 1; }));
+  await page.screenshot({ path: `${out}/alice-markdown-vollbild.png` });
+  await mdBody.press('Escape');
+  check('Esc beendet nur das Vollbild, der Dialog bleibt', await page.locator('.modal.open .md-editor.md-fullscreen').count() === 0 && await page.locator('.modal.open [name=body]').count() === 1);
+  await page.click('.modal.open [data-md-tool=help]');
+  check('Hilfe zeigt Beispiele mit Ergebnis', await page.locator('.modal.open .md-help .md-help-row').count() >= 10 && await page.locator('.modal.open .md-help table').count() === 1);
+  await page.screenshot({ path: `${out}/alice-markdown-editor.png` });
+  await submit(page);
+  const mdCard = page.locator('#n-list .memo', { hasText: 'Editor Notiz' });
+  check('Notiz mit Tabelle, Liste und Hinweis-Kasten', await mdCard.locator('.memo-body').evaluate((n) => !!n.querySelector('table th') && n.querySelectorAll('li').length >= 2 && !!n.querySelector('.md-alert-tip')));
+  await mdCard.locator('.md-fn').first().click();
+  await page.waitForTimeout(300);
+  check('Fußnote springt, ohne die Seite zu wechseln', (await page.evaluate(() => location.hash)) === '#/notes');
+  await mdCard.locator('[data-del]').click();
+  await submit(page);
+
   // ToDos
   at('alice todos');
   await go(page, '#/todos');
@@ -189,9 +249,9 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   const todoRow = page.locator('#t-list .todo-row', { hasText: 'UI Aufgabe' });
   check('ToDo angelegt', await todoRow.count() === 1 && /E2E Team/.test(await todoRow.textContent()));
   await todoRow.locator('[data-edit]').click();
-  await page.fill('.modal.open [name=note]', 'Mit <b>Notiz</b>');
+  await page.fill('.modal.open [name=note]', 'Mit <b onclick="x()">Notiz</b>');
   await submit(page);
-  check('ToDo-Notiz bleibt Text', /<b>Notiz<\/b>/.test(await todoRow.textContent()));
+  check('ToDo-Notiz: HTML mit Attributen bleibt Text', /<b onclick="x\(\)">Notiz<\/b>/.test(await todoRow.textContent()) && await todoRow.locator('[onclick]').count() === 0);
   await todoRow.locator('[data-done]').check();
   await page.waitForTimeout(500);
   check('Abgehakt verschwindet aus Offen', await todoRow.count() === 0);
@@ -224,13 +284,14 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   const ownTicket = page.locator('#bug-report-list .ticket', { hasText: 'UI Ticket zum Löschen' });
   await ownTicket.waitFor();
   await ownTicket.locator('[name=body]').fill('   ');
-  await ownTicket.locator('[data-comment-form] button').click();
+  check('Kommentarfeld bekommt beim Fokus die Werkzeugleiste', await ownTicket.locator('[data-comment-form] .md-toolbar').count() === 1);
+  await ownTicket.locator('[data-comment-form] button[type=submit]').click();
   await page.waitForTimeout(200);
   check('Leerer Kommentar wird nicht gesendet', await ownTicket.locator('.ticket-comment').count() === 0);
-  await ownTicket.locator('[name=body]').fill('Mein Kommentar <i>x</i>\nzweite Zeile');
-  await ownTicket.locator('[data-comment-form] button').click();
+  await ownTicket.locator('[name=body]').fill('Mein Kommentar <i class="y">x</i>\nzweite Zeile');
+  await ownTicket.locator('[data-comment-form] button[type=submit]').click();
   await ownTicket.locator('.ticket-comment').waitFor();
-  check('Kommentar erscheint als Text', /<i>x<\/i>/.test(await ownTicket.locator('.ticket-comment').textContent()) && /alice/.test(await ownTicket.locator('.ticket-comment').textContent()));
+  check('Kommentar: HTML mit Attributen bleibt Text', /<i class="y">x<\/i>/.test(await ownTicket.locator('.ticket-comment').textContent()) && /alice/.test(await ownTicket.locator('.ticket-comment').textContent()));
   check('Kommentarfeld ist danach leer', (await ownTicket.locator('[name=body]').inputValue()) === '');
   await page.screenshot({ path: `${out}/alice-ticket-comment.png` });
   await ownTicket.locator('[data-comment-del]').click();
@@ -382,6 +443,24 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.screenshot({ path: `${out}/alice-qr.png` });
   await page.keyboard.press('Escape');
   await page.evaluate(() => document.querySelectorAll('#modals .modal').forEach((m) => m.remove()));
+  at('alice personen csv');
+  await go(page, '#/assets-people');
+  const [peopleDownload] = await Promise.all([page.waitForEvent('download'), page.click('#p-csv')]);
+  check('Personen-Export lädt personen.csv', peopleDownload.suggestedFilename() === 'personen.csv');
+  await page.click('#p-import');
+  await page.waitForSelector('.modal.open #f-file');
+  // Wie aus Excel: Windows-1252 statt UTF-8; „Hans“ gibt es schon
+  await page.setInputFiles('.modal.open #f-file', { name: 'personen.csv', mimeType: 'text/csv', buffer: Buffer.from('Name;Art;Notiz\r\nJürgen Ümlaut;Extern;aus Excel\r\nHans;;\r\n', 'latin1') });
+  await page.click('.modal.open button[type=submit]');
+  await until(page, () => !!document.querySelector('#p-import-result .note'));
+  const importPreview = await page.textContent('#p-import-result');
+  check('Import-Vorschau zählt', /1 neue Person wird angelegt/.test(importPreview) && /1 Zeile übersprungen/.test(importPreview) && /Zeile 3/.test(importPreview), importPreview);
+  check('Nach dem Prüfen heißt der Knopf Importieren', (await page.textContent('.modal.open button[type=submit]')).trim() === 'Importieren');
+  await page.screenshot({ path: `${out}/alice-personen-import.png` });
+  await page.click('.modal.open button[type=submit]');
+  await until(page, () => !document.querySelector('.modal.open'));
+  await settle(page);
+  check('Importierte Person mit Umlauten in der Liste', /Jürgen Ümlaut/.test(await page.textContent('#view')));
   at('alice pin');
   await go(page, '#/assets-properties');
   await page.click('#view [data-reveal-pin]');
@@ -485,11 +564,11 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   const adminTicket = page.locator('#view .ticket', { hasText: 'Fehler im Test' });
   const commentsBefore = await adminTicket.locator('.ticket-comment').count();
   await adminTicket.locator('[name=body]').fill('Antwort vom Admin');
-  await adminTicket.locator('[data-comment-form] button').click();
+  await adminTicket.locator('[data-comment-form] button[type=submit]').click();
   await adminTicket.locator('.ticket-comment', { hasText: 'Antwort vom Admin' }).waitFor();
   check('Admin-Kommentar erscheint', await adminTicket.locator('.ticket-comment').count() === commentsBefore + 1);
   await adminTicket.locator('[name=body]').fill('Zweiter Kommentar');
-  await adminTicket.locator('[data-comment-form] button').click();
+  await adminTicket.locator('[data-comment-form] button[type=submit]').click();
   await adminTicket.locator('.ticket-comment', { hasText: 'Zweiter Kommentar' }).waitFor();
   check('Nach erneutem Zeichnen funktioniert das Formular weiter', await adminTicket.locator('.ticket-comment').count() === commentsBefore + 2);
   await page.screenshot({ path: `${out}/admin-ticket-comment.png` });
@@ -529,7 +608,8 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   check('Viewer ohne Schlüssel-Aktionen', await page.locator('#view [data-edit], #view [data-del], #view [data-assign], #view [data-ret], #view [data-lost]').count() === 0);
   check('Viewer kann QR-Code weiter öffnen', await page.locator('#view [data-qr]').count() > 0);
   await go(page, '#/assets-people');
-  check('Viewer ohne Personen-Aktionen', /Teamer/.test(await page.textContent('#view')) && await page.locator('#view [data-edit], #view [data-del]').count() === 0);
+  // Personen sind global: Für sie zählen nur die Rollenrechte, nicht die Stufe in der Organisation
+  check('Viewer sieht Personen und darf sie mit der Rolle User bearbeiten', /Teamer/.test(await page.textContent('#view')) && await page.locator('#view [data-edit]').count() > 0);
   at('carol notizen');
   await go(page, '#/notes');
   const teamNote = page.locator('#n-list .memo', { hasText: 'Team-Notiz' });

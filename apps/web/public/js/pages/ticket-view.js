@@ -19,7 +19,7 @@ export const ticketHtml = (ticket, admin = false) => `<div class="list-item tick
     ${ticket.github_sync_error ? `<small class="auth-error">GitHub-Synchronisierung fehlgeschlagen: ${esc(ticket.github_sync_error)}</small>` : ''}
     <div class="ticket-comments">${(ticket.comments || []).map((comment) => commentHtml(ticket, comment, admin)).join('')}</div>
     <form data-comment-form="${esc(ticket.id)}" class="ticket-comment-form">
-      <label class="field">Kommentar<textarea name="body" rows="2" maxlength="5000" required></textarea></label>
+      <div class="field md-field"><label for="comment-${esc(ticket.id)}">Kommentar</label><textarea id="comment-${esc(ticket.id)}" name="body" rows="2" maxlength="5000" required data-md="lazy"></textarea></div>
       <div class="row start"><button class="btn ghost sm" type="submit">Kommentieren</button></div>
     </form>
   </div>

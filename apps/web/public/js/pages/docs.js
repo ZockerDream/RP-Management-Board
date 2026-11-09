@@ -4,7 +4,6 @@ import { can } from '../app.js';
 import { renderMarkdown } from '../markdown.js';
 import { writableTeams, visibilityField, scopeTag } from './common.js';
 
-const FORMAT_HELP = 'Formatierung: # Überschrift, **fett**, *kursiv*, - Liste, 1. nummerierte Liste, > Zitat, --- Trennlinie, [Text](https://…)';
 const scopeName = (category) => (category.team_id ? category.team_name : 'Solo');
 
 const categoryForm = (category, teams) => openForm({
@@ -34,7 +33,7 @@ function pageForm(page, categories, preset) {
       { name: 'title', label: 'Titel', value: page?.title, required: true, maxlength: 200, full: true },
       { name: 'category_id', label: 'Kategorie', type: 'select', options: choices.map((c) => ({ v: c.id, l: `${c.name} · ${scopeName(c)}` })), value: page?.category_id || preset || choices[0].id },
       { name: 'pinned', label: 'Oben anheften', type: 'checkbox', value: page?.pinned },
-      { name: 'body', label: 'Text', type: 'textarea', rows: 18, maxlength: 200000, value: page?.body, full: true, help: FORMAT_HELP },
+      { name: 'body', label: 'Text', type: 'textarea', rows: 18, maxlength: 200000, value: page?.body, full: true, markdown: true },
     ],
     onSubmit: async (values) => {
       const body = { title: values.title.trim(), category_id: values.category_id, pinned: values.pinned, body: values.body };

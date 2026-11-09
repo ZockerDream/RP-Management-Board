@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { empty, toast } from '../ui.js';
+import { markdownEditors } from '../editor.js';
 import { ticketHtml, bindTickets } from './ticket-view.js';
 
 export async function render(view) {
@@ -8,15 +9,15 @@ export async function render(view) {
       <form id="bug-report-form">
         <div class="form">
           <label class="field full">Kurzer Titel<input name="title" required minlength="5" maxlength="120"></label>
-          <label class="field full">Was ist passiert?<textarea name="description" rows="4" required minlength="20" maxlength="10000"></textarea></label>
-          <label class="field full">Reproduktionsschritte (optional)<textarea name="steps" rows="3" maxlength="5000"></textarea></label>
-          <small class="muted full">Beschreibung und Schritte unterstützen Markdown: **fett**, *kursiv*, - Liste, &#96;Code&#96;, [Text](https://…).</small>
+          <div class="field full md-field"><label for="bug-description">Was ist passiert?</label><textarea id="bug-description" name="description" rows="6" required minlength="20" maxlength="10000" data-md></textarea></div>
+          <div class="field full md-field"><label for="bug-steps">Reproduktionsschritte (optional)</label><textarea id="bug-steps" name="steps" rows="4" maxlength="5000" data-md></textarea></div>
         </div>
         <div class="modal-foot"><button class="btn" type="submit">Ticket erstellen</button></div>
       </form>
     </div>
     <div class="card" style="margin-top:18px"><div class="card-head"><h2>Meine Tickets</h2></div><div id="bug-report-list"></div></div>`;
 
+  markdownEditors(view);
   const form = view.querySelector('#bug-report-form');
   const list = view.querySelector('#bug-report-list');
   const refresh = async () => {

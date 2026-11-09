@@ -12,7 +12,7 @@ Diese Datei gilt für jede KI, die an diesem Projekt weiterarbeitet (`CLAUDE.md`
 
 Selbst gehostete deutschsprachige Web-App: Finanzen, Zeiterfassung, Sport, Objekte (Fahrzeuge, Häuser, Personen, Schlüssel), Akten, Schulungen, Lizenzen, Dokumentationen, Organisationen mit Rängen, Gruppen und Rechten, Kalender und Administration. Betrieb per Docker Compose.
 
-Die Anforderungen wurden aus Code, Doku und Git-Historie abgeleitet (Stand 2026-11-08, Migration 016); die frühen Originalgespräche mit dem Auftraggeber lagen nicht vor. Akten, Schulungen, Lizenzen, Dokumentationen und die Nachtschicht-Regel (Migration 017) hat der Auftraggeber am 2026-11-08 direkt entschieden, Organisationen mit Rängen, Gruppen und Rechten (Migration 018) am 2026-11-09. Im Zweifel beim Auftraggeber nachfragen und hier ergänzen. Fachliche Details: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Betrieb: [README.md](README.md).
+Die Anforderungen wurden aus Code, Doku und Git-Historie abgeleitet (Stand 2026-11-08, Migration 016); die frühen Originalgespräche mit dem Auftraggeber lagen nicht vor. Akten, Schulungen, Lizenzen, Dokumentationen und die Nachtschicht-Regel (Migration 017) hat der Auftraggeber am 2026-11-08 direkt entschieden, Organisationen mit Rängen, Gruppen und Rechten (Migration 018) und globale Personen (Migration 019) am 2026-11-09. Im Zweifel beim Auftraggeber nachfragen und hier ergänzen. Fachliche Details: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Betrieb: [README.md](README.md).
 
 ## Arbeitsweise
 
@@ -41,6 +41,7 @@ Node 22, Fastify 5, reines ESM-JavaScript, `zod`, `pg` mit handgeschriebenem SQL
 - **`ownerSql(alias)` nutzt standardmäßig `$1`.** Steht die Benutzer-ID an anderer Stelle, den Parameter angeben: `ownerSql('p', '$2')`.
 - **Jeder übergebene SQL-Parameter muss im Text vorkommen**, sonst scheitert die Abfrage mit „could not determine data type“. Betrifft vor allem Jobs, die nur zur Laufzeit auffallen.
 - **Strikte CSP:** kein Inline-JavaScript und keine `on*`-Attribute. Inline-`style` ist erlaubt.
+- **Markdown:** neue Textfelder mit Formatierung bekommen in `openForm` `markdown: true` (sonst `textarea[data-md]` und `markdownEditors`), angezeigt wird mit `markdownBlock`. `markdown.js` nicht an `ui.js` hängen: Er muss ohne DOM laufen (`apps/api/test/markdown.test.js`). Keine `href="#…"` erzeugen außer `#/…`, der Hash-Router würde die Seite wechseln.
 - **`.chip` ist doppelt belegt:** `calendar.css` definiert es global als Block; Chip-Listen brauchen den Container `.chips`.
 - **Restore:** `src/cli/backup.js` filtert `pgboss` aus der Inhaltsliste des Dumps. `--exclude-schema` reicht nicht: Es würde das Schema trotzdem droppen; die partitionierten Tabellen scheitern ohnehin an `--clean`.
 - **Datumsangaben** kommen als Strings aus der DB (Typ-Parser in `db.js`); Geldbeträge sind Strings aus `numeric`, nie als Float rechnen.
@@ -64,8 +65,9 @@ Node 22, Fastify 5, reines ESM-JavaScript, `zod`, `pg` mit handgeschriebenem SQL
 - **Kalender rendert beim Filtern neu:** Element-Referenzen in Tests werden dabei ungültig; Elemente jedes Mal neu suchen.
 - **Ein Arbeitszeit-Eintrag gehört genau einem Kalendertag.** Neue Wege, Einträge anzulegen oder zu ändern, müssen über `splitManualEntry`/`splitTimer` (`work-split.js`) gehen; sonst zählen Stunden nach Mitternacht in der falschen Woche.
 - **Gehaltslauf stündlich, Stichtag 03:45:** `payroll.run` bucht vor 03:45 Uhr nur bis vorgestern. Tests, die den Job aufrufen, müssen das berücksichtigen (`api.mjs` tut es); der Teil „wartet auf das Ausstempeln“ läuft nur zwischen 03:45 und 23:00.
-- **Personen sind Bezugspunkt für Akten, Lizenzen und Schulungsnachweise:** `DELETE /people/:id` lehnt solche Personen ab, und sie wechseln nicht den Bereich (`personRecords` in `objects.js`); neue Tabellen mit Personenbezug dort mit prüfen. Die Fremdschlüssel selbst müssen kaskadieren: Beim Löschen eines Teams prüft PostgreSQL Verweise ohne `ON DELETE` schon in der kaskadierenden Teil-Löschung der Personen, das ergab einen 500er.
-- **Bereich fest, Personen im selben Bereich:** Akten, Lizenzarten, Schulungen und Doku-Kategorien wechseln nach dem Anlegen nicht zwischen Solo und Organisation; Personen und Teilnehmer müssen zur selben Organisation bzw. derselben Person gehören (`records.js`).
+- **Personen sind global (Migration 019):** `people` hat kein `owner_user_id`/`team_id` mehr und keine Funktion in `ORG_MODULES`. Nie `visibleSql`/`levelSql`/`recordLevel` mit `'person'` aufrufen (wirft „Unbekannte Funktion“); Rechte kommen allein aus `person:*`. Verwenden darf jeder jede Person (`assertPerson` in `records.js`). Fällt beim Umbau ein `personJoin(…, '$2')` o. Ä. weg, auch den Parameter aus dem Array nehmen.
+- **Personen sind Bezugspunkt für Akten, Lizenzen und Schulungsnachweise:** `DELETE /people/:id` lehnt solche Personen ab (`personRecords` in `objects.js`); neue Tabellen mit Personenbezug dort mit prüfen.
+- **Bereich fest:** Akten, Lizenzarten, Schulungen und Doku-Kategorien wechseln nach dem Anlegen nicht zwischen Solo und Organisation; Benutzer als Teilnehmer müssen zur selben Organisation gehören bzw. man selbst sein (`assertUserInScope` in `records.js`). Personen sind davon ausgenommen.
 - **Rechte in Organisationen nie selbst aus `team_members` ableiten:** Es gibt keine `team_role` mehr. Sichtbarkeit und Schreibrecht kommen allein aus der Datenbankfunktion `team_level(team, user, modul, bereich)` bzw. `case_file_level(akte, user)`; in JS über `levelSql`/`visibleSql`/`recordLevel`/`recordOwner`/`teamUsers` aus `org.js`. `visibleSql(alias, modul)` braucht immer das Modul; der Alias muss `owner_user_id` und `team_id` haben. Eine reine Mitgliedschaftsprüfung (`team_members`) ist nur richtig, wo es um Mitgliedschaft geht (Teilnehmer, geteilte Daueraufträge).
 - **Neue Funktion mit Organisationsbezug:** in `ORG_MODULES` (`org.js`) eintragen, dieselben Stufen in `seed_team_ranks()` (neue Migration) ergänzen und bestehenden Organisationen per Migration Zeilen für ihre Ränge geben, sonst hat dort niemand außer den Inhabern Zugriff. Erinnerungen über `teamUsers(team, modul)` verschicken.
 - **Niemand vergibt mehr, als er selbst hat:** `teams.js` prüft bei Rang, Gruppe, persönlichem Recht und Zuweisung jede gestiegene Stufe gegen die eigene (`assertWithin`), Nicht-Inhaber verwalten nur Mitglieder und Ränge unter dem eigenen Rang. Neue Verwaltungswege dort mit absichern. Inhaber (`team_members.is_owner`) dürfen immer alles; der letzte Inhaber kann nicht gehen.
@@ -81,7 +83,7 @@ Nie gegen die laufende Instanz `budget-manager` testen, dort liegen echte Daten.
 | `api.mjs` | Alle API-Bereiche, Rollen, IDOR, ungültige Eingaben, ToDo-Job im Worker-Container; jede 5xx-Antwort ist ein Fehler |
 | `auth.mjs` | Refresh-Rotation, 2FA, Recovery-Codes, Passwort, Reset, Einladung |
 | `browser.mjs` | Geführte Abläufe im Browser, Mobilbreite, Konsole |
-| `crawl.mjs` | Klickt jede Aktionsart auf jeder Seite als Viewer, Owner, Admin, danach destruktiv |
+| `crawl.mjs` | Klickt jede Aktionsart auf jeder Seite als Viewer, Owner, Admin, danach destruktiv; je Durchlauf mehrere Browser (`CRAWL_WORKERS`), nur bestimmte Rollen mit `CRAWL_ROLES` |
 | `upgrade.mjs` | Update von einem alten Stand im selben Browserprofil, ohne Cache-Löschen |
 
 Zusätzlich vor einem Release: `upgrade.mjs` ab dem zuletzt ausgerollten Stand, Migrationen auf einer Wegwerf-Kopie des aktuellen Stands, alle Worker-Jobs mit Daten (`runJob`), Restore bei laufendem Stack und in eine leere DB. Der Test-Stack braucht ein eigenes `APP_VERSION`, sonst wird das produktive Image-Tag überschrieben.
@@ -124,12 +126,14 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 - Mit „Lesen“ Bestenliste sehen und eigene Ergebnisse eintragen und löschen; mit „Lesen & Schreiben“ Strecken verwalten und fremde Ergebnisse löschen. Fremde sehen nichts.
 
 ### Objekte
-- Objekte sind privat oder pro Datensatz einer Organisation freigegeben (ändern ab „Lesen & Schreiben“, löschen mit „Verwalten“). Fahrzeuge (Service nach Datum/km, Verbandskasten), Häuser (Wartung), Personen (auch ohne Login), Schlüssel (freie Art, Kopien, Ausgabe, Rückgabe, verloren, QR-Code, Inventur).
+- Fahrzeuge, Häuser und Schlüssel sind privat oder pro Datensatz einer Organisation freigegeben (ändern ab „Lesen & Schreiben“, löschen mit „Verwalten“). Fahrzeuge (Service nach Datum/km, Verbandskasten), Häuser (Wartung), Schlüssel (freie Art, Kopien, Ausgabe, Rückgabe, verloren, QR-Code, Inventur).
+- **Personen sind global (Entscheidung des Auftraggebers vom 2026-11-09):** eine gemeinsame Liste für das ganze System, auch Personen ohne Login. Jeder mit `person:read` sieht alle und verwendet sie überall (Schlüssel, Häuser, Akten, Lizenzen, Schulungen jeder Organisation und solo). Anlegen, Ändern, Löschen nur über die Rollenrechte `person:create|update|delete`, mit Audit-Log. Die Personenübersicht zeigt Akten, Lizenzen und Schulungen nur, soweit die eigenen Rechte reichen.
+- **Personen per CSV (Wunsch des Auftraggebers vom 2026-11-09):** Export mit `person:export` (Spalten ID, Name, Art, Funktion, Telefon, E-Mail, Aktiv, Notiz; lässt sich unverändert wieder importieren). Import mit `person:create`, erst Prüfen, dann Importieren. Mit ID ändern (zusätzlich `person:update`, nur Spalten der Datei), ohne ID anlegen; vorhandene oder doppelte Namen werden übersprungen, damit ein zweiter Import nichts verdoppelt. Fehlerhafte Zeilen fallen mit Zeilennummer weg. Regeln in `planPeopleImport` (`people.js`), ohne Datenbank testbar.
 - Tür-PINs verschlüsselt, nie in Listen, nur nach Passwort und ggf. 2FA sichtbar, jeder Zugriff im Audit-Log.
 - „Verwaltung“ bündelt Übersicht, Kosten, Protokoll und Auditlog (nur mit `audit:read`). Keine Versicherungsangabe an Fahrzeugen.
 
 ### Akten, Schulungen, Lizenzen, Dokumentationen (Entscheidungen des Auftraggebers vom 2026-11-08)
-- Alle vier solo oder pro Organisation, Bereich beim Anlegen fest. Rechte nach „Organisationen und Rechte“; Fremde sehen nichts; zusätzlich Katalogrechte `casefile`, `training`, `license`, `doc`.
+- Alle vier solo oder pro Organisation, Bereich beim Anlegen fest. Rechte nach „Organisationen und Rechte“; Fremde sehen nichts; zusätzlich Katalogrechte `casefile`, `training`, `license`, `doc`. Beteiligte Personen, Lizenzinhaber und Teilnehmer-Personen kommen aus der globalen Personenliste.
 - **Akten:** Fall- bzw. Vorgangsakten mit Aktenzeichen (automatisch `Jahr-Nummer`), Status offen/ruhend/abgeschlossen, beteiligten Personen mit Rolle, chronologischen Einträgen und Anhängen. Auf jeder Person zeigt die „Übersicht“ alle Akten und Einträge zu ihr, dazu Lizenzen und Schulungen.
 - **Lizenzen für Personen:** frei anlegbare Lizenzarten mit Standard-Gültigkeit; Lizenz mit Nummer, Aussteller, Ausstellung, Ablauf, Status gültig/gesperrt/entzogen mit Begründung; Erinnerung 30 Tage vorher und nach Ablauf.
 - **Schulungen, Teilnahme und Nachweis:** Termine, Teilnehmer (Benutzer oder Personen), Ergebnis, Gültigkeit mit Erinnerung, Übersicht wer was hat. Keine Lerninhalte mit Test.
@@ -143,6 +147,10 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 - **Akten:** Aktenarten mit eigenen Rechten und zusätzlich einzelne Akten beschränkbar auf Ränge (samt allen höheren), Gruppen und Mitglieder; Inhaber und Ersteller sehen sie immer, sich selbst aussperren geht nicht.
 - **Hierarchie:** Nicht-Inhaber verwalten nur Mitglieder und Ränge unter dem eigenen Rang und vergeben nie mehr, als sie selbst haben. Inhaber dürfen alles; mindestens ein Inhaber bleibt.
 - Die appweiten Rollen aus der Administration gelten zusätzlich (z. B. `casefile:read`); fehlt dort ein Recht, hilft auch die Organisation nicht.
+
+### Texte mit Markdown (Wunsch des Auftraggebers vom 2026-11-09)
+- „Wirklich volles Markdown“ in Notizen, ToDo-Notizen, Dokumentationen, Akten (Sachverhalt, Einträge), Schulungen, Lizenzarten, Streckennotizen, Tickets und Kommentaren: CommonMark mit GitHub-Erweiterungen (Tabellen, Aufgabenlisten, Durchstreichen, automatische Links, Fußnoten, Hinweis-Kästen). Dazu eine Werkzeugleiste über dem Textfeld mit Vorschau, Nebeneinander, Vollbild, Hilfe und Tastenkürzeln.
+- Sicher vor Code aus dem Text: HTML erscheint als Text bis auf wenige Tags ohne Attribute; externe Bilder nur als Link (Datenschutz, CSP). Ein Zeilenumbruch bleibt ein Zeilenumbruch.
 
 ### Kalender und Benachrichtigungen
 - Monat, Woche, Tag, Agenda; eigene Termine plus abgeleitete (Zahlungen, Service, Schlüsselfristen, Wartung, Schulungstermine, Ablauf von Lizenzen und Schulungsnachweisen, Feiertage); iCal-Abo. Glocke mit Zähler. Täglicher Job erinnert an Termine, Service, Verbandskasten, Schlüsselrückgaben, ablaufende Lizenzen und Schulungsnachweise.
@@ -166,5 +174,6 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 - **Stunden für abgeschlossene Wochen**, die nachgetragen werden, bringen keinen Bonus mehr. Nachtschichten sind davon seit Migration 017 nicht mehr betroffen. Einträge über Mitternacht von vor dieser Regel wurden nicht umgerechnet.
 - **„Heute“ ist im Server UTC:** `today()` in `lib.js` nimmt das UTC-Datum. Zwischen Mitternacht und 1 Uhr (Sommer 2 Uhr) ist „heute“ deshalb noch gestern, etwa beim Abschlussdatum einer Akte oder als Vorgabe für Buchungen. Ein Umstieg auf `TZ` betrifft viele Stellen und ist noch nicht entschieden; Tests mit Datum schlagen in diesem Zeitfenster fehl.
 - **Eigene Rollen** aus der Administration bekommen neue Katalogrechte nicht automatisch; Admin und User schon.
+- **Doppelte Personen:** Migration 019 hat private und Organisations-Personen unverändert zusammengelegt; gleichnamige Personen stehen doppelt in der Liste. Zusammenführen gibt es nicht, ebenso keine Suche in den Auswahllisten.
 - **Beträge** erscheinen überall in der Profilwährung, auch bei Konten in anderer Währung; umgerechnet wird nichts.
 - Nicht enthalten: SSO/OIDC, LDAP, Bankanbindung, MT940, S3/SFTP-Backupziele, E-Mail-Bestätigung bei Registrierung, Restore in der Oberfläche.

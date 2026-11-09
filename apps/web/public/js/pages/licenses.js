@@ -2,13 +2,12 @@ import { api } from '../api.js';
 import { $, esc, empty, fdate, tag, openForm, confirmBox, toast, todayStr, debounce } from '../ui.js';
 import { can } from '../app.js';
 import { writableTeams, visibilityField, scopeTag } from './common.js';
-import { markdownBlock, MARKDOWN_HELP } from '../markdown.js';
+import { markdownBlock } from '../markdown.js';
 
 export const LICENSE_STATE = {
   valid: ['ok', 'Gültig'], expiring: ['warn', 'Läuft bald ab'], expired: ['bad', 'Abgelaufen'], suspended: ['warn', 'Gesperrt'], revoked: ['bad', 'Entzogen'],
 };
 const stateTag = (state) => tag(...(LICENSE_STATE[state] || ['', state]));
-const sameScope = (a, b) => (a.team_id ? a.team_id === b.team_id : !b.team_id && a.owner_user_id === b.owner_user_id);
 
 const typeForm = (type, teams) => openForm({
   title: type ? 'Lizenzart bearbeiten' : 'Neue Lizenzart',
@@ -16,7 +15,7 @@ const typeForm = (type, teams) => openForm({
     { name: 'name', label: 'Name', value: type?.name, required: true, maxlength: 100, placeholder: 'z. B. Führerschein, Waffenschein', full: true },
     { name: 'validity_months', label: 'Standard-Gültigkeit in Monaten', type: 'number', min: 1, step: 1, value: type?.validity_months ?? '', help: 'Leer heißt unbefristet. Neue Lizenzen laufen dann so lange.' },
     ...(type ? [] : [visibilityField(teams, null)]),
-    { name: 'description', label: 'Beschreibung', type: 'textarea', value: type?.description, maxlength: 2000, full: true, help: MARKDOWN_HELP },
+    { name: 'description', label: 'Beschreibung', type: 'textarea', value: type?.description, maxlength: 2000, full: true, markdown: true },
   ],
   onSubmit: async (values) => {
     const body = { name: values.name.trim(), description: values.description, validity_months: values.validity_months ? Number(values.validity_months) : null };
@@ -30,12 +29,13 @@ async function licenseForm(license, types, people) {
   const writableTypes = types.filter((t) => t.level >= 3);
   if (!license && !writableTypes.length) { toast('Lege zuerst eine Lizenzart an', true); return false; }
   const type = license ? types.find((t) => t.id === license.type_id) : writableTypes[0];
-  const personOptions = (forType) => people.filter((p) => sameScope(forType, p) && (p.active || p.id === license?.person_id)).map((p) => ({ v: p.id, l: p.name }));
+  // Personen sind global: Jede aktive Person passt zu jeder Lizenzart
+  const personOptions = people.filter((p) => p.active).map((p) => ({ v: p.id, l: p.name }));
   const fields = license ? [
     { type: 'html', html: `<p><b>${esc(license.type_name)}</b> für <b>${esc(license.person_name || 'unbekannte Person')}</b></p>` },
   ] : [
     { name: 'type_id', label: 'Lizenzart', type: 'select', options: writableTypes.map((t) => ({ v: t.id, l: `${t.name}${t.team_name ? ` · ${t.team_name}` : ''}` })), value: type.id },
-    { name: 'person_id', label: 'Person', type: 'select', options: personOptions(type), help: 'Personen aus demselben Bereich wie die Lizenzart (Organisation oder privat).' },
+    { name: 'person_id', label: 'Person', type: 'select', options: personOptions },
   ];
   fields.push(
     { name: 'number', label: 'Nummer', value: license?.number, maxlength: 60 },
@@ -49,7 +49,7 @@ async function licenseForm(license, types, people) {
     ] : []),
     { name: 'note', label: 'Notiz', type: 'textarea', value: license?.note, maxlength: 2000, full: true },
   );
-  const result = openForm({
+  return openForm({
     title: license ? 'Lizenz bearbeiten' : 'Lizenz ausstellen',
     fields,
     onSubmit: async (values) => {
@@ -58,7 +58,7 @@ async function licenseForm(license, types, people) {
         Object.assign(body, { valid_until: values.valid_until || null, status: values.status, status_reason: values.status_reason.trim() });
         await api.patch(`/licenses/${license.id}`, body);
       } else {
-        if (!values.person_id) throw new Error('Für diese Lizenzart gibt es keine passende Person. Lege sie unter „Personen“ im selben Bereich an.');
+        if (!values.person_id) throw new Error('Es gibt noch keine aktive Person. Lege sie unter „Personen“ an.');
         Object.assign(body, { type_id: values.type_id, person_id: values.person_id });
         if (values.unlimited) body.valid_until = null;
         else if (values.valid_until) body.valid_until = values.valid_until;
@@ -67,13 +67,6 @@ async function licenseForm(license, types, people) {
       toast('Lizenz gespeichert');
     },
   });
-  // Personen passen zum Bereich der gewählten Lizenzart
-  const typeSelect = document.querySelector('#f-type_id');
-  typeSelect?.addEventListener('change', () => {
-    const chosen = types.find((t) => t.id === typeSelect.value);
-    document.querySelector('#f-person_id').innerHTML = personOptions(chosen).map((o) => `<option value="${esc(o.v)}">${esc(o.l)}</option>`).join('');
-  });
-  return result;
 }
 
 export async function render(view) {

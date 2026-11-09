@@ -6,7 +6,7 @@ import { audit } from '../audit.js';
 import { patchSchema } from '../validation.js';
 import { today } from '../lib.js';
 import { receiveUpload, sendUpload, removeUpload } from '../uploads.js';
-import { uuid, isoDate, assertPersonInScope, personJoin } from '../records.js';
+import { uuid, isoDate, assertPerson, personJoin } from '../records.js';
 
 const STATUS = ['open', 'dormant', 'closed'];
 const fileFields = z.object({
@@ -103,7 +103,7 @@ export default async function routes(app) {
     const openedOn = b.opened_on || today();
     const closedOn = b.status === 'closed' ? b.closed_on || today() : null;
     checkDates(openedOn, closedOn);
-    for (const p of b.people) await assertPersonInScope(p.person_id, scope);
+    for (const p of b.people) await assertPerson(p.person_id);
     if (new Set(b.people.map((p) => p.person_id)).size !== b.people.length) throw bad('Eine Person ist doppelt angegeben');
     const created = await tx(async (client) => {
       const number = b.file_number || await nextFileNumber(client, scope);
@@ -130,12 +130,12 @@ export default async function routes(app) {
          LEFT JOIN team_ranks r ON r.id=a.rank_id LEFT JOIN team_groups g ON g.id=a.group_id LEFT JOIN users u ON u.id=a.user_id
          WHERE a.case_file_id=$1 ORDER BY name`, [file.id]) : [],
       many(`SELECT cp.person_id, cp.role, pe.name, pe.kind, pe.function, pe.active FROM case_file_people cp
-        ${personJoin('pe', 'cp.person_id', '$2')} WHERE cp.case_file_id=$1 ORDER BY pe.name NULLS LAST`, [file.id, req.user.id]),
+        ${personJoin('pe', 'cp.person_id')} WHERE cp.case_file_id=$1 ORDER BY pe.name NULLS LAST`, [file.id]),
       many(`SELECT e.id, e.entry_date, e.kind, e.body, e.person_id, pe.name person_name, e.created_at, e.updated_at,
           cu.name created_by_name, uu.name updated_by_name
-        FROM case_file_entries e ${personJoin('pe', 'e.person_id', '$2')}
+        FROM case_file_entries e ${personJoin('pe', 'e.person_id')}
           LEFT JOIN users cu ON cu.id=e.created_by LEFT JOIN users uu ON uu.id=e.updated_by
-        WHERE e.case_file_id=$1 ORDER BY e.entry_date DESC, e.created_at DESC`, [file.id, req.user.id]),
+        WHERE e.case_file_id=$1 ORDER BY e.entry_date DESC, e.created_at DESC`, [file.id]),
       many(`SELECT a.id, a.original_name, a.mime, a.size, a.created_at, u.name uploaded_by_name FROM case_file_attachments a
         LEFT JOIN users u ON u.id=a.uploaded_by WHERE a.case_file_id=$1 ORDER BY a.created_at`, [file.id]),
     ]);
@@ -179,7 +179,7 @@ export default async function routes(app) {
   app.post('/case-files/:id/people', authz('casefile:update'), async (req) => {
     const { file } = await loadFile(req, req.params.id, write);
     const b = personBody.parse(req.body);
-    await assertPersonInScope(b.person_id, file);
+    await assertPerson(b.person_id);
     await q(
       'INSERT INTO case_file_people(case_file_id,person_id,role) VALUES ($1,$2,$3) ON CONFLICT (case_file_id,person_id) DO UPDATE SET role=EXCLUDED.role',
       [file.id, b.person_id, b.role],
@@ -369,7 +369,7 @@ export default async function routes(app) {
   // ---- Personenakte: alles zu einer Person, soweit die Rechte reichen
   app.get('/people/:id/record', authz('person:read'), async (req) => {
     const personId = uuid.parse(req.params.id);
-    const person = await one(`SELECT pe.* FROM people pe WHERE pe.id=$1 AND ${visibleSql('pe', 'person', '$2')}`, [personId, req.user.id]);
+    const person = await one('SELECT * FROM people WHERE id=$1', [personId]);
     if (!person) throw notFound();
     const result = { person, case_files: null, entries: null, licenses: null, trainings: null };
     if (can(req, 'casefile:read')) {

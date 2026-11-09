@@ -150,8 +150,8 @@ async function formKey(o, props, vehicles) {
     onSubmit: (v) => save('keys', o, { code: v.code.trim(), label: v.label.trim(), kind: v.kind, copies: Number(v.copies) || 1, property_id: v.property_id || null, vehicle_id: v.vehicle_id || null, note: v.note, ...ownershipBody(v), ...costBody(v) }),
   });
 }
-async function formPerson(o) {
-  const ownership = await ownershipFields(o, 'person');
+// Personen sind global: keine Sichtbarkeit, alle mit „Personen lesen“ sehen und nutzen sie
+function formPerson(o) {
   return openForm({
   title: o ? 'Person bearbeiten' : 'Neue Person', fields: [
     { name: 'name', label: 'Name', value: o?.name, required: true },
@@ -160,21 +160,78 @@ async function formPerson(o) {
     { name: 'phone', label: 'Telefon', value: o?.phone },
     { name: 'email', label: 'E-Mail', type: 'email', value: o?.email, full: true },
     { name: 'active', label: 'Aktiv', type: 'checkbox', value: o ? o.active : true },
-    { name: 'note', label: 'Notiz', type: 'textarea', value: o?.note, full: true },
-    ...ownership,
+    { name: 'note', label: 'Notiz', type: 'textarea', value: o?.note, full: true, help: 'Für alle Benutzer mit Zugriff auf Personen sichtbar.' },
   ],
-  onSubmit: (v) => save('people', o, { name: v.name.trim(), kind: v.kind, function: v.function, phone: v.phone, email: v.email, active: v.active, note: v.note, ...ownershipBody(v) }),
+  onSubmit: (v) => save('people', o, { name: v.name.trim(), kind: v.kind, function: v.function, phone: v.phone, email: v.email, active: v.active, note: v.note }),
   });
 }
 
-// Stufe in der Organisation: ändern ab „Lesen & Schreiben“, löschen mit „Verwalten“; dazu die allgemeinen Rechte der Rolle
+// Excel speichert CSV oft als Windows-1252 statt UTF-8; ohne diesen Rückfall würden Umlaute kaputtgehen
+async function readCsvFile(file) {
+  const bytes = await file.arrayBuffer();
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { return new TextDecoder('windows-1252').decode(bytes); }
+}
+const count = (n, one, many) => `${n.toLocaleString('de-DE')} ${n === 1 ? one : many}`;
+function importResultHtml(r) {
+  // In der Vorschau „wird/werden angelegt“, danach nur „angelegt“
+  const will = (n, word) => (r.preview ? `${n === 1 ? 'wird' : 'werden'} ${word}` : word);
+  const parts = [[r.created, 'neue Person', 'neue Personen', (n) => will(n, 'angelegt')], [r.updated, 'Person', 'Personen', (n) => will(n, 'geändert')],
+    [r.unchanged, 'Person', 'Personen', () => 'unverändert'], [r.skipped, 'Zeile', 'Zeilen', () => 'übersprungen'], [r.errors, 'Zeile', 'Zeilen', () => 'fehlerhaft']]
+    .filter(([n]) => n > 0).map(([n, one, many, verb]) => `${count(n, one, many)} ${verb(n)}`);
+  const nothing = !r.created && !r.updated;
+  const head = `<div class="note ${nothing ? 'warn' : 'info'}"><b>${r.preview ? 'Prüfung' : 'Import'}:</b> ${parts.join(' · ') || 'keine Personen gefunden'}${nothing && r.preview ? '. Nichts zu importieren.' : r.preview ? '. Fehlerhafte und übersprungene Zeilen werden nicht importiert.' : ''}</div>`;
+  const ignored = r.ignored_columns.length ? `<p class="muted">Nicht erkannte Spalten werden ignoriert: ${esc(r.ignored_columns.join(', '))}</p>` : '';
+  const problems = r.problems.length ? `<div class="person-record" style="max-height:220px;overflow:auto">${r.problems.map((p) => `<div class="list-item"><div class="grow"><b>Zeile ${p.line}</b>${p.name ? ` ${esc(p.name)}` : ''}<small>${p.kind === 'error' ? 'Fehler' : 'Übersprungen'}: ${esc(p.message)}</small></div></div>`).join('')}
+    ${r.problems.length < r.errors + r.skipped ? `<p class="muted">… und ${r.errors + r.skipped - r.problems.length} weitere</p>` : ''}</div>` : '';
+  return head + ignored + problems;
+}
+// CSV-Import in zwei Schritten: „Prüfen“ zeigt, was passieren würde, „Importieren“ schreibt genau diese Datei
+async function importPeople() {
+  let checked = null;
+  const done = openForm({
+    title: 'Personen importieren', wide: true, submit: 'Prüfen',
+    fields: [
+      { type: 'html', html: `<p class="muted">CSV-Datei mit Kopfzeile, getrennt durch Semikolon, Komma oder Tab. Spalten wie beim CSV-Export: <b>Name</b> (Pflicht), Art (Mitarbeiter, Extern oder Familie), Funktion, Telefon, E-Mail, Aktiv (ja oder nein), Notiz. Zeilen <b>mit ID</b> ändern die vorhandene Person, Zeilen ohne ID legen eine neue an; gibt es den Namen schon, wird die Zeile übersprungen. Fehlende Spalten bleiben unverändert. Am einfachsten exportierst du die Liste, bearbeitest sie und liest sie wieder ein.</p>` },
+      { name: 'file', label: 'CSV-Datei', type: 'file', accept: '.csv,.txt,text/csv', required: true, full: true },
+      { type: 'html', html: '<div id="p-import-result"></div>' },
+    ],
+    onSubmit: async (_values, modal) => {
+      const file = $('#f-file', modal).files[0];
+      if (!file) throw new Error('Wähle eine CSV-Datei aus');
+      const csv = await readCsvFile(file);
+      const submit = $('button[type=submit]', modal);
+      if (csv !== checked) {
+        const r = await api.post('/people/import', { csv, preview: true });
+        $('#p-import-result', modal).innerHTML = importResultHtml(r);
+        checked = r.created || r.updated ? csv : null;
+        submit.textContent = checked ? 'Importieren' : 'Prüfen';
+        return false;
+      }
+      const r = await api.post('/people/import', { csv });
+      toast(`Import: ${count(r.created, 'Person', 'Personen')} angelegt, ${r.updated} geändert${r.errors + r.skipped ? `, ${r.errors + r.skipped} Zeilen nicht übernommen` : ''}`);
+      return true;
+    },
+  });
+  // Neue Datei gewählt: erst wieder prüfen
+  const modal = $('#modals .modal:last-child');
+  $('#f-file', modal)?.addEventListener('change', () => { checked = null; $('button[type=submit]', modal).textContent = 'Prüfen'; $('#p-import-result', modal).innerHTML = ''; });
+  return done;
+}
+
+// Stufe in der Organisation: ändern ab „Lesen & Schreiben“, löschen mit „Verwalten“; dazu die allgemeinen Rechte der Rolle.
+// Personen sind global und haben keine Stufe: Für sie zählen allein die Rechte der Rolle.
 const writable = (item) => item.level >= 3;
-const actions = (item, perm) => (writable(item) ? `${can(`${perm}:update`) ? `<button class="btn ghost sm" data-edit="${item.id}">Bearbeiten</button>` : ''}${can(`${perm}:delete`) && item.level >= 4 ? ` <button class="btn ghost sm" data-del="${item.id}">Löschen</button>` : ''}` : '');
+const actions = (item, perm) => {
+  const global = perm === 'person';
+  const edit = can(`${perm}:update`) && (global || writable(item));
+  const del = can(`${perm}:delete`) && (global || item.level >= 4);
+  return `${edit ? `<button class="btn ghost sm" data-edit="${item.id}">Bearbeiten</button>` : ''}${del ? ` <button class="btn ghost sm" data-del="${item.id}">Löschen</button>` : ''}`;
+};
 
 const SECTIONS = {
   vehicles: { title: 'Fahrzeuge', desc: 'Fuhrpark, Service und Kosten', tabs: [['vehicles', 'Fahrzeuge']] },
   properties: { title: 'Häuser', desc: 'Häuser, Wohnungen und Wartung', tabs: [['properties', 'Häuser']] },
-  people: { title: 'Personen', desc: 'Mitarbeiter, Familie und Externe', tabs: [['people', 'Personen']] },
+  people: { title: 'Personen', desc: 'Gemeinsame Personenliste für alle: Mitarbeiter, Familie und Externe', tabs: [['people', 'Personen']] },
   keys: { title: 'Schlüssel', desc: 'Schlüsselbestand und Ausgabe', tabs: [['keys', 'Schlüssel']] },
   manage: { title: 'Verwaltung', desc: 'Übersicht, Kosten, Protokoll und Auditlog', tabs: [['overview', 'Übersicht'], ['costs', 'Kosten'], ['log', 'Protokoll'], ['audit', 'Auditlog']] },
 };
@@ -246,7 +303,8 @@ export async function render(view, params, section) {
     },
     async people(el) {
       await fetchAll();
-      el.innerHTML = `<div class="card">${D.people.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Art</th><th>Funktion</th><th>Kontakt</th><th>Schlüssel</th><th>Status</th><th></th></tr></thead><tbody>${D.people.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td>${PKIND[p.kind]}</td><td>${esc(p.function)}</td><td>${esc(p.email || p.phone || '–')}</td><td>${p.keys}</td><td><span class="tag ${p.active ? 'ok' : 'warn'}">${p.active ? 'Aktiv' : 'Inaktiv'}</span></td><td style="white-space:nowrap"><button class="btn ghost sm" data-record="${p.id}">Übersicht</button> ${actions(p, 'person')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Personen.')}</div>`;
+      const tools = `${can('person:export') ? '<button class="btn ghost sm" id="p-csv">CSV-Export</button>' : ''}${can('person:create') ? '<button class="btn ghost sm" id="p-import">CSV-Import</button>' : ''}`;
+      el.innerHTML = `<div class="card">${tools ? `<div class="toolbar">${tools}</div>` : ''}${D.people.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Art</th><th>Funktion</th><th>Kontakt</th><th>Schlüssel</th><th>Status</th><th></th></tr></thead><tbody>${D.people.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td>${PKIND[p.kind]}</td><td>${esc(p.function)}</td><td>${esc(p.email || p.phone || '–')}</td><td>${p.keys}</td><td><span class="tag ${p.active ? 'ok' : 'warn'}">${p.active ? 'Aktiv' : 'Inaktiv'}</span></td><td style="white-space:nowrap"><button class="btn ghost sm" data-record="${p.id}">Übersicht</button> ${actions(p, 'person')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Personen.')}</div>`;
     },
     async costs(el) {
       const c = await api.get('/assets/costs');
@@ -391,6 +449,8 @@ export async function render(view, params, section) {
       else if (g('[data-record]')) await showPersonRecord(g('[data-record]').dataset.record);
       else if (g('#scan-keys')) await scanKeyQr();
       else if (g('#a-csv')) await api.download('/admin/audit/export.csv', 'audit.csv');
+      else if (g('#p-csv')) await api.download('/people/export.csv', 'personen.csv');
+      else if (g('#p-import')) changed = await importPeople();
       if (changed) show();
     } catch (x) { toast(x.message, true); }
   });

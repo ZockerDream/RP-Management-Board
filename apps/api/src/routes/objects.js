@@ -1,21 +1,24 @@
 import { z } from 'zod';
 import QRCode from 'qrcode';
 import { one, many, q, tx } from '../db.js';
-import { authz, bad, notFound, budgetAccess, forbidden } from '../authz.js';
+import { authz, bad, notFound, budgetAccess, forbidden, can } from '../authz.js';
 import { addInterval, today } from '../lib.js';
 import { audit } from '../audit.js';
 import { config } from '../config.js';
 import { decrypt, encrypt, totpValid, verifyPassword } from '../security.js';
 import { patchSchema } from '../validation.js';
 import { LEVEL, levelSql, visibleSql, recordLevel, recordOwner } from '../org.js';
+import { assertPerson } from '../records.js';
+import { personSchema, PERSON_FIELDS, peopleCsv, readPeopleCsv, planPeopleImport } from '../people.js';
+import { CsvError } from '../csv.js';
 
 const money = z.union([z.string(), z.number()]).transform((v) => String(v).replace(',', '.')).refine((v) => /^\d{1,12}(\.\d{1,2})?$/.test(v), 'Ungültiger Betrag');
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const id = z.string().uuid();
 const str = (n = 200) => z.string().max(n);
 const ownerFields = { scope: z.enum(['personal', 'team']).default('personal'), team_id: id.nullish() };
-// Funktion in der Organisation je Tabelle; sichtbar ab „Lesen“
-const MODULE_OF = { properties: 'property', vehicles: 'vehicle', keys: 'key', people: 'person' };
+// Funktion in der Organisation je Tabelle; sichtbar ab „Lesen“. Personen sind global und gehören keiner Organisation.
+const MODULE_OF = { properties: 'property', vehicles: 'vehicle', keys: 'key' };
 const ownerSql = (alias, module, n = '$1') => visibleSql(alias, module, n);
 
 // Ändern ab „Lesen & Schreiben“, Löschen mit „Verwalten“
@@ -148,12 +151,12 @@ const keyStatusSql = `
     (SELECT count(*)::int FROM key_assignments a WHERE a.key_id=k.id AND a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at < current_date) overdue,
     (SELECT count(*)::int FROM key_assignments a WHERE a.key_id=k.id AND a.returned_at IS NULL AND a.lost_at IS NOT NULL) lost,
     (SELECT COALESCE(json_agg(json_build_object('id', a.id, 'copy_no', a.copy_no, 'person_id', pe.id, 'person', pe.name, 'issued_at', a.issued_at, 'due_at', a.due_at, 'lost', a.lost_at IS NOT NULL, 'receipt_signed', a.receipt_signed) ORDER BY a.copy_no), '[]')
-       FROM key_assignments a LEFT JOIN people pe ON pe.id=a.person_id AND ${ownerSql('pe', 'person')} WHERE a.key_id=k.id AND a.returned_at IS NULL) holders
+       FROM key_assignments a LEFT JOIN people pe ON pe.id=a.person_id WHERE a.key_id=k.id AND a.returned_at IS NULL) holders
   FROM keys k LEFT JOIN properties p ON p.id=k.property_id AND ${ownerSql('p', 'property')}
   LEFT JOIN vehicles v ON v.id=k.vehicle_id AND ${ownerSql('v', 'vehicle')}`;
 const withStatus = (k) => ({ ...k, status: k.lost > 0 ? 'lost' : k.overdue > 0 ? 'overdue' : k.issued > 0 ? 'out' : 'available' });
 
-// Unterlagen zu einer Person: Sie bleiben vollständig, deshalb lässt sich die Person weder löschen noch verschieben
+// Unterlagen zu einer Person: Sie bleiben vollständig, deshalb lässt sich die Person nicht löschen
 async function personRecords(personId) {
   const r = await one(
     `SELECT EXISTS (SELECT 1 FROM case_file_people WHERE person_id=$1) OR EXISTS (SELECT 1 FROM case_file_entries WHERE person_id=$1) files,
@@ -162,49 +165,80 @@ async function personRecords(personId) {
   );
   return [r.files && 'Akten', r.licenses && 'Lizenzen', r.trainings && 'Schulungsnachweise'].filter(Boolean);
 }
-const personHasRecords = async (personId) => (await personRecords(personId)).length > 0;
 
 export default async function routes(app) {
-  // ---- Personen
-  const personSchema = z.object({
-    name: z.string().min(1).max(100), kind: z.enum(['employee', 'external', 'family']).default('employee'), function: str(100).default(''),
-    phone: str(40).default(''), email: z.union([z.string().email(), z.literal('')]).default(''),     active: z.boolean().default(true), note: str(2000).default(''), ...ownerFields,
-  });
+  // ---- Personen: eine globale Liste für alle; wer was darf, regeln allein die Rollenrechte person:*
   app.get('/people', authz('person:read'), async (req) =>
-    many(`SELECT pe.*, ${levelSql('pe', 'person')} AS level, (SELECT count(*)::int FROM key_assignments a JOIN keys k ON k.id=a.key_id
+    many(`SELECT pe.*, (SELECT count(*)::int FROM key_assignments a JOIN keys k ON k.id=a.key_id
         WHERE a.person_id=pe.id AND ${ownerSql('k', 'key')} AND a.returned_at IS NULL AND a.lost_at IS NULL) keys
-      FROM people pe WHERE ${ownerSql('pe', 'person')} ORDER BY active DESC, name`, [req.user.id]));
+      FROM people pe ORDER BY pe.active DESC, pe.name`, [req.user.id]));
   app.post('/people', authz('person:create'), async (req) => {
     const b = personSchema.parse(req.body);
-    const owner = await ownerValues(req, b, 'person');
-    return one('INSERT INTO people(name,kind,function,phone,email,active,note,owner_user_id,team_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id', [b.name, b.kind, b.function, b.phone, b.email, b.active, b.note, owner.owner_user_id, owner.team_id]);
+    const row = await one('INSERT INTO people(name,kind,function,phone,email,active,note) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id', [b.name, b.kind, b.function, b.phone, b.email, b.active, b.note]);
+    await audit(req, 'people.created', 'people', row.id, { name: b.name });
+    return row;
   });
   app.patch('/people/:id', authz('person:update'), async (req) => {
-    const before = await one('SELECT * FROM people WHERE id=$1', [req.params.id]);
-    if (!before) throw notFound();
-    await assertOwner(req, before, 'person');
-    const b = patchSchema(personSchema).parse(req.body);
-    const patch = { ...b };
-    if (patch.scope) {
-      Object.assign(patch, await ownerValues(req, { scope: patch.scope, team_id: patch.team_id }, 'person'));
-      // Akten, Lizenzen und Nachweise gehören zum Bereich der Person; ein Wechsel würde sie für die Beteiligten unsichtbar machen
-      const moved = patch.team_id !== before.team_id || patch.owner_user_id !== before.owner_user_id;
-      if (moved && await personHasRecords(before.id)) throw bad('Person hat Akten, Lizenzen oder Schulungsnachweise und kann die Sichtbarkeit nicht wechseln');
-    } else delete patch.team_id;
-    delete patch.scope;
+    const personId = id.parse(req.params.id);
+    const patch = patchSchema(personSchema).parse(req.body);
     const keys = Object.keys(patch);
-    if (keys.length) await q(`UPDATE people SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1`, [req.params.id, ...keys.map((key) => patch[key])]);
+    const row = keys.length
+      ? await one(`UPDATE people SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1 RETURNING id`, [personId, ...keys.map((key) => patch[key])])
+      : await one('SELECT id FROM people WHERE id=$1', [personId]);
+    if (!row) throw notFound();
+    if (keys.length) await audit(req, 'people.updated', 'people', personId, { fields: keys });
     return { ok: true };
   });
   app.delete('/people/:id', authz('person:delete'), async (req) => {
-    const person = await one('SELECT * FROM people WHERE id=$1', [req.params.id]);
+    const person = await one('SELECT * FROM people WHERE id=$1', [id.parse(req.params.id)]);
     if (!person) throw notFound();
-    await assertOwner(req, person, 'person', LEVEL.MANAGE);
-    if (await one('SELECT 1 FROM key_assignments WHERE person_id=$1 AND returned_at IS NULL', [req.params.id])) throw bad('Person hat noch Schlüssel – zuerst zurücknehmen');
-    const linked = await personRecords(req.params.id);
+    if (await one('SELECT 1 FROM key_assignments WHERE person_id=$1 AND returned_at IS NULL', [person.id])) throw bad('Person hat noch Schlüssel – zuerst zurücknehmen');
+    const linked = await personRecords(person.id);
     if (linked.length) throw bad(`Person hat noch ${linked.join(', ')} – deaktiviere sie stattdessen`);
-    await q('DELETE FROM people WHERE id=$1', [req.params.id]);
+    await q('DELETE FROM people WHERE id=$1', [person.id]);
+    await audit(req, 'people.deleted', 'people', person.id, { name: person.name });
     return { ok: true };
+  });
+
+  // CSV-Export der ganzen Liste; Spalten wie beim Import, damit die Datei bearbeitet und wieder eingelesen werden kann
+  app.get('/people/export.csv', authz('person:export'), async (req, reply) => {
+    const rows = await many(`SELECT id, ${PERSON_FIELDS.join(', ')} FROM people ORDER BY active DESC, name`);
+    await audit(req, 'people.exported', 'people', null, { rows: rows.length });
+    reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', 'attachment; filename="personen.csv"');
+    return peopleCsv(rows);
+  });
+
+  // CSV-Import: Zeilen mit ID ändern die Person (Recht person:update), ohne ID entstehen neue; gibt es den Namen schon,
+  // wird die Zeile übersprungen. Fehlerhafte Zeilen fallen weg. preview prüft nur und schreibt nichts.
+  app.post('/people/import', { ...authz('person:create'), bodyLimit: 6 * 1024 * 1024 }, async (req) => {
+    const b = z.object({ csv: z.string().min(1).max(5_000_000), preview: z.boolean().default(false) }).parse(req.body);
+    let parsed;
+    try { parsed = readPeopleCsv(b.csv); } catch (e) {
+      if (e instanceof CsvError) throw bad(e.message);
+      throw e;
+    }
+    const existing = await many(`SELECT id, ${PERSON_FIELDS.join(', ')} FROM people`);
+    const plan = planPeopleImport(parsed.rows, existing, { canUpdate: can(req, 'person:update') });
+    const result = {
+      preview: b.preview, rows: parsed.rows.length, created: plan.create.length, updated: plan.update.length, unchanged: plan.unchanged,
+      skipped: plan.skipped, errors: plan.errors, problems: plan.problems, ignored_columns: parsed.ignored,
+    };
+    if (b.preview || (!plan.create.length && !plan.update.length)) return result;
+    await tx(async (c) => {
+      if (plan.create.length) {
+        const types = { active: 'boolean' };
+        await c.query(
+          `INSERT INTO people(${PERSON_FIELDS.join(',')}) SELECT * FROM unnest(${PERSON_FIELDS.map((k, i) => `$${i + 1}::${types[k] || 'text'}[]`).join(',')})`,
+          PERSON_FIELDS.map((k) => plan.create.map((p) => p[k])),
+        );
+      }
+      for (const u of plan.update) {
+        const keys = Object.keys(u.changes);
+        await c.query(`UPDATE people SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1`, [u.id, ...keys.map((k) => u.changes[k])]);
+      }
+    });
+    await audit(req, 'people.imported', 'people', null, { created: plan.create.length, updated: plan.update.map((u) => u.id), skipped: plan.skipped, errors: plan.errors });
+    return result;
   });
 
   // ---- Häuser / Fahrzeuge / Schlüssel
@@ -222,7 +256,7 @@ export default async function routes(app) {
       const owner = await ownerValues(req, b, K.perm);
       if (b.property_id) await assertVisible(req, 'properties', b.property_id);
       if (b.vehicle_id) await assertVisible(req, 'vehicles', b.vehicle_id);
-      if (b.responsible_person_id) await assertVisible(req, 'people', b.responsible_person_id);
+      if (b.responsible_person_id) await assertPerson(b.responsible_person_id);
       await checkCostBudget(req, b);
       const cols = [...K.cols, ...COST_COLS, 'owner_user_id', 'team_id'];
       try {
@@ -248,7 +282,7 @@ export default async function routes(app) {
       const merged = { ...before, ...b };
       if (merged.property_id) await assertVisible(req, 'properties', merged.property_id);
       if (merged.vehicle_id) await assertVisible(req, 'vehicles', merged.vehicle_id);
-      if (merged.responsible_person_id) await assertVisible(req, 'people', merged.responsible_person_id);
+      if (merged.responsible_person_id) await assertPerson(merged.responsible_person_id);
       await checkCostBudget(req, merged);
       const patch = { ...b };
       if (patch.scope) Object.assign(patch, await ownerValues(req, { scope: patch.scope, team_id: patch.team_id }, K.perm));
@@ -339,8 +373,9 @@ export default async function routes(app) {
       let n = 1;
       while ((used.includes(n) || lost.includes(n)) && n <= k.copies) n++;
       if (n > k.copies) throw bad('Keine freie Kopie verfügbar');
-      const person = (await c.query(`SELECT active FROM people pe WHERE pe.id=$1 AND ${ownerSql('pe', 'person', '$2')}`, [b.person_id, req.user.id])).rows[0];
-      if (!person?.active) throw bad('Person ist nicht aktiv');
+      const person = (await c.query('SELECT active FROM people WHERE id=$1', [b.person_id])).rows[0];
+      if (!person) throw bad('Person nicht gefunden');
+      if (!person.active) throw bad('Person ist nicht aktiv');
       const a = (await c.query('INSERT INTO key_assignments(key_id,person_id,copy_no,due_at,issued_by_user_id,receipt_signed) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [k.id, b.person_id, n, b.due_at || null, req.user.id, b.receipt_signed])).rows[0];
       await audit(req, 'key.issued', 'key', k.id, { person: b.person_id, copy: n });
       return { id: a.id, copy_no: n };
@@ -361,7 +396,7 @@ export default async function routes(app) {
     const [counts, service, maint, keys] = await Promise.all([
       one(`SELECT (SELECT count(*)::int FROM properties p WHERE ${ownerSql('p', 'property')}) properties,
             (SELECT count(*)::int FROM vehicles v WHERE ${ownerSql('v', 'vehicle')}) vehicles, (SELECT count(*)::int FROM keys k WHERE ${ownerSql('k', 'key')}) keys,
-            (SELECT count(*)::int FROM people pe WHERE pe.active AND ${ownerSql('pe', 'person')}) people,
+            (SELECT count(*)::int FROM people pe WHERE pe.active) people,
             (SELECT count(*)::int FROM key_assignments a JOIN keys k ON k.id=a.key_id WHERE ${ownerSql('k', 'key')} AND a.returned_at IS NULL AND a.lost_at IS NULL) issued`, [req.user.id]),
       many(`SELECT id, plate, make_model, service_due, odometer_km, service_due_km FROM vehicles v
         WHERE ${ownerSql('v', 'vehicle')} AND (
@@ -370,8 +405,8 @@ export default async function routes(app) {
         ) ORDER BY service_due NULLS LAST, service_due_km`, [req.user.id, soon]),
       many(`SELECT id, name, maintenance_due, maintenance_note FROM properties p WHERE ${ownerSql('p', 'property')} AND maintenance_due IS NOT NULL AND maintenance_due <= $2 ORDER BY maintenance_due`, [req.user.id, soon]),
       many(`SELECT k.id, k.label, a.due_at, a.copy_no, pe.name person, a.lost_at FROM key_assignments a JOIN keys k ON k.id=a.key_id
-            LEFT JOIN people pe ON pe.id=a.person_id AND ${ownerSql('pe', 'person', '$2')}
-            WHERE ${ownerSql('k', 'key')} AND a.returned_at IS NULL AND (a.lost_at IS NOT NULL OR a.due_at < current_date) ORDER BY a.due_at`, [req.user.id, req.user.id]),
+            LEFT JOIN people pe ON pe.id=a.person_id
+            WHERE ${ownerSql('k', 'key')} AND a.returned_at IS NULL AND (a.lost_at IS NOT NULL OR a.due_at < current_date) ORDER BY a.due_at`, [req.user.id]),
     ]);
     return { counts, vehicle_service: service, property_maintenance: maint, key_alerts: keys };
   });
@@ -390,9 +425,9 @@ export default async function routes(app) {
   app.get('/assets/log', authz('key:read'), async (req) =>
     many(
       `SELECT * FROM (
-         SELECT a.issued_at at, 'issued' event, k.label, pe.name person, a.copy_no FROM key_assignments a JOIN keys k ON k.id=a.key_id LEFT JOIN people pe ON pe.id=a.person_id AND ${ownerSql('pe', 'person')} WHERE ${ownerSql('k', 'key')}
-         UNION ALL SELECT a.returned_at, 'returned', k.label, pe.name, a.copy_no FROM key_assignments a JOIN keys k ON k.id=a.key_id LEFT JOIN people pe ON pe.id=a.person_id AND ${ownerSql('pe', 'person')} WHERE ${ownerSql('k', 'key')} AND a.returned_at IS NOT NULL
-         UNION ALL SELECT a.lost_at, 'lost', k.label, pe.name, a.copy_no FROM key_assignments a JOIN keys k ON k.id=a.key_id LEFT JOIN people pe ON pe.id=a.person_id AND ${ownerSql('pe', 'person')} WHERE ${ownerSql('k', 'key')} AND a.lost_at IS NOT NULL
+         SELECT a.issued_at at, 'issued' event, k.label, pe.name person, a.copy_no FROM key_assignments a JOIN keys k ON k.id=a.key_id LEFT JOIN people pe ON pe.id=a.person_id WHERE ${ownerSql('k', 'key')}
+         UNION ALL SELECT a.returned_at, 'returned', k.label, pe.name, a.copy_no FROM key_assignments a JOIN keys k ON k.id=a.key_id LEFT JOIN people pe ON pe.id=a.person_id WHERE ${ownerSql('k', 'key')} AND a.returned_at IS NOT NULL
+         UNION ALL SELECT a.lost_at, 'lost', k.label, pe.name, a.copy_no FROM key_assignments a JOIN keys k ON k.id=a.key_id LEFT JOIN people pe ON pe.id=a.person_id WHERE ${ownerSql('k', 'key')} AND a.lost_at IS NOT NULL
        ) l ORDER BY at DESC LIMIT 200`, [req.user.id],
     ));
 }

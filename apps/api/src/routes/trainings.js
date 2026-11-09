@@ -5,7 +5,7 @@ import { LEVEL, levelSql, visibleSql, recordLevel, recordOwner } from '../org.js
 import { audit } from '../audit.js';
 import { patchSchema } from '../validation.js';
 import { addInterval, today } from '../lib.js';
-import { uuid, isoDate, clockTime, assertPersonInScope, assertUserInScope, personJoin } from '../records.js';
+import { uuid, isoDate, clockTime, assertPerson, assertUserInScope, personJoin } from '../records.js';
 import { EXPIRY_WARNING_DAYS } from './licenses.js';
 
 const RESULTS = ['registered', 'passed', 'failed', 'absent'];
@@ -129,9 +129,9 @@ export default async function routes(app) {
         FROM training_sessions s WHERE s.training_id=$1 ORDER BY s.session_date DESC, s.start_time NULLS LAST`, [training.id]),
       many(`SELECT r.*, ${participantSql} participant, CASE WHEN r.user_id IS NOT NULL THEN 'user' ELSE 'person' END participant_kind,
           s.session_date, ${recordState} AS state
-        FROM training_records r LEFT JOIN users u ON u.id=r.user_id ${personJoin('pe', 'r.person_id', '$2')}
+        FROM training_records r LEFT JOIN users u ON u.id=r.user_id ${personJoin('pe', 'r.person_id')}
           LEFT JOIN training_sessions s ON s.id=r.session_id
-        WHERE r.training_id=$1 ORDER BY COALESCE(r.completed_on, s.session_date) DESC NULLS FIRST, participant`, [training.id, req.user.id]),
+        WHERE r.training_id=$1 ORDER BY COALESCE(r.completed_on, s.session_date) DESC NULLS FIRST, participant`, [training.id]),
     ]);
     const my = records.filter((r) => r.user_id === req.user.id && r.session_id);
     return {
@@ -140,16 +140,13 @@ export default async function routes(app) {
     };
   });
 
-  // Wählbare Teilnehmer: im Team die Mitglieder und Team-Personen, privat die eigene Person und eigene Personen
+  // Wählbare Teilnehmer: im Team die Mitglieder, privat die eigene Person; dazu alle aktiven (globalen) Personen
   app.get('/trainings/:id/candidates', authz('training:read'), async (req) => {
     const { training } = await loadTraining(req, req.params.id, LEVEL.WRITE);
     const users = training.team_id
       ? await many('SELECT u.id, u.name FROM team_members tm JOIN users u ON u.id=tm.user_id WHERE tm.team_id=$1 AND u.deleted_at IS NULL ORDER BY u.name', [training.team_id])
       : [{ id: req.user.id, name: req.user.name }];
-    const people = await many(
-      `SELECT id, name FROM people WHERE active AND ${training.team_id ? 'team_id=$1' : 'owner_user_id=$1'} ORDER BY name`,
-      [training.team_id || training.owner_user_id],
-    );
+    const people = await many('SELECT id, name FROM people WHERE active ORDER BY name');
     return { users, people };
   });
 
@@ -238,7 +235,7 @@ export default async function routes(app) {
     const b = recordFields.extend({ user_id: uuid.nullish(), person_id: uuid.nullish() }).parse(req.body);
     if (Boolean(b.user_id) === Boolean(b.person_id)) throw bad('Wähle genau einen Teilnehmer: Benutzer oder Person');
     if (b.user_id) await assertUserInScope(b.user_id, training);
-    else await assertPersonInScope(b.person_id, training);
+    else await assertPerson(b.person_id);
     const session = await loadSession(training.id, b.session_id);
     const { completedOn, validUntil } = await resolveRecord(training, { ...b, valid_until: 'valid_until' in req.body ? b.valid_until : undefined }, session);
     try {

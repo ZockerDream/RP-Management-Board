@@ -27,7 +27,7 @@ export const PERMISSION_CATALOG = [
   { resource: 'goal', label: 'Sparziele', actions: R },
   { resource: 'report', label: 'Berichte', actions: ['read', 'create', 'export'] },
   { resource: 'calendar', label: 'Kalender', actions: R },
-  { resource: 'person', label: 'Personen', actions: R },
+  { resource: 'person', label: 'Personen', actions: [...R, 'export'] },
   { resource: 'property', label: 'Häuser', actions: R },
   { resource: 'vehicle', label: 'Fahrzeuge', actions: R },
   { resource: 'key', label: 'Schlüssel', actions: [...R, 'assign'] },

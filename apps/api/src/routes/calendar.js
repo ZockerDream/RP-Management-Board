@@ -77,12 +77,12 @@ export async function buildFeed(userId, from, to) {
     out.push(ro(`house:${p.id}`, 'house', `Wartung: ${p.name}`, p.maintenance_due, { note: p.maintenance_note }));
   }
   for (const a of await many(`SELECT a.id, a.due_at, k.label, pe.name person FROM key_assignments a JOIN keys k ON k.id=a.key_id
-    LEFT JOIN people pe ON pe.id=a.person_id AND ${visibleSql('pe', 'person')}
+    LEFT JOIN people pe ON pe.id=a.person_id
     WHERE ${visibleSql('k', 'key')} AND a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at IS NOT NULL`, [userId])) {
     out.push(ro(`key:${a.id}`, 'key', `Rückgabe: ${a.label}`, a.due_at, { note: a.person || '' }));
   }
   for (const l of await many(`SELECT l.id, l.valid_until, lt.name, pe.name person FROM licenses l JOIN license_types lt ON lt.id=l.type_id
-    LEFT JOIN people pe ON pe.id=l.person_id AND ${visibleSql('pe', 'person')}
+    LEFT JOIN people pe ON pe.id=l.person_id
     WHERE ${visibleSql('lt', 'license')} AND l.status='valid' AND l.valid_until BETWEEN $2 AND $3`, [userId, from, to])) {
     out.push(ro(`lic:${l.id}`, 'license', `Lizenz läuft ab: ${l.name}`, l.valid_until, { note: l.person || '' }));
   }
@@ -93,7 +93,7 @@ export async function buildFeed(userId, from, to) {
     }));
   }
   for (const r of await many(`SELECT r.id, r.valid_until, tr.name, COALESCE(u.name, pe.name) participant FROM training_records r JOIN trainings tr ON tr.id=r.training_id
-    LEFT JOIN users u ON u.id=r.user_id LEFT JOIN people pe ON pe.id=r.person_id AND ${visibleSql('pe', 'person')}
+    LEFT JOIN users u ON u.id=r.user_id LEFT JOIN people pe ON pe.id=r.person_id
     WHERE ${visibleSql('tr', 'training')} AND tr.active AND r.result='passed' AND r.valid_until BETWEEN $2 AND $3
       AND NOT EXISTS (SELECT 1 FROM training_records n WHERE n.training_id=r.training_id AND n.result='passed'
         AND COALESCE(n.user_id, n.person_id)=COALESCE(r.user_id, r.person_id) AND n.completed_on > r.completed_on)`, [userId, from, to])) {

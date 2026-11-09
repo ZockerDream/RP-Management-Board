@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { $, esc, empty, fdate, fdatetime, tag, todayStr, openForm, confirmBox, toast } from '../ui.js';
 import { writableTeams, visibilityField, scopeTag } from './common.js';
-import { markdownBlock, MARKDOWN_HELP } from '../markdown.js';
+import { markdownBlock } from '../markdown.js';
 
 const dueOf = (todo) => (todo?.due_date ? String(todo.due_date).slice(0, 10) : '');
 const tomorrowStr = () => {
@@ -26,7 +26,7 @@ const todoForm = (todo, teams) => openForm({
     { name: 'title', label: 'Aufgabe', value: todo?.title, required: true, maxlength: 200, full: true },
     { name: 'due_date', label: 'Deadline (optional)', type: 'date', value: dueOf(todo), help: 'Erinnerung einen Tag vorher, am Fälligkeitstag und wenn es überfällig ist.' },
     visibilityField(teams, todo),
-    { name: 'note', label: 'Notiz', type: 'textarea', value: todo?.note, rows: 4, maxlength: 5000, full: true, help: MARKDOWN_HELP },
+    { name: 'note', label: 'Notiz', type: 'textarea', value: todo?.note, rows: 4, maxlength: 5000, full: true, markdown: true },
   ],
   onSubmit: async (values) => {
     const body = { title: values.title.trim(), note: values.note, due_date: values.due_date || null, team_id: values.team_id || null };

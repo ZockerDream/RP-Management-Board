@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 // org.js lädt über db.js die Konfiguration; eine Verbindung entsteht dabei nicht
 process.env.DATABASE_URL ||= 'postgres://test:test@127.0.0.1:1/test';
@@ -23,9 +23,11 @@ test('participate exists only for trainings and work time', () => {
   assert.equal(validLevel('unknown', 2), false);
 });
 
-// Die Standard-Ränge der Migration müssen jede Funktion mit einer erlaubten Stufe kennen
+// Die Standard-Ränge der neuesten Migration, die seed_team_ranks() festlegt, müssen jede Funktion mit einer erlaubten Stufe kennen
 test('seed_team_ranks covers every module with valid levels', () => {
-  const sql = readFileSync(new URL('../migrations/018_organisations_permissions.sql', import.meta.url), 'utf8');
+  const dir = new URL('../migrations/', import.meta.url);
+  const sql = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort().reverse()
+    .map((f) => readFileSync(new URL(f, dir), 'utf8')).find((text) => /FUNCTION seed_team_ranks/.test(text));
   const block = sql.slice(sql.indexOf('CROSS JOIN (VALUES'), sql.indexOf(') d(module, lead, member, reader)'));
   const rows = [...block.matchAll(/\('(\w+)', (\d), (\d), (\d)\)/g)].map(([, key, ...levels]) => [key, levels.map(Number)]);
   assert.deepEqual(rows.map(([key]) => key).sort(), [...MODULE_KEYS].sort());
@@ -34,6 +36,8 @@ test('seed_team_ranks covers every module with valid levels', () => {
 
 test('SQL helpers reject unknown modules and keep the parameter', () => {
   assert.throws(() => levelSql('x', "budget'; DROP TABLE users; --"));
+  // Personen sind global und haben keine Stufe in einer Organisation
+  assert.throws(() => visibleSql('pe', 'person'));
   assert.match(visibleSql('c', 'casefile', '$2', 3), /team_level\(c\.team_id, \$2, 'casefile'\) END\) >= 3$/);
   assert.match(levelSql('d', 'doc', '$1', 'd.id'), /team_level\(d\.team_id, \$1, 'doc', d\.id\)/);
 });
