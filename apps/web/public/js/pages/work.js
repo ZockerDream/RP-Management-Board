@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { $, esc, empty, openForm, confirmBox, toast, todayStr } from '../ui.js';
 import { can, state, reloadMe } from '../app.js';
 import { payrollAccountOptions, payrollAccountHint } from './common.js';
+import { renderInline } from '../markdown.js';
 
 const hoursText = (hours) => `${Number(hours).toLocaleString('de-DE', { maximumFractionDigits: 2 })} Std.`;
 const dateText = (date) => String(date).slice(0, 10).split('-').reverse().join('.');
@@ -55,7 +56,11 @@ export async function render(view) {
   let accounts = [];
   const teamEntries = new Map();
   let timer = null;
-  const teams = can('team:read') ? (await api.get('/teams')).filter((team) => team.role !== 'viewer') : [];
+  // Stundenzettel der Organisation: Zeiten aller sehen ab „Lesen“, bearbeiten und Projekte anlegen ab „Lesen & Schreiben“
+  const orgs = can('team:read') ? await api.get('/teams') : [];
+  const teams = orgs.filter((team) => team.levels.work >= 2);
+  const projectTeams = orgs.filter((team) => team.levels.work >= 3);
+  const teamWritable = () => (teams.find((team) => team.id === $('#work-team')?.value)?.levels.work ?? 0) >= 3;
   const today = todayStr();
   view.innerHTML = `<div class="page-head"><div><h1>Stundenzettel</h1><p>Ein- und ausstempeln, Pausen erfassen und Arbeitszeiten im Überblick behalten</p></div>
     <div class="actions"><button class="btn ghost" id="work-export">CSV-Export</button><button class="btn ghost" id="work-pdf">Monats-PDF</button><button class="btn ghost" id="project-new">Projekt anlegen</button><button class="btn" id="work-new">Manuell erfassen</button></div></div>
@@ -76,7 +81,7 @@ export async function render(view) {
     <div class="card"><div class="card-head"><h2>Auswertung</h2><b id="work-total" class="up"></b></div>
       <div class="toolbar" style="gap:8px;flex-wrap:wrap"><select id="work-mode"><option value="week">Woche</option><option value="day">Tag</option><option value="month">Monat</option></select>
       <input id="work-date" type="date" value="${today}"><span id="work-range" class="muted"></span></div><div id="work-list"></div></div>
-    ${teams.length ? `<div class="card"><div class="card-head"><h2>Team-Stundenzettel</h2><div class="toolbar"><select id="work-team">${teams.map((team) => `<option value="${team.id}">${esc(team.name)}</option>`).join('')}</select><input id="team-work-month" type="month" value="${today.slice(0, 7)}"></div></div><div id="team-work-report"></div></div>` : ''}
+    ${teams.length ? `<div class="card"><div class="card-head"><h2>Stundenzettel der Organisation</h2><div class="toolbar"><select id="work-team">${teams.map((team) => `<option value="${team.id}">${esc(team.name)}</option>`).join('')}</select><input id="team-work-month" type="month" value="${today.slice(0, 7)}"></div></div><div id="team-work-report"></div></div>` : ''}
     <div class="card"><div class="card-head"><h2>Projekte / Kunden</h2></div><div id="project-list"></div></div>`;
 
   function updateProjectOptions() {
@@ -106,7 +111,7 @@ export async function render(view) {
   async function loadProjects() {
     projects = await api.get('/work-projects');
     updateProjectOptions();
-        $('#project-list').innerHTML = projects.length ? projects.map((p) => `<div class="list-item"><div class="grow"><b>${esc(p.name)}</b><small>${p.team_name ? `Team: ${esc(p.team_name)}` : 'Privat'} · ${p.active ? 'Aktiv' : 'Archiviert'}</small></div>
+        $('#project-list').innerHTML = projects.length ? projects.map((p) => `<div class="list-item"><div class="grow"><b>${esc(p.name)}</b><small>${p.team_name ? esc(p.team_name) : 'Privat'} · ${p.active ? 'Aktiv' : 'Archiviert'}</small></div>
       <button class="btn ghost sm" data-project-toggle="${p.id}">${p.active ? 'Archivieren' : 'Aktivieren'}</button> <button class="btn ghost sm" data-project-delete="${p.id}">Löschen</button></div>`).join('') : empty('Noch keine Projekte angelegt.');
   }
   async function loadTimer() {
@@ -117,11 +122,11 @@ export async function render(view) {
   // Rechnet wie der Gehaltslauf in Cent, damit hier nie ein anderer Bonus steht als gebucht wird
   const bonusPerHour = (salary, percent) => Math.round(Math.round(Number(salary || 0) * 100) * Number(percent || 0) / 100) / 100;
   const salaryText = (salary, target, percent, currency) => `Festgehalt ${payText(salary, currency)} pro Tag · Wochen-Soll ${hoursText(target)} · Bonus ${Number(percent || 0).toLocaleString('de-DE')} % = ${payText(bonusPerHour(salary, percent), currency)} je Stunde über dem Soll`;
-  function entriesTable(items) {
+  function entriesTable(items, editable = true) {
     return items.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Datum</th><th>Projekt / Kunde</th><th>Zeitraum</th><th>Pause</th><th>Arbeitszeit</th><th>Notiz</th><th></th></tr></thead><tbody>${items.map((item) => `<tr>
       <td>${dateText(item.work_date)}</td><td>${esc(item.project_name || '–')}</td><td>${timeText(item.started_at)} – ${timeText(item.ended_at)}</td>
-      <td>${item.break_minutes || 0} Min.</td><td><b>${hoursText(item.hours)}</b></td><td>${esc(item.note || '–')}</td>
-      <td style="white-space:nowrap"><button class="btn ghost sm" data-edit="${item.id}">Bearbeiten</button> <button class="btn ghost sm" data-del="${item.id}">Löschen</button></td></tr>`).join('')}</tbody></table></div>` : empty('Keine Arbeitszeit im gewählten Zeitraum erfasst.');
+      <td>${item.break_minutes || 0} Min.</td><td><b>${hoursText(item.hours)}</b></td><td>${item.note ? renderInline(item.note) : '–'}</td>
+      <td style="white-space:nowrap">${editable ? `<button class="btn ghost sm" data-edit="${item.id}">Bearbeiten</button> <button class="btn ghost sm" data-del="${item.id}">Löschen</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : empty('Keine Arbeitszeit im gewählten Zeitraum erfasst.');
   }
   const salaryFields = (values, currency) => [
     { name: 'daily_salary', label: `Festgehalt pro Tag (${currency})`, type: 'number', min: 0, step: 0.01, value: values.daily_salary ?? 0, required: true, help: 'Jeden Tag, auch am Wochenende und unabhängig von den Stunden.' },
@@ -189,16 +194,17 @@ export async function render(view) {
     if (!teams.length) return;
     const report = await api.get(`/work-hours/team/monthly?${new URLSearchParams({ team_id: $('#work-team').value, month: $('#team-work-month').value })}`);
     teamEntries.clear();
+    const editable = teamWritable();
     $('#team-work-report').innerHTML = report.members.length ? report.members.map((member) => {
       const general = member.items.filter((item) => !item.project_id);
       const project = member.items.filter((item) => item.project_id);
       for (const item of member.items) teamEntries.set(item.id, item);
       return `<div class="card"><div class="card-head"><div class="grow"><h3>${esc(member.name)}</h3>
         <small>Gesamt ${hoursText(member.total_hours)} · Über dem Soll ${hoursText(member.overtime_hours)} · Vergütung ${payText(member.total_pay, member.currency)}</small></div>
-        <button class="btn ghost sm" data-team-settings="${member.user_id}">Mitarbeitereinstellungen</button></div>
+        ${editable ? `<button class="btn ghost sm" data-team-settings="${member.user_id}">Mitarbeitereinstellungen</button>` : ''}</div>
         <p class="muted">${salaryText(member.daily_salary, member.weekly_target, member.hourly_bonus_percent, member.currency)}</p>
-        <h4>Allgemeine Arbeitszeiten</h4>${entriesTable(general)}<h4 style="margin-top:16px">Projektzeiten</h4>${entriesTable(project)}</div>`;
-    }).join('') : empty('Keine aktiven Teammitglieder gefunden.');
+        <h4>Allgemeine Arbeitszeiten</h4>${entriesTable(general, editable)}<h4 style="margin-top:16px">Projektzeiten</h4>${entriesTable(project, editable)}</div>`;
+    }).join('') : empty('Keine aktiven Mitglieder gefunden.');
   }
   async function employeeSettingsForm(userId) {
     const member = (await api.get(`/work-hours/team/monthly?${new URLSearchParams({ team_id: $('#work-team').value, month: $('#team-work-month').value })}`)).members.find((item) => item.user_id === userId);
@@ -206,7 +212,7 @@ export async function render(view) {
     return openForm({
       title: `Einstellungen: ${member.name}`,
       fields: [
-        { type: 'html', html: '<small class="muted">Diese Einstellungen gelten für den Mitarbeiter global in allen Teams. Das Konto für die Gehaltsgutschrift wählt jeder Mitarbeiter selbst unter „Gehalt einstellen“.</small>' },
+        { type: 'html', html: '<small class="muted">Diese Einstellungen gelten für den Mitarbeiter global in allen Organisationen. Das Konto für die Gehaltsgutschrift wählt jeder Mitarbeiter selbst unter „Gehalt einstellen“.</small>' },
         ...salaryFields({ daily_salary: member.daily_salary, weekly_work_hours: member.weekly_target, hourly_bonus_percent: member.hourly_bonus_percent }, member.currency),
       ],
       onSubmit: async (values) => api.patch(`/work-hours/team/${$('#work-team').value}/members/${userId}/settings`, salaryBody(values)),
@@ -217,7 +223,7 @@ export async function render(view) {
       title: 'Projekt / Kunde anlegen',
       fields: [
         { name: 'name', label: 'Name', required: true, full: true },
-        { name: 'team_id', label: 'Sichtbarkeit', type: 'select', options: [{ v: '', l: 'Privat' }, ...teams.map((team) => ({ v: team.id, l: `Team: ${team.name}` }))], value: '' },
+        { name: 'team_id', label: 'Sichtbarkeit', type: 'select', options: [{ v: '', l: 'Privat' }, ...projectTeams.map((team) => ({ v: team.id, l: `Organisation: ${team.name}` }))], value: '' },
       ],
       onSubmit: async (v) => api.post('/work-projects', { name: v.name.trim(), team_id: v.team_id || null }),
     });

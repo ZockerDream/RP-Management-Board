@@ -54,7 +54,7 @@ export async function txForm(tx, defaults = {}) {
 // Andere Konten bleiben mit Begründung sichtbar, damit klar ist, warum sie nicht wählbar sind.
 export function payrollAccountOptions(budgets, me, currency = me.currency || 'EUR') {
   const blocked = (b) => {
-    if (b.type !== 'solo' || b.owner_user_id !== me.id) return 'Team-Konto';
+    if (b.type !== 'solo' || b.owner_user_id !== me.id) return 'Konto einer Organisation';
     return b.currency === currency ? '' : `in ${b.currency}`;
   };
   return [{ v: '', l: 'Kein Konto ausgewählt' }, ...budgets.filter((b) => !b.archived).map((b) => {
@@ -66,11 +66,13 @@ export const payrollAccountHint = (options, currency) => (options.some((o) => o.
   ? 'Tägliche Basisgutschrift inklusive Wochenende; Auszahlung um 03:45 Uhr. Wählbar sind eigene persönliche Konten in Profilwährung.'
   : `Du hast noch kein persönliches Konto in ${currency}. Lege es unter „Konten“ an (neue Konten erhalten deine Profilwährung) und wähle es dann hier aus.`);
 
-// Solo oder Team: Teams, in denen die Person schreiben darf; das aktuelle Team bleibt beim Bearbeiten immer wählbar
-export const writableTeams = async () => (can('team:read') ? (await api.get('/teams')).filter((team) => team.role !== 'viewer') : []);
+// Solo oder Organisation: Organisationen, in denen die Person in dieser Funktion mindestens `min` hat
+// (anlegen meist ab „Lesen & Schreiben“ = 3); die aktuelle Organisation bleibt beim Bearbeiten immer wählbar
+export const orgsWithLevel = async (module, min = 3) => (can('team:read') ? (await api.get('/teams')).filter((team) => (team.levels?.[module] ?? 0) >= min) : []);
+export const writableTeams = orgsWithLevel;
 export function visibilityField(teams, item) {
-  const options = [{ v: '', l: 'Solo (nur für mich)' }, ...teams.map((team) => ({ v: team.id, l: `Team: ${team.name}` }))];
-  if (item?.team_id && !teams.some((team) => team.id === item.team_id)) options.push({ v: item.team_id, l: `Team: ${item.team_name}` });
+  const options = [{ v: '', l: 'Solo (nur für mich)' }, ...teams.map((team) => ({ v: team.id, l: `Organisation: ${team.name}` }))];
+  if (item?.team_id && !teams.some((team) => team.id === item.team_id)) options.push({ v: item.team_id, l: `Organisation: ${item.team_name}` });
   return { name: 'team_id', label: 'Sichtbarkeit', type: 'select', options, value: item?.team_id || '' };
 }
 export const scopeTag = (item) => budgetTag(item.team_id ? 'shared' : 'solo', item.team_name || 'Solo');

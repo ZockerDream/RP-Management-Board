@@ -33,7 +33,7 @@ RP-Management-Board/
     │       ├── main.js, worker.js, jobs.js, config.js, db.js, seed.js, settings.js
     │       ├── authz.js, security.js, audit.js, mail.js, lib.js, backup.js
     │       ├── payroll.js, work-hours.js, work-split.js, periods.js, validation.js, static-assets.js, cli/backup.js
-    │       ├── records.js, uploads.js
+    │       ├── org.js, records.js, uploads.js
     │       └── routes/          # admin attachments auth calendar casefiles docs finance integrations
     │                            # licenses me notes objects public spending sport teams todos trainings work
     └── web/public/
@@ -63,10 +63,15 @@ roles(id, name, description, is_system, is_default, data_scope[all|groups|own], 
 permissions(id, key), role_permissions, user_roles, groups, group_members, group_roles
 ```
 
-### 4.2 Teams und Finanzen
+### 4.2 Organisationen und Finanzen
+Die Oberfläche sagt „Organisation“, Code, API und Datenbank bleiben bei `team`.
 ```
-teams(id, name, owner_id, status[active|archived])
-team_members(team_id, user_id, team_role[owner|editor|viewer])
+teams(id, name, owner_id, status[active|archived])                 -- owner_id = Ersteller
+team_members(team_id, user_id, is_owner, rank_id)                 -- Inhaber dürfen alles
+team_ranks(id, team_id, name, position)                           -- höher = höherer Rang, (team_id, position) eindeutig, aufschiebbar
+team_groups(id, team_id, name, description), team_group_members(group_id, team_id, user_id)
+team_permissions(id, team_id, rank_id | group_id | user_id, module, scope_id, level 0..4)
+invitations(…, team_id, rank_id)
 budgets(id, name, type[solo|shared], owner_user_id, team_id, currency, period_type, period_start, period_end, limit_amount, archived)
 categories(id, budget_id, name, limit_amount, color)
 transactions(id, budget_id, category_id, created_by, type[income|expense|deposit], amount, booked_at, title, note, tags,
@@ -95,7 +100,7 @@ Schichten über Mitternacht: Ein Eintrag gehört immer zu genau einem Kalenderta
 sport_routes(id, team_id, sport_type[run|swim|bike], name, checkpoints, distance_km, notes, created_by)
 sport_scores(id, route_id, user_id, score, duration_seconds, checkpoints_reached, note, achieved_on)
 ```
-Sortierung der Bestenliste: `score DESC, duration_seconds NULLS LAST, created_at`. Alle Rechte hängen an der Teamrolle, nicht am RBAC-Katalog.
+Sortierung der Bestenliste: `score DESC, duration_seconds NULLS LAST, created_at`. Rechte über die Funktion `sport` der Organisation (Lesen: ansehen und eigene Ergebnisse, Lesen & Schreiben: Strecken und fremde Ergebnisse).
 
 ### 4.5 Objekte
 ```
@@ -124,9 +129,11 @@ notes(id, owner_user_id, team_id, title, body, pinned, created_by, updated_by, c
 todos(id, owner_user_id, team_id, title, note, due_date, done_at, done_by, last_reminder, created_by, created_at, updated_at)
 bug_report_comments(id, report_id, user_id, body, created_at)
 ```
-### 4.8 Akten, Lizenzen, Schulungen, Dokumentationen (Migration 017)
+### 4.8 Akten, Lizenzen, Schulungen, Dokumentationen (Migration 017, Aktenarten und Beschränkung 018)
 ```
-case_files(id, owner_user_id, team_id, file_number, title, description, status[open|dormant|closed], opened_on, closed_on, …)   -- Aktenzeichen eindeutig je Bereich
+case_files(id, owner_user_id, team_id, type_id, restricted, file_number, title, description, status[open|dormant|closed], opened_on, closed_on, …)   -- Aktenzeichen eindeutig je Bereich
+case_file_types(id, owner_user_id, team_id, name)                -- Name eindeutig je Bereich, benutzte Arten lassen sich nicht löschen
+case_file_access(id, case_file_id, rank_id | group_id | user_id) -- nur bei restricted; Rang zählt samt allen höheren
 case_file_people(case_file_id, person_id, role), case_file_entries(id, case_file_id, entry_date, kind, body, person_id, …)
 case_file_attachments(id, case_file_id, storage_key, original_name, mime, size, sha256, uploaded_by)
 license_types(id, owner_user_id, team_id, name, description, validity_months)
@@ -136,9 +143,18 @@ training_sessions(id, training_id, session_date, start_time, end_time, location,
 training_records(id, training_id, session_id, user_id | person_id, result[registered|passed|failed|absent], completed_on, valid_until, instructor, note)
 doc_categories(id, owner_user_id, team_id, name, sort), doc_pages(id, category_id, title, body, pinned, created_by, updated_by, …)
 ```
-Bereich (`owner_user_id` xor `team_id`) haben nur die Kopftabellen; Einträge, Lizenzen, Termine, Nachweise und Seiten erben ihn. Er wird beim Anlegen gesetzt und bleibt fest. Zugriff: Katalogrecht (`casefile|license|training|doc:read|create|update|delete`) und `recordRole`/`recordOwner`. Personen und Teilnehmer müssen im selben Bereich liegen (`assertPersonInScope`, `assertUserInScope` in `records.js`); Personennamen werden nur über `personJoin` gezeigt, also nur bei Zugriff auf die Person. `DELETE /people/:id` lehnt Personen mit Akten, Lizenzen oder Nachweisen ab, und solche Personen wechseln auch nicht den Bereich. Die Fremdschlüssel auf `people` kaskadieren trotzdem (Einträge: `SET NULL`), denn beim Löschen eines Teams prüft PostgreSQL die Verweise schon in der kaskadierenden Teil-Löschung der Personen, bevor die Akten des Teams entfernt sind. Anhänge laufen wie Belege über `uploads.js` (PDF, PNG, JPEG, Magic Bytes, Größenlimit); beim Löschen einer Akte werden die Dateien entfernt. Zustände `expiring` (≤ 30 Tage) und `expired` werden beim Abruf berechnet. Dokumentationen rendert das Frontend mit `markdown.js`: erst alles maskieren, dann wenige Auszeichnungen, Links nur `http(s)`.
+Bereich (`owner_user_id` xor `team_id`) haben nur die Kopftabellen; Einträge, Lizenzen, Termine, Nachweise und Seiten erben ihn. Er wird beim Anlegen gesetzt und bleibt fest. Zugriff: Katalogrecht (`casefile|license|training|doc:read|create|update|delete`) und die Stufe in der Organisation (`recordLevel`/`recordOwner`, Akten über `case_file_level`). Personen und Teilnehmer müssen im selben Bereich liegen (`assertPersonInScope`, `assertUserInScope` in `records.js`); Personennamen werden nur über `personJoin` gezeigt, also nur bei Zugriff auf die Person. `DELETE /people/:id` lehnt Personen mit Akten, Lizenzen oder Nachweisen ab, und solche Personen wechseln auch nicht den Bereich. Die Fremdschlüssel auf `people` kaskadieren trotzdem (Einträge: `SET NULL`), denn beim Löschen eines Teams prüft PostgreSQL die Verweise schon in der kaskadierenden Teil-Löschung der Personen, bevor die Akten des Teams entfernt sind. Anhänge laufen wie Belege über `uploads.js` (PDF, PNG, JPEG, Magic Bytes, Größenlimit); beim Löschen einer Akte werden die Dateien entfernt. Zustände `expiring` (≤ 30 Tage) und `expired` werden beim Abruf berechnet. Dokumentationen, Notizen, Sachverhalte und Einträge von Akten, Schulungsbeschreibungen, ToDo-Notizen, Streckennotizen, Lizenzart-Beschreibungen und Tickets rendert das Frontend mit `markdown.js` (`markdownBlock`, einzeilig `renderInline`): erst alles maskieren, dann wenige Auszeichnungen, Links nur `http(s)`. Gespeichert wird der Rohtext.
 
-Bei `notes` und `todos` ist genau eines von `owner_user_id` und `team_id` gesetzt. Rechte hängen an Eigentum und Teamrolle (`recordRole`, `recordOwner` in `authz.js`), nicht am RBAC-Katalog; Viewer erhalten beim Ändern 403, Fremde 404. Listen liefern `role`, damit die Oberfläche Aktionen für Viewer ausblendet. `todos.last_reminder` hält `<Deadline>:<Stufe>` der letzten Erinnerung. Tickets löschen die Kommentare per Kaskade.
+Bei `notes` und `todos` ist genau eines von `owner_user_id` und `team_id` gesetzt. Rechte hängen an Eigentum und der Stufe in der Organisation (`recordLevel`, `recordOwner` in `org.js`), nicht am RBAC-Katalog; ohne Schreibrecht gibt es beim Ändern 403, Fremde bekommen 404. Listen liefern `level`, damit die Oberfläche Aktionen ausblendet.
+
+### 4.9 Rechte in Organisationen (Migration 018)
+Stufen: 0 kein Zugriff, 1 teilnehmen, 2 lesen, 3 lesen und schreiben, 4 verwalten. Die Funktionen stehen in `ORG_MODULES` (`org.js`) mit erlaubten Stufen und Hinweistexten; `GET /teams/catalog` liefert sie der Oberfläche. Ausgerechnet wird die Stufe in der Datenbank, damit Listen und Einzelprüfungen dieselbe Regel nutzen:
+
+- `team_level(team, user, module, scope)`: kein Mitglied → 0, Inhaber → 4. Sonst je Rang, Gruppe oder Benutzer die Zeile für den Bereich (`scope_id`) vor der Zeile für die Funktion; gibt es eine persönliche Zeile, gilt sie, sonst das Maximum aus Rang und Gruppen, sonst 0.
+- `case_file_level(file, user)`: privat nur der Besitzer; sonst `team_level(…, 'casefile', type_id)`, bei `restricted` nur für Inhaber, Ersteller und freigegebene Ränge (samt höheren), Gruppen und Benutzer.
+- `seed_team_ranks(team)`: Leitung (30), Mitglied (20), Leser (10) mit Standardrechten; `POST /teams` ruft sie auf, Migration 018 hat damit die bestehenden Teams übernommen (owner → Inhaber und Leitung, editor → Mitglied, viewer → Leser, Einladungen ebenso).
+
+In JS: `levelSql(alias, modul, n, scope)` und `visibleSql(…)` für Listen (Alias mit `owner_user_id`/`team_id`), `teamIdsSql` für Tabellen nur mit `team_id`, `recordLevel(user, row, modul, { need, see, scope })` (404 unter `see`, 403 unter `need`), `recordOwner(user, team, modul, need)`, `teamLevel`, `levelsFor`, `teamUsers(team, modul)` für Erinnerungen. Verwaltung (`routes/teams.js`): Nicht-Inhaber brauchen bei `members` 3 (Mitglieder, Ränge und Gruppen zuweisen) bzw. 4 (Ränge, Gruppen, Rechte), handeln nur unter dem eigenen Rang und vergeben nie mehr, als sie selbst haben (`assertWithin` vergleicht jede gestiegene Stufe je Funktion und Bereich; Ränge und Gruppen beim Zuweisen ganz). Bereichszeilen haben keinen Fremdschlüssel; `DELETE` von Aktenart oder Doku-Kategorie löscht sie mit. Die Rang-Spalte in `team_members` nutzt `ON DELETE SET NULL (rank_id)`, damit das Löschen einer Organisation nicht an der Reihenfolge der Kaskaden scheitert; benutzte Ränge lehnt die API ab. `todos.last_reminder` hält `<Deadline>:<Stufe>` der letzten Erinnerung. Tickets löschen die Kommentare per Kaskade.
 
 ## 5. API (REST unter `/api`)
 
@@ -147,22 +163,22 @@ Bei `notes` und `todos` ist genau eines von `owner_user_id` und `team_id` gesetz
 | Auth | `POST /auth/login`, `/auth/2fa/login`, `/auth/refresh`, `/auth/logout`, `/auth/forgot`, `/auth/reset`, `/auth/register`, `/auth/invite/:token`; `GET /auth/config` |
 | Konto | `GET/PATCH /me`, `/me/password`, `/me/2fa/*`, `/me/sessions`, `/me/export`, `/me/notification-prefs`, `/me/api-keys`, `/me/ical`, `/notifications` |
 | Admin | `/admin/users`, `/roles`, `/groups`, `/teams`, `/settings`, `/system`, `/overview`, `/audit`, `/api-keys`, `/webhooks`, `/backups`, `/bug-reports` |
-| Teams | `/teams`, `/teams/:id/members`, `/teams/:id/invitations/:iid` |
+| Organisationen | `GET/POST /teams`, `GET /teams/catalog`, `PATCH/DELETE /teams/:id`, `POST /teams/:id/members` (`rank_id`), `PATCH/DELETE /teams/:id/members/:uid` (`rank_id`, `is_owner`, `group_ids`), `GET /teams/:id/members/:uid/levels`, `DELETE /teams/:id/invitations/:iid`, `POST /teams/:id/ranks`, `PATCH/DELETE /team-ranks/:id` (`name`, `move: up\|down`), `POST /teams/:id/groups`, `PATCH/DELETE /team-groups/:id`, `GET/PUT /teams/:id/permissions` (`subject`, `subject_id`, `module`, `scope_id`, `level` oder `null`) |
 | Finanzen | `/budgets`, `/budgets/:id/categories`, `/categories/:id`, `/transactions`, `/transactions/export.csv`, `/recurring`, `/goals`, `/spending-budgets` |
 | Auswertung | `/stats/overview`, `/stats/by-category`, `/stats/timeline?granularity=day\|week\|month&periods=&week_start=&to=`, `/reports/costs`, `/reports/saved`. Standard `month` liefert `month`, sonst `bucket` (Tag bzw. Wochenbeginn) |
 | Zeiterfassung | `/work-projects`, `/work-hours`, `/work-hours/timer/*`, `DELETE /work-hours/timer` (verwerfen), `/work-hours/monthly`, `/work-hours/monthly.pdf`, `/work-hours/export.csv`, `/work-hours/team/*` |
 | Sport | `GET/POST /sport/routes`, `PATCH/DELETE /sport/routes/:id`, `POST /sport/routes/:id/scores`, `DELETE /sport/scores/:id` |
 | Notizblock, ToDos | `GET/POST /notes`, `PATCH/DELETE /notes/:id`, `GET/POST /todos`, `PATCH/DELETE /todos/:id` (mit `done`) |
 | Tickets | `GET/POST /bug-reports`, `DELETE /bug-reports/:id`, `POST /bug-reports/:id/comments`, `DELETE /bug-reports/:id/comments/:commentId`; dieselben unter `/admin/bug-reports` für alle Tickets. Getrennte Pfade, damit die Admin-IP-Allowlist greift |
-| Akten | `GET/POST /case-files` (`?status=&q=`), `GET/PATCH/DELETE /case-files/:id`, `POST /case-files/:id/people`, `DELETE /case-files/:id/people/:personId`, `POST /case-files/:id/entries`, `PATCH/DELETE /case-file-entries/:id`, `POST /case-files/:id/attachments`, `GET/DELETE /case-file-attachments/:id`, `GET /people/:id/record` (Personenübersicht) |
+| Akten | `GET/POST /case-files` (`?status=&type_id=&q=`), `GET/POST /case-file-types`, `PATCH/DELETE /case-file-types/:id`, `GET /case-files/:id/access-options`, `PUT /case-files/:id/access`, `GET/PATCH/DELETE /case-files/:id`, `POST /case-files/:id/people`, `DELETE /case-files/:id/people/:personId`, `POST /case-files/:id/entries`, `PATCH/DELETE /case-file-entries/:id`, `POST /case-files/:id/attachments`, `GET/DELETE /case-file-attachments/:id`, `GET /people/:id/record` (Personenübersicht) |
 | Lizenzen | `GET/POST /license-types`, `PATCH/DELETE /license-types/:id`, `GET/POST /licenses` (`?state=&type_id=&person_id=&q=`), `PATCH/DELETE /licenses/:id`, `POST /licenses/:id/renew` |
-| Schulungen | `GET/POST /trainings`, `GET /trainings/overview`, `GET/PATCH/DELETE /trainings/:id`, `GET /trainings/:id/candidates`, `POST /trainings/:id/sessions`, `PATCH/DELETE /training-sessions/:id`, `POST /trainings/:id/records`, `PATCH/DELETE /training-records/:id` |
+| Schulungen | `GET/POST /trainings`, `GET /trainings/overview`, `GET/PATCH/DELETE /trainings/:id`, `GET /trainings/:id/candidates`, `POST /trainings/:id/sessions`, `POST/DELETE /training-sessions/:id/enroll` (selbst an- und abmelden), `PATCH/DELETE /training-sessions/:id`, `POST /trainings/:id/records`, `PATCH/DELETE /training-records/:id` |
 | Dokumentationen | `GET/POST /doc-categories`, `PATCH/DELETE /doc-categories/:id`, `GET/POST /doc-pages` (`?category_id=&q=`), `GET/PATCH/DELETE /doc-pages/:id` |
 | Objekte | `/people`, `/properties`, `/properties/:id/pin`, `/vehicles`, `/keys`, `/keys/:id/assign`, `/keys/:id/qr`, `/assignments/:id/return`, `/assignments/:id/lost`, `/assets/overview`, `/assets/costs`, `/assets/log` |
 | Kalender | `GET /calendar?from=&to=`, `POST/PUT/DELETE /calendar/events`, `GET /calendar/ical/:token.ics` |
 | Sonstiges | `/integrations/:provider/*`, `/attachments/:id`, `GET /public/imprint` |
 
-Fehlerformat: `{ error, message }`. Validierungsfehler und von PostgreSQL abgelehnte Werte (keine gültige UUID, nicht existierendes Datum, Null-Byte im Text) ergeben 400. Meldungen sind deutsch und nennen das Feld verständlich (`validationMessage`). Fremde Datensätze ergeben 404 oder eine leere Liste; Viewer erhalten beim Ändern von Team-Objekten 403. Die Listen von Personen, Häusern, Fahrzeugen, Schlüsseln, Notizen und ToDos liefern `role`, damit die Oberfläche Aktionen für Viewer ausblendet. Beträge werden als String ausgegeben.
+Fehlerformat: `{ error, message }`. Validierungsfehler und von PostgreSQL abgelehnte Werte (keine gültige UUID, nicht existierendes Datum, Null-Byte im Text) ergeben 400. Meldungen sind deutsch und nennen das Feld verständlich (`validationMessage`). Fremde Datensätze ergeben 404 oder eine leere Liste; fehlt in der Organisation die nötige Stufe, gibt es 403 mit der fehlenden Stufe im Text. Listen liefern `level` (0–4), damit die Oberfläche Aktionen ausblendet; `/teams` liefert je Organisation `levels` je Funktion. Beträge werden als String ausgegeben.
 
 ## 6. Sicherheit
 
@@ -170,7 +186,7 @@ Fehlerformat: `{ error, message }`. Validierungsfehler und von PostgreSQL abgele
 - **Tokens:** kurzlebiges Access-JWT nur im Speicher; Refresh-Token als httpOnly-, SameSite=Strict-Cookie (`Secure` bei HTTPS), als Hash in `sessions`, mit Rotation.
 - **2FA:** TOTP, Secret mit AES-256-GCM verschlüsselt, 8 einmalige Recovery-Codes als Hash. Global (`security.force_2fa`) oder pro Benutzer erzwingbar.
 - **Sperren:** Login-Sperre nach Fehlversuchen; optionale Admin-IP-Allowlist. Rate-Limits nur an Routen, die Passwörter oder Codes prüfen oder Mails auslösen, pro IP: Login, 2FA, Passwort vergessen und zurücksetzen, Einladung, Registrierung und die Passwort- und 2FA-Aktionen unter `/me` je 10/Minute, Tür-PIN 5/Minute. Es gibt bewusst kein allgemeines Limit; `/auth/refresh` ist frei, weil jedes Neuladen es aufruft und das Token nicht erratbar ist. Ein abgelaufener Zugang (`users.expires_at`, gilt bis einschließlich zu diesem Tag in `TZ`) endet bei Login, Refresh und jeder Anfrage. Ohne `TRUST_PROXY` hinter einem Proxy warnen Log und Admin-Einstellungen.
-- **Rechteprüfung:** `authz('budget:update')` plus Objektprüfung (`budgetAccess`, `assertOwner`, Teamrolle). Effektive Rechte = Vereinigung aus Rollen und Gruppenrollen, Cache 15 Sekunden.
+- **Rechteprüfung:** `authz('budget:update')` plus Objektprüfung (`budgetAccess`, `recordLevel`, `team_level`; Abschnitt 4.9). Effektive Rechte = Vereinigung aus Rollen und Gruppenrollen, Cache 15 Sekunden.
 - **Gravatar:** Standard aus; der MD5-Hash wird im Browser gebildet, das Backend speichert nur den Schalter.
 - **Eingaben/Ausgaben:** `zod` am Rand, parametrisierte Queries, Escaping im Frontend, strikte CSP (`script-src 'self'`), `frame-ancestors 'none'`.
 - **Uploads:** Größenlimit, Ablage außerhalb des Web-Roots, Auslieferung nur über die API mit Rechteprüfung.

@@ -4,6 +4,7 @@ import { one, many, q } from '../db.js';
 import { authz, bad, notFound, forbidden, accessibleBudgetIds } from '../authz.js';
 import { nthOccurrence, addInterval, today } from '../lib.js';
 import { config } from '../config.js';
+import { LEVEL, teamLevel, visibleSql, needMessage, teamIdsSql } from '../org.js';
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const time = z.string().regex(/^\d{2}:\d{2}$/);
@@ -27,10 +28,12 @@ const ro = (id, type, title, d, extra = {}) => ({ id, source: type, type, title,
 export async function buildFeed(userId, from, to) {
   const out = [];
   const own = await many(
-    `SELECT * FROM calendar_events e WHERE (e.owner_id=$1 AND e.type='personal') OR (e.type='team' AND e.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1))`,
+    `SELECT * FROM (SELECT e.*, CASE WHEN e.type='team' THEN team_level(e.team_id, $1, 'calendar') ELSE 4 END AS level FROM calendar_events e
+       WHERE (e.owner_id=$1 AND e.type='personal') OR e.type='team') x WHERE x.level >= 2`,
     [userId],
   );
-  out.push(...own.map((e) => ({ ...shape(e), start: e.start_time, end: e.end_time })));
+  // Termine einer Organisation ohne Schreibrecht erscheinen gesperrt
+  out.push(...own.map((e) => ({ ...shape(e), start: e.start_time, end: e.end_time, locked: e.level < LEVEL.WRITE })));
 
   const imported = await many(
     `SELECT provider, external_id, title, starts_at, ends_at, all_day FROM synced_calendar_events
@@ -65,34 +68,33 @@ export async function buildFeed(userId, from, to) {
       }
     }
   }
-  for (const v of await many(`SELECT id, plate, make_model, service_due, first_aid_kit_expires_on FROM vehicles
-    WHERE owner_user_id=$1 OR team_id IN (SELECT team_id FROM team_members WHERE user_id=$1)`, [userId])) {
+  for (const v of await many(`SELECT v.id, v.plate, v.make_model, v.service_due, v.first_aid_kit_expires_on FROM vehicles v
+    WHERE ${visibleSql('v', 'vehicle')}`, [userId])) {
     if (v.service_due) out.push(ro(`veh:${v.id}:service`, 'vehicle', `Service: ${v.make_model}`, v.service_due, { note: v.plate }));
     if (v.first_aid_kit_expires_on) out.push(ro(`veh:${v.id}:kit`, 'vehicle', `Verbandskasten läuft ab: ${v.make_model}`, v.first_aid_kit_expires_on, { note: v.plate }));
   }
-  for (const p of await many(`SELECT id, name, maintenance_due, maintenance_note FROM properties WHERE (owner_user_id=$1 OR team_id IN (SELECT team_id FROM team_members WHERE user_id=$1)) AND maintenance_due IS NOT NULL`, [userId])) {
+  for (const p of await many(`SELECT p.id, p.name, p.maintenance_due, p.maintenance_note FROM properties p WHERE ${visibleSql('p', 'property')} AND p.maintenance_due IS NOT NULL`, [userId])) {
     out.push(ro(`house:${p.id}`, 'house', `Wartung: ${p.name}`, p.maintenance_due, { note: p.maintenance_note }));
   }
   for (const a of await many(`SELECT a.id, a.due_at, k.label, pe.name person FROM key_assignments a JOIN keys k ON k.id=a.key_id
-    LEFT JOIN people pe ON pe.id=a.person_id AND (pe.owner_user_id=$1 OR pe.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1))
-    WHERE (k.owner_user_id=$1 OR k.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1)) AND a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at IS NOT NULL`, [userId])) {
+    LEFT JOIN people pe ON pe.id=a.person_id AND ${visibleSql('pe', 'person')}
+    WHERE ${visibleSql('k', 'key')} AND a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at IS NOT NULL`, [userId])) {
     out.push(ro(`key:${a.id}`, 'key', `Rückgabe: ${a.label}`, a.due_at, { note: a.person || '' }));
   }
-  const visible = (alias) => `(${alias}.owner_user_id=$1 OR ${alias}.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1))`;
   for (const l of await many(`SELECT l.id, l.valid_until, lt.name, pe.name person FROM licenses l JOIN license_types lt ON lt.id=l.type_id
-    LEFT JOIN people pe ON pe.id=l.person_id AND ${visible('pe')}
-    WHERE ${visible('lt')} AND l.status='valid' AND l.valid_until BETWEEN $2 AND $3`, [userId, from, to])) {
+    LEFT JOIN people pe ON pe.id=l.person_id AND ${visibleSql('pe', 'person')}
+    WHERE ${visibleSql('lt', 'license')} AND l.status='valid' AND l.valid_until BETWEEN $2 AND $3`, [userId, from, to])) {
     out.push(ro(`lic:${l.id}`, 'license', `Lizenz läuft ab: ${l.name}`, l.valid_until, { note: l.person || '' }));
   }
   for (const s of await many(`SELECT s.id, s.session_date, s.start_time, s.end_time, s.location, tr.name FROM training_sessions s JOIN trainings tr ON tr.id=s.training_id
-    WHERE ${visible('tr')} AND s.session_date BETWEEN $2 AND $3`, [userId, from, to])) {
+    WHERE ${visibleSql('tr', 'training', '$1', LEVEL.PARTICIPATE)} AND s.session_date BETWEEN $2 AND $3`, [userId, from, to])) {
     out.push(ro(`trs:${s.id}`, 'training', `Schulung: ${s.name}`, s.session_date, {
       start: s.start_time?.slice(0, 5) || null, end: s.end_time?.slice(0, 5) || null, allDay: !s.start_time, note: s.location,
     }));
   }
   for (const r of await many(`SELECT r.id, r.valid_until, tr.name, COALESCE(u.name, pe.name) participant FROM training_records r JOIN trainings tr ON tr.id=r.training_id
-    LEFT JOIN users u ON u.id=r.user_id LEFT JOIN people pe ON pe.id=r.person_id AND ${visible('pe')}
-    WHERE ${visible('tr')} AND tr.active AND r.result='passed' AND r.valid_until BETWEEN $2 AND $3
+    LEFT JOIN users u ON u.id=r.user_id LEFT JOIN people pe ON pe.id=r.person_id AND ${visibleSql('pe', 'person')}
+    WHERE ${visibleSql('tr', 'training')} AND tr.active AND r.result='passed' AND r.valid_until BETWEEN $2 AND $3
       AND NOT EXISTS (SELECT 1 FROM training_records n WHERE n.training_id=r.training_id AND n.result='passed'
         AND COALESCE(n.user_id, n.person_id)=COALESCE(r.user_id, r.person_id) AND n.completed_on > r.completed_on)`, [userId, from, to])) {
     out.push(ro(`trv:${r.id}`, 'training', `Schulung läuft ab: ${r.name}`, r.valid_until, { note: r.participant || '' }));
@@ -119,14 +121,13 @@ export default async function routes(app) {
     return buildFeed(req.user.id, f.from || `${y - 1}-01-01`, f.to || `${y + 2}-12-31`);
   });
 
+  // Termine einer Organisation anlegen und ändern ab „Lesen & Schreiben“ im Kalender
   async function resolveTeam(req, b) {
     if (b.type !== 'team') return null;
-    const m = b.team_id
-      ? await one('SELECT team_id, team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [b.team_id, req.user.id])
-      : await one("SELECT team_id, team_role FROM team_members WHERE user_id=$1 AND team_role IN ('owner','editor') LIMIT 1", [req.user.id]);
-    if (!m) throw bad('Kein Team für diesen Termin verfügbar');
-    if (m.team_role === 'viewer') throw forbidden();
-    return m.team_id;
+    const teamId = b.team_id || (await one(`SELECT team_id FROM ${teamIdsSql('calendar', '$1', LEVEL.WRITE)} t LIMIT 1`, [req.user.id]))?.team_id;
+    if (!teamId || !(await one('SELECT 1 FROM team_members WHERE team_id=$1 AND user_id=$2', [teamId, req.user.id]))) throw bad('Keine Organisation für diesen Termin verfügbar');
+    if (await teamLevel(req.user.id, teamId, 'calendar') < LEVEL.WRITE) throw forbidden(needMessage('calendar', LEVEL.WRITE));
+    return teamId;
   }
 
   app.post('/calendar/events', authz('calendar:create'), async (req) => {
@@ -146,9 +147,9 @@ export default async function routes(app) {
     if (!e) throw notFound();
     if (e.type === 'personal' ? e.owner_id !== req.user.id : false) throw notFound();
     if (e.type === 'team') {
-      const m = await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [e.team_id, req.user.id]);
-      if (!m || (m.team_role === 'viewer' && e.owner_id !== req.user.id)) throw forbidden();
-      if (m.team_role === 'viewer') throw forbidden();
+      const level = await teamLevel(req.user.id, e.team_id, 'calendar');
+      if (level < LEVEL.READ) throw notFound();
+      if (level < LEVEL.WRITE) throw forbidden(needMessage('calendar', LEVEL.WRITE));
     }
     return e;
   };

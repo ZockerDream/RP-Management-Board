@@ -4,12 +4,12 @@ import { loadBudgets } from './common.js';
 import { can, state } from '../app.js';
 
 async function budgetForm(b) {
-  const teams = !b && can('team:read') ? (await api.get('/teams')).filter((t) => t.role !== 'viewer') : [];
+  const teams = !b && can('team:read') ? (await api.get('/teams')).filter((t) => t.levels.budget >= 3) : [];
   const currency = b?.currency || state.me.currency || 'EUR';
   const fields = [
     { name: 'name', label: 'Name', value: b?.name, required: true, full: true },
-    ...(b ? [] : [{ name: 'type', label: 'Typ', type: 'select', options: [{ v: 'solo', l: 'Solo' }, ...(teams.length ? [{ v: 'shared', l: 'Geteilt (Team)' }] : [])], value: 'solo' },
-      { name: 'team_id', label: 'Team (bei geteilt)', type: 'select', options: teams.map((t) => ({ v: t.id, l: t.name })), value: teams[0]?.id }]),
+    ...(b ? [] : [{ name: 'type', label: 'Typ', type: 'select', options: [{ v: 'solo', l: 'Solo' }, ...(teams.length ? [{ v: 'shared', l: 'Geteilt (Organisation)' }] : [])], value: 'solo' },
+      { name: 'team_id', label: 'Organisation (bei geteilt)', type: 'select', options: teams.map((t) => ({ v: t.id, l: t.name })), value: teams[0]?.id }]),
     { name: 'currency', label: 'Währung', type: 'select', options: [...new Set(['EUR', 'USD', 'CHF', 'GBP', currency])].map((c) => ({ v: c, l: c })), value: currency, help: 'Beträge werden beim Ändern nicht umgerechnet.' },
   ];
   return openForm({
@@ -39,7 +39,7 @@ async function catForm(b, c) {
 
 export async function render(view) {
   let scope = 'all', sel = null, budgets = [];
-  view.innerHTML = `<div class="page-head"><div><h1>Konten</h1><p>Persönliche und geteilte Team-Konten getrennt verwalten</p></div>
+  view.innerHTML = `<div class="page-head"><div><h1>Konten</h1><p>Persönliche Konten und geteilte Konten einer Organisation getrennt verwalten</p></div>
     <div class="actions"><div class="seg" id="b-scope"><button data-s="all" class="on">Alle</button><button data-s="solo">Solo</button><button data-s="shared">Geteilt</button></div>
     ${can('budget:create') ? '<button class="btn" id="b-new">Neues Konto</button>' : ''}</div></div><div id="b-body"></div>`;
 
@@ -50,17 +50,17 @@ export async function render(view) {
     const cur = list.find((b) => b.id === sel);
     $('#b-body').innerHTML = (list.length ? `<div class="grid cols-3">${list.map((b) => `<div class="card stack" data-sel="${b.id}" style="cursor:pointer;${b.id === sel ? 'outline:2px solid var(--primary)' : ''}">
       <div class="row"><b>${esc(b.name)}</b>${budgetTag(b.type, b.type === 'solo' ? 'Persönlich' : 'Geteilt')}</div>
-      <small class="muted">${b.team_name ? `Team „${esc(b.team_name)}“` : 'Persönliches Konto'}</small>
+      <small class="muted">${b.team_name ? `Organisation „${esc(b.team_name)}“` : 'Persönliches Konto'}</small>
       <div class="row"><b>${eur(b.balance)}</b><span class="muted">Kontostand</span></div>
       <div class="row"><span class="muted">Einkommen</span><b style="color:var(--success,#16a34a)">${eur(b.income)}</b></div>
       <div class="row"><span class="muted">Ausgaben</span><b>${eur(b.expenses)}</b></div>
       <div class="chips">${b.categories.slice(0, 4).map((c) => `<span class="chip">${esc(c.name)}</span>`).join('')}</div>
-      <div class="row">${can('budget:update') && b.role !== 'viewer' ? `<button class="btn ghost sm" data-edit="${b.id}">Bearbeiten</button>` : ''}${can('budget:delete') && b.role === 'owner' ? `<button class="btn ghost sm" data-del="${b.id}">Löschen</button>` : ''}</div></div>`).join('')}</div>` : `<div class="card">${empty('Noch keine Konten vorhanden.')}</div>`)
-      + (cur ? `<div class="card"><div class="card-head"><h2>Kategorien · ${esc(cur.name)}</h2>${can('budget:update') && cur.role !== 'viewer' ? '<button class="btn ghost sm" id="c-new">Kategorie hinzufügen</button>' : ''}</div>
+      <div class="row">${can('budget:update') && b.level >= 3 ? `<button class="btn ghost sm" data-edit="${b.id}">Bearbeiten</button>` : ''}${can('budget:delete') && b.level >= 4 ? `<button class="btn ghost sm" data-del="${b.id}">Löschen</button>` : ''}</div></div>`).join('')}</div>` : `<div class="card">${empty('Noch keine Konten vorhanden.')}</div>`)
+      + (cur ? `<div class="card"><div class="card-head"><h2>Kategorien · ${esc(cur.name)}</h2>${can('budget:update') && cur.level >= 3 ? '<button class="btn ghost sm" id="c-new">Kategorie hinzufügen</button>' : ''}</div>
       ${cur.categories.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Kategorie</th><th>Ausgegeben</th><th>Limit</th><th style="width:34%">Auslastung</th><th></th></tr></thead><tbody>${cur.categories.map((c) => {
         const pct = Number(c.limit_amount) > 0 ? (Number(c.used) / Number(c.limit_amount)) * 100 : 0;
         return `<tr><td><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${esc(c.color || '#94a3b8')};margin-right:6px"></i>${esc(c.name)}</td><td>${eur(c.used)}</td><td>${c.limit_amount ? eur(c.limit_amount) : '–'}</td><td>${c.limit_amount ? progress(pct) : ''}</td>
-        <td style="white-space:nowrap">${can('budget:update') && cur.role !== 'viewer' ? `<button class="btn ghost sm" data-cedit="${c.id}">Bearbeiten</button> <button class="btn ghost sm" data-cdel="${c.id}">Löschen</button>` : ''}</td></tr>`;
+        <td style="white-space:nowrap">${can('budget:update') && cur.level >= 3 ? `<button class="btn ghost sm" data-cedit="${c.id}">Bearbeiten</button> <button class="btn ghost sm" data-cdel="${c.id}">Löschen</button>` : ''}</td></tr>`;
       }).join('')}</tbody></table></div>` : empty('Keine Kategorien.')}</div>` : '');
   }
 

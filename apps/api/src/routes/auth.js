@@ -179,7 +179,14 @@ export default async function routes(app) {
       }
       const role = inv.role_id ? [inv.role_id] : (await c.query('SELECT id FROM roles WHERE is_default')).rows.map((r) => r.id);
       for (const rid of role) await c.query('INSERT INTO user_roles VALUES ($1,$2) ON CONFLICT DO NOTHING', [u.id, rid]);
-      if (inv.team_id) await c.query('INSERT INTO team_members VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [inv.team_id, u.id, inv.team_role]);
+      if (inv.team_id) {
+        // Ohne Rang (gelöscht) kommt die Person in den niedrigsten Rang der Organisation
+        await c.query(
+          `INSERT INTO team_members(team_id, user_id, rank_id)
+           VALUES ($1, $2, COALESCE($3, (SELECT id FROM team_ranks WHERE team_id=$1 ORDER BY position LIMIT 1))) ON CONFLICT DO NOTHING`,
+          [inv.team_id, u.id, inv.rank_id],
+        );
+      }
       await c.query('UPDATE invitations SET accepted_at=now() WHERE id=$1', [inv.id]);
       return u;
     });

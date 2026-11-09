@@ -20,7 +20,7 @@ export const PERMISSION_CATALOG = [
   { resource: 'user', label: 'Benutzer', actions: [...R, 'export'] },
   { resource: 'role', label: 'Rollen', actions: R },
   { resource: 'group', label: 'Gruppen', actions: R },
-  { resource: 'team', label: 'Teams', actions: R },
+  { resource: 'team', label: 'Organisationen', actions: R },
   { resource: 'budget', label: 'Konten', actions: [...R, 'export'] },
   { resource: 'transaction', label: 'Transaktionen', actions: [...R, 'export'] },
   { resource: 'recurring', label: 'Daueraufträge', actions: R },
@@ -151,45 +151,27 @@ export function adminOnly(...perms) {
   };
 }
 
-// Zugriff auf ein Konto: owner (solo) | owner/editor/viewer (Team)
-export async function budgetAccess(userId, budgetId, write = false) {
+// Zugriff auf ein Konto: privat nur der Besitzer, geteilt nach der Stufe für "Konten & Buchungen" in der Organisation.
+// need: 2 lesen, 3 buchen und ändern (true), 4 löschen. Liefert das Konto und die Stufe.
+export async function budgetAccess(userId, budgetId, need = 2) {
+  const required = need === true ? 3 : need || 2;
   const b = await one(
-    `SELECT b.*, tm.team_role FROM budgets b LEFT JOIN team_members tm ON tm.team_id=b.team_id AND tm.user_id=$2 WHERE b.id=$1`,
+    `SELECT b.*, CASE WHEN b.type='solo' THEN (CASE WHEN b.owner_user_id=$2 THEN 4 ELSE 0 END) ELSE team_level(b.team_id, $2, 'budget') END AS level
+     FROM budgets b WHERE b.id=$1`,
     [budgetId, userId],
   );
-  if (!b) throw notFound('Konto nicht gefunden');
-  const role = b.type === 'solo' ? (b.owner_user_id === userId ? 'owner' : null) : b.team_role;
-  if (!role) throw notFound('Konto nicht gefunden');
-  if (write && role === 'viewer') throw forbidden('Nur Leserechte auf diesem Konto');
-  if (write && b.archived) throw bad('Konto ist archiviert');
-  return { budget: b, role };
-}
-
-// Datensätze, die einer Person oder einem Team gehören (Notizen, ToDos): liefert die Rolle, Viewer dürfen nur lesen
-export async function recordRole(userId, row, write = false) {
-  if (!row) throw notFound();
-  const role = row.owner_user_id === userId
-    ? 'owner'
-    : row.team_id && (await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [row.team_id, userId]))?.team_role;
-  if (!role) throw notFound();
-  if (write && role === 'viewer') throw forbidden('Nur Team-Owner und -Editoren dürfen das ändern');
-  return role;
-}
-
-// Besitzer eines neuen oder verschobenen Datensatzes: ohne Team gehört er der Person selbst
-export async function recordOwner(userId, teamId) {
-  if (!teamId) return { owner_user_id: userId, team_id: null };
-  const member = await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [teamId, userId]);
-  if (!member) throw notFound('Team nicht gefunden');
-  if (member.team_role === 'viewer') throw forbidden('Nur Team-Owner und -Editoren dürfen das ändern');
-  return { owner_user_id: null, team_id: teamId };
+  if (!b || b.level < 2) throw notFound('Konto nicht gefunden');
+  if (b.level < required) throw forbidden(required >= 4 ? 'Konten dieser Organisation darfst du nicht löschen' : 'Nur Leserechte auf diesem Konto');
+  if (required >= 3 && b.archived) throw bad('Konto ist archiviert');
+  const { level, ...budget } = b;
+  return { budget, level };
 }
 
 export const accessibleBudgetIds = async (userId) =>
   (
     await many(
       `SELECT b.id FROM budgets b WHERE (b.type='solo' AND b.owner_user_id=$1)
-       OR (b.type='shared' AND b.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1))`,
+       OR (b.type='shared' AND team_level(b.team_id, $1, 'budget') >= 2)`,
       [userId],
     )
   ).map((r) => r.id);

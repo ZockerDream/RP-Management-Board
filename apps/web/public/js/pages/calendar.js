@@ -6,9 +6,9 @@ import { can } from '../app.js';
 const MODAL = `<div class="modal" id="m-event"><div class="card"><div class="card-head"><h2 id="ev-head">Neuer Termin</h2></div>
   <div class="form">
     <label class="field full">Titel<input id="ev-title" placeholder="z. B. Service Transporter"></label>
-    <label class="field">Kalender<select id="ev-type"><option value="personal">Privat</option><option value="team">Team</option></select></label>
+    <label class="field">Kalender<select id="ev-type"><option value="personal">Privat</option><option value="team">Organisation</option></select></label>
     <label class="field">Datum<input type="date" id="ev-date"></label>
-    <label class="field full" id="ev-team-wrap">Team<select id="ev-team"></select></label>
+    <label class="field full" id="ev-team-wrap">Organisation<select id="ev-team"></select></label>
     <label class="field full row start"><input type="checkbox" id="ev-allday"> Ganztägig</label>
     <label class="field" id="ev-times-a">Beginn<input type="time" id="ev-start" value="09:00"></label>
     <label class="field" id="ev-times-b">Ende<input type="time" id="ev-end" value="10:00"></label>
@@ -25,7 +25,7 @@ const MODAL = `<div class="modal" id="m-event"><div class="card"><div class="car
 export async function render(view) {
   const teams = can('team:read') ? await api.get('/teams') : [];
   view.innerHTML = `<div id="cal">
-  <div class="page-head"><div><h1>Kalender</h1><p>Zahlungen, Services, Schlüssel-Fristen, Team- und private Termine</p></div>
+  <div class="page-head"><div><h1>Kalender</h1><p>Zahlungen, Services, Schlüssel-Fristen, Termine der Organisation und private Termine</p></div>
     <div class="actions">${can('calendar:create') ? '<button class="btn" id="cal-new">Neuer Termin</button>' : ''}</div></div>
   <div class="cal-layout"><div class="card cal-main"><div class="cal-bar"><div class="row start">
     <button class="btn ghost sm" data-nav="-1" aria-label="Zurück">‹</button><button class="btn ghost sm" data-nav="0">Heute</button><button class="btn ghost sm" data-nav="1" aria-label="Weiter">›</button><h2 id="cal-title"></h2></div>
@@ -36,7 +36,7 @@ export async function render(view) {
     <div class="card"><div class="card-head"><h2>Zahlungen im Monat</h2></div><div id="cal-sum" class="stack"></div></div></div></div></div>`;
   $('#m-event')?.remove();
   $('#modals').insertAdjacentHTML('beforeend', MODAL);
-  $('#ev-team').innerHTML = teams.filter((t) => t.role !== 'viewer').map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+  $('#ev-team').innerHTML = teams.filter((t) => t.levels.calendar >= 3).map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
   $('#ev-type option[value=team]').disabled = !$('#ev-team').options.length;
   initCalendar();
 }

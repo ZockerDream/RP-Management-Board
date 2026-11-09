@@ -24,7 +24,7 @@ test('messages name the field in German', () => {
   assert.equal(message(z.object({ hours: z.number().max(24) }), { hours: 25 }), 'Stunden darf höchstens 24 sein');
   assert.equal(message(z.object({ email: z.string().email() }), { email: 'x' }), 'E-Mail ist keine gültige E-Mail-Adresse');
   assert.equal(message(z.object({ title: z.string() }), {}), 'Titel fehlt');
-  assert.equal(message(z.object({ team_id: z.string().uuid() }), { team_id: 'x' }), 'Team hat kein gültiges Format');
+  assert.equal(message(z.object({ team_id: z.string().uuid() }), { team_id: 'x' }), 'Organisation hat kein gültiges Format');
   assert.equal(message(z.object({ amount: z.number().multipleOf(0.01) }), { amount: 1.234 }), 'Betrag hat zu viele Nachkommastellen');
 });
 

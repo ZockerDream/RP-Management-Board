@@ -11,14 +11,14 @@ const errBox = (x) => `<div class="card"><p class="auth-error">${esc(x.message)}
 const btn = (attr, label) => `<button class="btn ghost sm" ${attr}>${label}</button>`;
 
 const SECTIONS = {
-  users: { title: 'User-Management', desc: 'Benutzer, Rollen, Gruppen und Teams', tabs: ['users', 'roles', 'groups', 'teams'] },
+  users: { title: 'User-Management', desc: 'Benutzer, Rollen, Gruppen und Organisationen', tabs: ['users', 'roles', 'groups', 'teams'] },
   server: { title: 'Server-Management', desc: 'Übersicht, Sicherheit, System, Integrationen und Audit-Log', tabs: ['overview', 'settings', 'system', 'integr', 'audit'] },
   tickets: { title: 'Tickets', desc: 'Gemeldete Fehler und Anfragen', tabs: ['tickets'] },
 };
 
 export async function render(view, params, section) {
   const meta = SECTIONS[section] || SECTIONS.users;
-  const ALL = [['overview', 'Übersicht', 'admin:access'], ['tickets', 'Tickets', 'admin:access'], ['users', 'Benutzer', 'user:read'], ['roles', 'Rollen & Rechte', 'role:read'], ['groups', 'Gruppen', 'group:read'], ['teams', 'Teams', 'team:read'],
+  const ALL = [['overview', 'Übersicht', 'admin:access'], ['tickets', 'Tickets', 'admin:access'], ['users', 'Benutzer', 'user:read'], ['roles', 'Rollen & Rechte', 'role:read'], ['groups', 'Gruppen', 'group:read'], ['teams', 'Organisationen', 'team:read'],
     ['settings', 'Sicherheit & Einstellungen', 'settings:read'], ['system', 'System & Backups', 'settings:read'], ['integr', 'Integrationen', 'settings:read'], ['audit', 'Audit-Log', 'audit:read']].filter((t) => meta.tabs.includes(t[0]) && can(t[2]));
   const D = { roles: [], groups: [], users: [] };
   view.innerHTML = `<div class="page-head"><div><h1>${meta.title}</h1><p>${meta.desc}</p></div><div class="actions" id="ad-actions"></div></div>
@@ -107,7 +107,7 @@ export async function render(view, params, section) {
       const o = await api.get('/admin/overview');
       const s = o.stats;
       el.innerHTML = `<div class="grid cols-4">${[['Benutzer', `${s.active_users} / ${s.users}`, 'aktiv / gesamt'], ['Mit 2FA', s.users_2fa, `von ${s.users}`], ['Logins (24 h)', s.logins_24h, `${s.failed_24h} fehlgeschlagen`], ['Aktive Sitzungen', s.sessions, '']].map(([l, v, d]) => `<div class="card kpi"><span class="label">${l}</span><span class="value">${v}</span><span class="delta muted">${d}</span></div>`).join('')}</div>
-      <div class="grid cols-4">${[['Teams', s.teams], ['Konten', s.budgets], ['Buchungen', s.transactions]].map(([l, v]) => `<div class="card kpi"><span class="label">${l}</span><span class="value">${v}</span></div>`).join('')}</div>
+      <div class="grid cols-4">${[['Organisationen', s.teams], ['Konten', s.budgets], ['Buchungen', s.transactions]].map(([l, v]) => `<div class="card kpi"><span class="label">${l}</span><span class="value">${v}</span></div>`).join('')}</div>
       <div class="grid cols-21"><div class="card"><div class="card-head"><h2>Aktivität (14 Tage)</h2></div><div class="chart" id="ad-act"></div></div>
       <div class="card"><div class="card-head"><h2>Rollenverteilung</h2></div>${o.roles.map((r) => `<div class="list-item"><div class="grow">${esc(r.name)}</div><b>${r.n}</b></div>`).join('')}</div></div>
       <div class="card"><div class="card-head"><h2>Letzte Ereignisse</h2></div>${o.recent.length ? o.recent.map((r) => `<div class="list-item"><div class="grow"><b>${esc(r.action)}</b><small>${esc(r.user_name || 'System')} · ${esc(r.entity || '')}</small></div><small>${fdatetime(r.created_at)}</small></div>`).join('') : empty('Keine Ereignisse.')}</div>`;
@@ -145,7 +145,7 @@ export async function render(view, params, section) {
     },
     async teams(el) {
       const t = await api.get('/admin/teams');
-      el.innerHTML = `<div class="card">${t.length ? `<table class="table"><thead><tr><th>Team</th><th>Eigentümer</th><th>Mitglieder</th><th>Konten</th><th>Status</th></tr></thead><tbody>${t.map((x) => `<tr><td><b>${esc(x.name)}</b></td><td>${esc(x.owner)}</td><td>${x.members}</td><td>${x.budgets}</td><td>${esc(x.status)}</td></tr>`).join('')}</tbody></table>` : empty('Keine Teams.')}</div>`;
+      el.innerHTML = `<div class="card">${t.length ? `<table class="table"><thead><tr><th>Organisation</th><th>Erstellt von</th><th>Mitglieder</th><th>Konten</th><th>Status</th></tr></thead><tbody>${t.map((x) => `<tr><td><b>${esc(x.name)}</b></td><td>${esc(x.owner)}</td><td>${x.members}</td><td>${x.budgets}</td><td>${esc(x.status)}</td></tr>`).join('')}</tbody></table>` : empty('Keine Organisationen.')}</div>`;
     },
     async settings(el) {
       const { values: v, env } = await api.get('/admin/settings');

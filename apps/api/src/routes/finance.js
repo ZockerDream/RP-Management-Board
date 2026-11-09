@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { one, many, q, tx } from '../db.js';
-import { authz, bad, notFound, forbidden, budgetAccess, accessibleBudgetIds } from '../authz.js';
+import { authz, bad, notFound, budgetAccess, accessibleBudgetIds } from '../authz.js';
+import { LEVEL, recordOwner, teamLevel } from '../org.js';
 import { addDefaultCategories } from '../seed.js';
 import { periodRange, budgetUsed, budgetWatch, toCsv, today, notify } from '../lib.js';
 import { audit } from '../audit.js';
@@ -22,7 +23,7 @@ const budgetBody = z.object({
   limit_amount: money.default('0'),
 });
 
-async function decorate(b, role, teamName) {
+async function decorate(b, level, teamName) {
   const used = await budgetUsed(b);
   const lim = Number(b.limit_amount);
   const cats = await many(
@@ -36,29 +37,29 @@ async function decorate(b, role, teamName) {
      FROM transactions WHERE budget_id=$1 AND booked_at <= $2`,
     [b.id, today()],
   );
-  return { ...b, role, team_name: teamName || null, income: totals.income, expenses: totals.expenses, balance: (Number(totals.income) - Number(totals.expenses)).toFixed(2), used, pct: lim > 0 ? Math.round((Number(used) / lim) * 1000) / 10 : 0, categories: cats };
+  return { ...b, level, team_name: teamName || null, income: totals.income, expenses: totals.expenses, balance: (Number(totals.income) - Number(totals.expenses)).toFixed(2), used, pct: lim > 0 ? Math.round((Number(used) / lim) * 1000) / 10 : 0, categories: cats };
 }
 
 export default async function routes(app) {
   // ---- Konten
   app.get('/budgets', authz('budget:read'), async (req) => {
     const rows = await many(
-      `SELECT b.*, t.name team_name, CASE WHEN b.type='solo' THEN 'owner' ELSE tm.team_role END role
-       FROM budgets b LEFT JOIN teams t ON t.id=b.team_id LEFT JOIN team_members tm ON tm.team_id=b.team_id AND tm.user_id=$1
-       WHERE (b.type='solo' AND b.owner_user_id=$1) OR (b.type='shared' AND tm.user_id IS NOT NULL)
-       ORDER BY b.archived, b.type, b.name`,
+      `SELECT * FROM (
+         SELECT b.*, t.name team_name, CASE WHEN b.type='solo' THEN 4 ELSE team_level(b.team_id, $1, 'budget') END AS level
+         FROM budgets b LEFT JOIN teams t ON t.id=b.team_id
+         WHERE (b.type='solo' AND b.owner_user_id=$1) OR b.type='shared'
+       ) x WHERE x.level >= 2 ORDER BY x.archived, x.type, x.name`,
       [req.user.id],
     );
-    return Promise.all(rows.map((b) => decorate(b, b.role, b.team_name)));
+    return Promise.all(rows.map(({ level, ...b }) => decorate(b, level, b.team_name)));
   });
 
   app.post('/budgets', authz('budget:create'), async (req) => {
     const b = budgetBody.parse(req.body);
     if (b.period_type === 'custom' && (!b.period_start || !b.period_end || b.period_end < b.period_start)) throw bad('Zeitraum ungültig');
     if (b.type === 'shared') {
-      if (!b.team_id) throw bad('Team erforderlich');
-      const m = await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [b.team_id, req.user.id]);
-      if (!m || m.team_role === 'viewer') throw forbidden();
+      if (!b.team_id) throw bad('Organisation erforderlich');
+      await recordOwner(req.user.id, b.team_id, 'budget', LEVEL.WRITE);
     } else {
       const max = req.user.max_budgets ?? Math.max(...req.userRoles.map((r) => r.max_budgets ?? 1e9), 0);
       const n = (await one("SELECT count(*)::int n FROM budgets WHERE owner_user_id=$1 AND NOT archived", [req.user.id])).n;
@@ -92,8 +93,7 @@ export default async function routes(app) {
   });
 
   app.delete('/budgets/:id', authz('budget:delete'), async (req) => {
-    const { role } = await budgetAccess(req.user.id, req.params.id, true);
-    if (role !== 'owner') throw forbidden('Nur der Eigentümer kann ein Konto löschen');
+    await budgetAccess(req.user.id, req.params.id, LEVEL.MANAGE);
     // Objektkosten, die dieses Konto nutzen, zurücksetzen (sonst verletzt SET NULL den Kosten-Check)
     for (const t of ['properties', 'vehicles', 'keys']) {
       await q(`UPDATE ${t} SET cost_amount=NULL, cost_interval=NULL, cost_category_id=NULL, cost_recurring_id=NULL WHERE cost_budget_id=$1`, [req.params.id]);
@@ -248,15 +248,14 @@ export default async function routes(app) {
     frequency: z.enum(['daily', 'weekly', 'monthly', 'yearly', 'custom']), interval: z.number().int().min(1).max(3650).default(1), income_kind: z.enum(['other', 'salary']).default('other'),
     start_date: date, end_date: date.nullish(), active: z.boolean().default(true),
   });
-  const assetTables = { house: 'properties', vehicle: 'vehicles', key: 'keys' };
+  const assetTables = { house: ['properties', 'property'], vehicle: ['vehicles', 'vehicle'], key: ['keys', 'key'] };
   async function assertAssetRecurringAccess(req, rule, write = false) {
-    const table = assetTables[rule.asset_type];
+    const [table, module] = assetTables[rule.asset_type] || [];
     if (!table || !rule.asset_id) throw notFound();
     const asset = await one(`SELECT owner_user_id,team_id FROM ${table} WHERE id=$1`, [rule.asset_id]);
-    if (!asset) throw notFound();
-    if (asset.owner_user_id === req.user.id) return table;
-    const member = asset.team_id && await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [asset.team_id, req.user.id]);
-    if (!member || (write && member.team_role === 'viewer')) throw notFound();
+    // Wie bisher: fehlendes Schreibrecht sieht von außen aus wie ein fremdes Objekt
+    const level = asset ? (asset.owner_user_id ? (asset.owner_user_id === req.user.id ? LEVEL.MANAGE : 0) : await teamLevel(req.user.id, asset.team_id, module)) : 0;
+    if (level < (write ? LEVEL.WRITE : LEVEL.READ)) throw notFound();
     return table;
   }
   app.get('/recurring/share-candidates', authz('recurring:create'), async (req) => many(
@@ -297,7 +296,7 @@ export default async function routes(app) {
          WHERE mine.user_id=$1 AND peer.user_id=$2 AND u.status='active' AND u.deleted_at IS NULL`,
         [req.user.id, b.recipient_user_id],
       );
-      if (!peer) throw bad('Der zweite Nutzer muss mit dir in einem Team sein');
+      if (!peer) throw bad('Der zweite Nutzer muss mit dir in einer Organisation sein');
     }
     const rule = await one(
       `INSERT INTO recurring_rules(name,budget_id,category_id,created_by,type,amount,frequency,interval,start_date,end_date,next_run,active,income_kind,recipient_user_id,recipient_status)

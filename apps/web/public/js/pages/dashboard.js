@@ -57,7 +57,7 @@ export async function render(view) {
   const weekStart = Number(state.me.week_start ?? 1);
 
   view.innerHTML = `<div class="page-head"><div><h1>Dashboard</h1><p>Willkommen zurück, ${esc(state.me.name)}</p></div>
-    <div class="actions"><div class="seg" id="d-scope"><button data-s="solo">Solo</button><button data-s="shared">Team</button><button data-s="all" class="on">Gesamt</button></div>
+    <div class="actions"><div class="seg" id="d-scope"><button data-s="solo">Solo</button><button data-s="shared">Organisation</button><button data-s="all" class="on">Gesamt</button></div>
     <div class="seg" id="d-view">${[['day', 'Tag'], ['week', 'Woche'], ['month', 'Monat']].map(([value, label]) => `<button data-v="${value}" class="${value === mode ? 'on' : ''}">${label}</button>`).join('')}</div>
     <select id="d-range" style="width:170px" aria-label="Zeitraum">${periodOptions(mode, weekStart)}</select>
     ${can('transaction:create') ? '<button class="btn" id="d-new">Buchung</button>' : ''}</div></div>
@@ -98,7 +98,7 @@ export async function render(view) {
     }
     upcoming.sort((a, b) => a.occurrence.localeCompare(b.occurrence) || (a.start || '').localeCompare(b.start || ''));
     const vehicleStatus = { available: ['ok', 'Verfügbar'], in_use: ['warn', 'Im Einsatz'], workshop: ['bad', 'Werkstatt'], retired: ['sys', 'Ausgemustert'] };
-    const eventTypes = { finance: 'Zahlung', vehicle: 'Fahrzeug', key: 'Schlüssel', house: 'Wartung', license: 'Lizenz', training: 'Schulung', team: 'Team', personal: 'Privat' };
+    const eventTypes = { finance: 'Zahlung', vehicle: 'Fahrzeug', key: 'Schlüssel', house: 'Wartung', license: 'Lizenz', training: 'Schulung', team: 'Organisation', personal: 'Privat' };
     const vehicleItems = vehicles.slice(0, 5);
     $('#d-body').innerHTML = `
       <div class="grid cols-4">

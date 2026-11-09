@@ -75,18 +75,20 @@ const costIntervalText = (interval, count) => interval === 'custom'
     ? `alle ${count} ${INTERVAL_UNITS[interval] || 'Einheiten'}`
     : INTERVAL[interval] || '–';
 const save = (path, o, body) => (o ? api.patch(`/${path}/${o.id}`, body) : api.post(`/${path}`, body));
-async function ownershipFields(o) {
-  const teams = can('team:read') ? (await api.get('/teams')).filter((team) => team.role !== 'viewer') : [];
+// Organisationen, in denen die Person diese Objektart anlegen und ändern darf
+async function ownershipFields(o, module) {
+  const teams = can('team:read') ? (await api.get('/teams')).filter((team) => team.levels[module] >= 3) : [];
+  if (o?.team_id && !teams.some((team) => team.id === o.team_id)) teams.push({ id: o.team_id, name: o.team_name || 'Organisation' });
   return [
-    { name: 'scope', label: 'Sichtbarkeit', type: 'select', options: [{ v: 'personal', l: 'Privat' }, ...(teams.length ? [{ v: 'team', l: 'Team' }] : [])], value: o?.team_id ? 'team' : 'personal' },
-    { name: 'team_id', label: 'Team', type: 'select', options: [{ v: '', l: '–' }, ...teams.map((team) => ({ v: team.id, l: team.name }))], value: o?.team_id || '' },
+    { name: 'scope', label: 'Sichtbarkeit', type: 'select', options: [{ v: 'personal', l: 'Privat' }, ...(teams.length ? [{ v: 'team', l: 'Organisation' }] : [])], value: o?.team_id ? 'team' : 'personal' },
+    { name: 'team_id', label: 'Organisation', type: 'select', options: [{ v: '', l: '–' }, ...teams.map((team) => ({ v: team.id, l: team.name }))], value: o?.team_id || '' },
   ];
 }
 const ownershipBody = (v) => ({ scope: v.scope, team_id: v.scope === 'team' ? v.team_id || null : null });
 
 async function formProperty(o, people) {
   const budgets = await loadBudgets();
-  const ownership = await ownershipFields(o);
+  const ownership = await ownershipFields(o, 'property');
   return costForm({
     title: o ? 'Haus bearbeiten' : 'Neues Haus / Objekt', wide: true, fields: [
       { name: 'name', label: 'Name', value: o?.name, required: true },
@@ -104,7 +106,7 @@ async function formProperty(o, people) {
 }
 async function formVehicle(o) {
   const budgets = await loadBudgets();
-  const ownership = await ownershipFields(o);
+  const ownership = await ownershipFields(o, 'vehicle');
   return costForm({
     title: o ? 'Fahrzeug bearbeiten' : 'Neues Fahrzeug', wide: true, fields: [
       { name: 'plate', label: 'Kennzeichen', value: o?.plate, required: true },
@@ -132,7 +134,7 @@ async function formVehicle(o) {
 }
 async function formKey(o, props, vehicles) {
   const budgets = await loadBudgets();
-  const ownership = await ownershipFields(o);
+  const ownership = await ownershipFields(o, 'key');
   return costForm({
     title: o ? 'Schlüssel bearbeiten' : 'Neuer Schlüssel', wide: true, fields: [
       { name: 'code', label: 'Schlüssel-Nr.', value: o?.code, required: true },
@@ -149,7 +151,7 @@ async function formKey(o, props, vehicles) {
   });
 }
 async function formPerson(o) {
-  const ownership = await ownershipFields(o);
+  const ownership = await ownershipFields(o, 'person');
   return openForm({
   title: o ? 'Person bearbeiten' : 'Neue Person', fields: [
     { name: 'name', label: 'Name', value: o?.name, required: true },
@@ -165,9 +167,9 @@ async function formPerson(o) {
   });
 }
 
-// Team-Viewer dürfen nur lesen, unabhängig von den allgemeinen Rechten ihrer Rolle
-const writable = (item) => item.role !== 'viewer';
-const actions = (item, perm) => (writable(item) ? `${can(`${perm}:update`) ? `<button class="btn ghost sm" data-edit="${item.id}">Bearbeiten</button>` : ''}${can(`${perm}:delete`) ? ` <button class="btn ghost sm" data-del="${item.id}">Löschen</button>` : ''}` : '');
+// Stufe in der Organisation: ändern ab „Lesen & Schreiben“, löschen mit „Verwalten“; dazu die allgemeinen Rechte der Rolle
+const writable = (item) => item.level >= 3;
+const actions = (item, perm) => (writable(item) ? `${can(`${perm}:update`) ? `<button class="btn ghost sm" data-edit="${item.id}">Bearbeiten</button>` : ''}${can(`${perm}:delete`) && item.level >= 4 ? ` <button class="btn ghost sm" data-del="${item.id}">Löschen</button>` : ''}` : '');
 
 const SECTIONS = {
   vehicles: { title: 'Fahrzeuge', desc: 'Fuhrpark, Service und Kosten', tabs: [['vehicles', 'Fahrzeuge']] },

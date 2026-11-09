@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { one, many, q } from '../db.js';
-import { requireAuth, recordRole, recordOwner } from '../authz.js';
+import { requireAuth } from '../authz.js';
+import { LEVEL, levelSql, recordLevel, recordOwner } from '../org.js';
 import { patchSchema } from '../validation.js';
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
@@ -18,19 +19,19 @@ const patchBody = patchSchema(createBody).extend({ done: z.boolean().optional() 
 
 export default async function routes(app) {
   app.get('/todos', requireAuth, async (req) => many(
-    `SELECT td.id, td.title, td.note, td.due_date, td.done_at, td.team_id, t.name team_name, td.created_at,
-       CASE WHEN td.owner_user_id=$1 THEN 'owner' ELSE tm.team_role END role, u.name done_by_name
-     FROM todos td LEFT JOIN teams t ON t.id=td.team_id
-       LEFT JOIN team_members tm ON tm.team_id=td.team_id AND tm.user_id=$1
-       LEFT JOIN users u ON u.id=td.done_by
-     WHERE td.owner_user_id=$1 OR tm.user_id IS NOT NULL
-     ORDER BY td.done_at IS NOT NULL, td.done_at DESC, td.due_date NULLS LAST, td.created_at LIMIT 1000`,
+    `SELECT * FROM (
+       SELECT td.id, td.title, td.note, td.due_date, td.done_at, td.team_id, t.name team_name, td.created_at,
+         ${levelSql('td', 'todos')} AS level, u.name done_by_name
+       FROM todos td LEFT JOIN teams t ON t.id=td.team_id LEFT JOIN users u ON u.id=td.done_by
+       WHERE td.owner_user_id=$1 OR td.team_id IS NOT NULL
+     ) x WHERE x.level >= 2
+     ORDER BY x.done_at IS NOT NULL, x.done_at DESC, x.due_date NULLS LAST, x.created_at LIMIT 1000`,
     [req.user.id],
   ));
 
   app.post('/todos', requireAuth, async (req) => {
     const b = createBody.parse(req.body);
-    const owner = await recordOwner(req.user.id, b.team_id);
+    const owner = await recordOwner(req.user.id, b.team_id, 'todos');
     return one(
       'INSERT INTO todos(owner_user_id,team_id,title,note,due_date,created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
       [owner.owner_user_id, owner.team_id, b.title, b.note, b.due_date || null, req.user.id],
@@ -39,10 +40,10 @@ export default async function routes(app) {
 
   app.patch('/todos/:id', requireAuth, async (req) => {
     const todo = await one('SELECT * FROM todos WHERE id=$1', [req.params.id]);
-    await recordRole(req.user.id, todo, true);
+    await recordLevel(req.user.id, todo, 'todos', { need: LEVEL.WRITE });
     const b = patchBody.parse(req.body);
     const moved = 'team_id' in b && (b.team_id || null) !== todo.team_id;
-    const owner = moved ? await recordOwner(req.user.id, b.team_id) : todo;
+    const owner = moved ? await recordOwner(req.user.id, b.team_id, 'todos') : todo;
     const isDone = b.done ?? Boolean(todo.done_at);
     const finishedNow = isDone && !todo.done_at;
     await q(
@@ -59,7 +60,7 @@ export default async function routes(app) {
 
   app.delete('/todos/:id', requireAuth, async (req) => {
     const todo = await one('SELECT * FROM todos WHERE id=$1', [req.params.id]);
-    await recordRole(req.user.id, todo, true);
+    await recordLevel(req.user.id, todo, 'todos', { need: LEVEL.WRITE });
     await q('DELETE FROM todos WHERE id=$1', [todo.id]);
     return { ok: true };
   });

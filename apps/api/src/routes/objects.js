@@ -7,34 +7,29 @@ import { audit } from '../audit.js';
 import { config } from '../config.js';
 import { decrypt, encrypt, totpValid, verifyPassword } from '../security.js';
 import { patchSchema } from '../validation.js';
+import { LEVEL, levelSql, visibleSql, recordLevel, recordOwner } from '../org.js';
 
 const money = z.union([z.string(), z.number()]).transform((v) => String(v).replace(',', '.')).refine((v) => /^\d{1,12}(\.\d{1,2})?$/.test(v), 'Ungültiger Betrag');
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const id = z.string().uuid();
 const str = (n = 200) => z.string().max(n);
 const ownerFields = { scope: z.enum(['personal', 'team']).default('personal'), team_id: id.nullish() };
-const ownerSql = (alias, n = '$1') => `(${alias}.owner_user_id=${n} OR ${alias}.team_id IN (SELECT team_id FROM team_members WHERE user_id=${n}))`;
-// Rolle in den Listen, damit die Oberfläche Aktionen für Viewer ausblenden kann
-const roleSql = (alias) => `CASE WHEN ${alias}.owner_user_id=$1 THEN 'owner' ELSE (SELECT tm.team_role FROM team_members tm WHERE tm.team_id=${alias}.team_id AND tm.user_id=$1) END`;
+// Funktion in der Organisation je Tabelle; sichtbar ab „Lesen“
+const MODULE_OF = { properties: 'property', vehicles: 'vehicle', keys: 'key', people: 'person' };
+const ownerSql = (alias, module, n = '$1') => visibleSql(alias, module, n);
 
-async function assertOwner(req, row, write = false) {
-  if (row.owner_user_id === req.user.id) return;
-  const member = row.team_id && await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [row.team_id, req.user.id]);
-  if (!member) throw notFound();
-  if (write && member.team_role === 'viewer') throw forbidden('Nur Team-Owner und -Editoren dürfen Team-Objekte ändern');
-}
+// Ändern ab „Lesen & Schreiben“, Löschen mit „Verwalten“
+const assertOwner = (req, row, module, need = LEVEL.WRITE) => recordLevel(req.user.id, row, module, { need });
 
-async function ownerValues(req, body) {
+async function ownerValues(req, body, module) {
   if (body.scope !== 'team') return { owner_user_id: req.user.id, team_id: null };
-  if (!body.team_id) throw bad('Team erforderlich');
-  const member = await one('SELECT team_role FROM team_members WHERE team_id=$1 AND user_id=$2', [body.team_id, req.user.id]);
-  if (!member || member.team_role === 'viewer') throw bad('Keine Berechtigung für dieses Team');
-  return { owner_user_id: null, team_id: body.team_id };
+  if (!body.team_id) throw bad('Organisation erforderlich');
+  return recordOwner(req.user.id, body.team_id, module);
 }
 async function assertVisible(req, table, recordId) {
   if (!recordId) return;
-  const row = await one(`SELECT x.owner_user_id,x.team_id FROM ${table} x WHERE x.id=$1 AND ${ownerSql('x', '$2')}`, [recordId, req.user.id]);
-  if (!row || (row.owner_user_id !== req.user.id && !(await one('SELECT 1 FROM team_members WHERE team_id=$1 AND user_id=$2', [row.team_id, req.user.id])))) throw bad('Verknüpftes Objekt ist nicht verfügbar');
+  const row = await one(`SELECT 1 FROM ${table} x WHERE x.id=$1 AND ${ownerSql('x', MODULE_OF[table], '$2')}`, [recordId, req.user.id]);
+  if (!row) throw bad('Verknüpftes Objekt ist nicht verfügbar');
 }
 
 const costFields = {
@@ -148,14 +143,14 @@ async function checkCostBudget(req, b) {
 }
 
 const keyStatusSql = `
-  SELECT k.*, ${roleSql('k')} AS role, p.name property_name, v.plate vehicle_plate, v.make_model vehicle_name,
+  SELECT k.*, ${levelSql('k', 'key')} AS level, p.name property_name, v.plate vehicle_plate, v.make_model vehicle_name,
     (SELECT count(*)::int FROM key_assignments a WHERE a.key_id=k.id AND a.returned_at IS NULL AND a.lost_at IS NULL) issued,
     (SELECT count(*)::int FROM key_assignments a WHERE a.key_id=k.id AND a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at < current_date) overdue,
     (SELECT count(*)::int FROM key_assignments a WHERE a.key_id=k.id AND a.returned_at IS NULL AND a.lost_at IS NOT NULL) lost,
     (SELECT COALESCE(json_agg(json_build_object('id', a.id, 'copy_no', a.copy_no, 'person_id', pe.id, 'person', pe.name, 'issued_at', a.issued_at, 'due_at', a.due_at, 'lost', a.lost_at IS NOT NULL, 'receipt_signed', a.receipt_signed) ORDER BY a.copy_no), '[]')
-       FROM key_assignments a LEFT JOIN people pe ON pe.id=a.person_id AND (pe.owner_user_id=$1 OR pe.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1)) WHERE a.key_id=k.id AND a.returned_at IS NULL) holders
-  FROM keys k LEFT JOIN properties p ON p.id=k.property_id AND (p.owner_user_id=$1 OR p.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1))
-  LEFT JOIN vehicles v ON v.id=k.vehicle_id AND (v.owner_user_id=$1 OR v.team_id IN (SELECT team_id FROM team_members WHERE user_id=$1))`;
+       FROM key_assignments a LEFT JOIN people pe ON pe.id=a.person_id AND ${ownerSql('pe', 'person')} WHERE a.key_id=k.id AND a.returned_at IS NULL) holders
+  FROM keys k LEFT JOIN properties p ON p.id=k.property_id AND ${ownerSql('p', 'property')}
+  LEFT JOIN vehicles v ON v.id=k.vehicle_id AND ${ownerSql('v', 'vehicle')}`;
 const withStatus = (k) => ({ ...k, status: k.lost > 0 ? 'lost' : k.overdue > 0 ? 'overdue' : k.issued > 0 ? 'out' : 'available' });
 
 // Unterlagen zu einer Person: Sie bleiben vollständig, deshalb lässt sich die Person weder löschen noch verschieben
@@ -176,22 +171,22 @@ export default async function routes(app) {
     phone: str(40).default(''), email: z.union([z.string().email(), z.literal('')]).default(''),     active: z.boolean().default(true), note: str(2000).default(''), ...ownerFields,
   });
   app.get('/people', authz('person:read'), async (req) =>
-    many(`SELECT pe.*, ${roleSql('pe')} AS role, (SELECT count(*)::int FROM key_assignments a JOIN keys k ON k.id=a.key_id
-        WHERE a.person_id=pe.id AND ${ownerSql('k')} AND a.returned_at IS NULL AND a.lost_at IS NULL) keys
-      FROM people pe WHERE ${ownerSql('pe')} ORDER BY active DESC, name`, [req.user.id]));
+    many(`SELECT pe.*, ${levelSql('pe', 'person')} AS level, (SELECT count(*)::int FROM key_assignments a JOIN keys k ON k.id=a.key_id
+        WHERE a.person_id=pe.id AND ${ownerSql('k', 'key')} AND a.returned_at IS NULL AND a.lost_at IS NULL) keys
+      FROM people pe WHERE ${ownerSql('pe', 'person')} ORDER BY active DESC, name`, [req.user.id]));
   app.post('/people', authz('person:create'), async (req) => {
     const b = personSchema.parse(req.body);
-    const owner = await ownerValues(req, b);
+    const owner = await ownerValues(req, b, 'person');
     return one('INSERT INTO people(name,kind,function,phone,email,active,note,owner_user_id,team_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id', [b.name, b.kind, b.function, b.phone, b.email, b.active, b.note, owner.owner_user_id, owner.team_id]);
   });
   app.patch('/people/:id', authz('person:update'), async (req) => {
     const before = await one('SELECT * FROM people WHERE id=$1', [req.params.id]);
     if (!before) throw notFound();
-    await assertOwner(req, before, true);
+    await assertOwner(req, before, 'person');
     const b = patchSchema(personSchema).parse(req.body);
     const patch = { ...b };
     if (patch.scope) {
-      Object.assign(patch, await ownerValues(req, { scope: patch.scope, team_id: patch.team_id }));
+      Object.assign(patch, await ownerValues(req, { scope: patch.scope, team_id: patch.team_id }, 'person'));
       // Akten, Lizenzen und Nachweise gehören zum Bereich der Person; ein Wechsel würde sie für die Beteiligten unsichtbar machen
       const moved = patch.team_id !== before.team_id || patch.owner_user_id !== before.owner_user_id;
       if (moved && await personHasRecords(before.id)) throw bad('Person hat Akten, Lizenzen oder Schulungsnachweise und kann die Sichtbarkeit nicht wechseln');
@@ -204,7 +199,7 @@ export default async function routes(app) {
   app.delete('/people/:id', authz('person:delete'), async (req) => {
     const person = await one('SELECT * FROM people WHERE id=$1', [req.params.id]);
     if (!person) throw notFound();
-    await assertOwner(req, person, true);
+    await assertOwner(req, person, 'person', LEVEL.MANAGE);
     if (await one('SELECT 1 FROM key_assignments WHERE person_id=$1 AND returned_at IS NULL', [req.params.id])) throw bad('Person hat noch Schlüssel – zuerst zurücknehmen');
     const linked = await personRecords(req.params.id);
     if (linked.length) throw bad(`Person hat noch ${linked.join(', ')} – deaktiviere sie stattdessen`);
@@ -217,14 +212,14 @@ export default async function routes(app) {
     const table = path;
     const kind = path;
     app.get(`/${path}`, authz(`${K.perm}:read`), async (req) => {
-      if (path === 'keys') return (await many(`${keyStatusSql} WHERE ${ownerSql('k')} ORDER BY k.label`, [req.user.id])).map(withStatus);
-      const rows = await many(`SELECT x.*, ${roleSql('x')} AS role, b.name cost_budget_name FROM ${table} x LEFT JOIN budgets b ON b.id=x.cost_budget_id WHERE ${ownerSql('x')} ORDER BY ${path === 'vehicles' ? 'x.plate' : 'x.name'}`, [req.user.id]);
+      if (path === 'keys') return (await many(`${keyStatusSql} WHERE ${ownerSql('k', 'key')} ORDER BY k.label`, [req.user.id])).map(withStatus);
+      const rows = await many(`SELECT x.*, ${levelSql('x', K.perm)} AS level, b.name cost_budget_name FROM ${table} x LEFT JOIN budgets b ON b.id=x.cost_budget_id WHERE ${ownerSql('x', K.perm)} ORDER BY ${path === 'vehicles' ? 'x.plate' : 'x.name'}`, [req.user.id]);
       if (path === 'properties') return rows.map(({ door_pin_enc, ...property }) => property);
       return rows;
     });
     app.post(`/${path}`, authz(`${K.perm}:create`), async (req) => {
       const b = K.schema.parse(req.body);
-      const owner = await ownerValues(req, b);
+      const owner = await ownerValues(req, b, K.perm);
       if (b.property_id) await assertVisible(req, 'properties', b.property_id);
       if (b.vehicle_id) await assertVisible(req, 'vehicles', b.vehicle_id);
       if (b.responsible_person_id) await assertVisible(req, 'people', b.responsible_person_id);
@@ -248,7 +243,7 @@ export default async function routes(app) {
     app.patch(`/${path}/:id`, authz(`${K.perm}:update`), async (req) => {
       const before = await one(`SELECT * FROM ${table} WHERE id=$1`, [req.params.id]);
       if (!before) throw notFound();
-      await assertOwner(req, before, true);
+      await assertOwner(req, before, K.perm);
       const b = patchSchema(K.base || K.schema).parse(req.body);
       const merged = { ...before, ...b };
       if (merged.property_id) await assertVisible(req, 'properties', merged.property_id);
@@ -256,7 +251,7 @@ export default async function routes(app) {
       if (merged.responsible_person_id) await assertVisible(req, 'people', merged.responsible_person_id);
       await checkCostBudget(req, merged);
       const patch = { ...b };
-      if (patch.scope) Object.assign(patch, await ownerValues(req, { scope: patch.scope, team_id: patch.team_id }));
+      if (patch.scope) Object.assign(patch, await ownerValues(req, { scope: patch.scope, team_id: patch.team_id }, K.perm));
       else delete patch.team_id;
       delete patch.scope;
       const keys = Object.keys(patch).filter((k) => [...K.cols, ...COST_COLS, 'owner_user_id', 'team_id'].includes(k));
@@ -271,7 +266,7 @@ export default async function routes(app) {
     app.delete(`/${path}/:id`, authz(`${K.perm}:delete`), async (req) => {
       const before = await one(`SELECT * FROM ${table} WHERE id=$1`, [req.params.id]);
       if (!before) throw notFound();
-      await assertOwner(req, before, true);
+      await assertOwner(req, before, K.perm, LEVEL.MANAGE);
       if (before.cost_recurring_id) await q('DELETE FROM recurring_rules WHERE id=$1', [before.cost_recurring_id]);
       if (path === 'keys' && (await one('SELECT 1 FROM key_assignments WHERE key_id=$1 AND returned_at IS NULL', [before.id]))) throw bad('Schlüssel ist ausgegeben');
       await q(`DELETE FROM ${table} WHERE id=$1`, [before.id]);
@@ -301,7 +296,7 @@ export default async function routes(app) {
   }, async (req) => {
     const credentials = z.object({ password: z.string().min(1), code: z.string().max(10).optional() }).parse(req.body);
     await reauthenticatePin(req, credentials);
-    const property = await one(`SELECT * FROM properties p WHERE p.id=$1 AND ${ownerSql('p', '$2')}`, [req.params.id, req.user.id]);
+    const property = await one(`SELECT * FROM properties p WHERE p.id=$1 AND ${ownerSql('p', 'property', '$2')}`, [req.params.id, req.user.id]);
     if (!property || !property.door_pin_enc) throw notFound('Kein Tür-PIN hinterlegt');
     await recordPinAccess(req, property.id, 'revealed');
     return { pin: decrypt(property.door_pin_enc) };
@@ -314,7 +309,7 @@ export default async function routes(app) {
     await reauthenticatePin(req, body);
     const property = await one('SELECT * FROM properties WHERE id=$1', [req.params.id]);
     if (!property) throw notFound();
-    await assertOwner(req, property, true);
+    await assertOwner(req, property, 'property');
     await tx(async (client) => {
       await client.query('UPDATE properties SET door_pin_enc=$2 WHERE id=$1', [property.id, body.pin ? encrypt(body.pin) : null]);
       await client.query(
@@ -326,7 +321,7 @@ export default async function routes(app) {
   });
 
   app.get('/keys/:id/qr', authz('key:read'), async (req) => {
-    const key = await one(`SELECT k.id FROM keys k WHERE k.id=$1 AND ${ownerSql('k', '$2')}`, [req.params.id, req.user.id]);
+    const key = await one(`SELECT k.id FROM keys k WHERE k.id=$1 AND ${ownerSql('k', 'key', '$2')}`, [req.params.id, req.user.id]);
     if (!key) throw notFound();
     const url = `${config.appUrl}/#/assets?tab=keys&key=${encodeURIComponent(key.id)}`;
     return { image: await QRCode.toDataURL(url, { errorCorrectionLevel: 'M', margin: 2, width: 320 }) };
@@ -338,13 +333,13 @@ export default async function routes(app) {
     return tx(async (c) => {
       const k = (await c.query('SELECT * FROM keys WHERE id=$1 FOR UPDATE', [req.params.id])).rows[0];
       if (!k) throw notFound();
-      await assertOwner(req, k, true);
+      await assertOwner(req, k, 'key');
       const used = (await c.query('SELECT copy_no FROM key_assignments WHERE key_id=$1 AND returned_at IS NULL AND lost_at IS NULL', [k.id])).rows.map((r) => r.copy_no);
       const lost = (await c.query('SELECT copy_no FROM key_assignments WHERE key_id=$1 AND returned_at IS NULL AND lost_at IS NOT NULL', [k.id])).rows.map((r) => r.copy_no);
       let n = 1;
       while ((used.includes(n) || lost.includes(n)) && n <= k.copies) n++;
       if (n > k.copies) throw bad('Keine freie Kopie verfügbar');
-      const person = (await c.query(`SELECT active FROM people pe WHERE pe.id=$1 AND ${ownerSql('pe', '$2')}`, [b.person_id, req.user.id])).rows[0];
+      const person = (await c.query(`SELECT active FROM people pe WHERE pe.id=$1 AND ${ownerSql('pe', 'person', '$2')}`, [b.person_id, req.user.id])).rows[0];
       if (!person?.active) throw bad('Person ist nicht aktiv');
       const a = (await c.query('INSERT INTO key_assignments(key_id,person_id,copy_no,due_at,issued_by_user_id,receipt_signed) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [k.id, b.person_id, n, b.due_at || null, req.user.id, b.receipt_signed])).rows[0];
       await audit(req, 'key.issued', 'key', k.id, { person: b.person_id, copy: n });
@@ -353,7 +348,7 @@ export default async function routes(app) {
   });
   for (const [action, set] of [['return', 'returned_at=now()'], ['lost', 'lost_at=now()']]) {
     app.post(`/assignments/:id/${action}`, authz('key:assign'), async (req) => {
-      const r = await one(`UPDATE key_assignments a SET ${set} FROM keys k WHERE a.key_id=k.id AND a.id=$1 AND (k.owner_user_id=$2 OR k.team_id IN (SELECT team_id FROM team_members WHERE user_id=$2 AND team_role<>'viewer')) AND a.returned_at IS NULL ${action === 'lost' ? 'AND a.lost_at IS NULL' : ''} RETURNING a.key_id`, [req.params.id, req.user.id]);
+      const r = await one(`UPDATE key_assignments a SET ${set} FROM keys k WHERE a.key_id=k.id AND a.id=$1 AND ${levelSql('k', 'key', '$2')} >= 3 AND a.returned_at IS NULL ${action === 'lost' ? 'AND a.lost_at IS NULL' : ''} RETURNING a.key_id`, [req.params.id, req.user.id]);
       if (!r) throw notFound();
       await audit(req, `key.${action}`, 'key', r.key_id);
       return { ok: true };
@@ -364,19 +359,19 @@ export default async function routes(app) {
   app.get('/assets/overview', authz('property:read'), async (req) => {
     const soon = addInterval(today(), 'daily', 30);
     const [counts, service, maint, keys] = await Promise.all([
-      one(`SELECT (SELECT count(*)::int FROM properties p WHERE ${ownerSql('p')}) properties,
-            (SELECT count(*)::int FROM vehicles v WHERE ${ownerSql('v')}) vehicles, (SELECT count(*)::int FROM keys k WHERE ${ownerSql('k')}) keys,
-            (SELECT count(*)::int FROM people pe WHERE pe.active AND ${ownerSql('pe')}) people,
-            (SELECT count(*)::int FROM key_assignments a JOIN keys k ON k.id=a.key_id WHERE ${ownerSql('k')} AND a.returned_at IS NULL AND a.lost_at IS NULL) issued`, [req.user.id]),
+      one(`SELECT (SELECT count(*)::int FROM properties p WHERE ${ownerSql('p', 'property')}) properties,
+            (SELECT count(*)::int FROM vehicles v WHERE ${ownerSql('v', 'vehicle')}) vehicles, (SELECT count(*)::int FROM keys k WHERE ${ownerSql('k', 'key')}) keys,
+            (SELECT count(*)::int FROM people pe WHERE pe.active AND ${ownerSql('pe', 'person')}) people,
+            (SELECT count(*)::int FROM key_assignments a JOIN keys k ON k.id=a.key_id WHERE ${ownerSql('k', 'key')} AND a.returned_at IS NULL AND a.lost_at IS NULL) issued`, [req.user.id]),
       many(`SELECT id, plate, make_model, service_due, odometer_km, service_due_km FROM vehicles v
-        WHERE ${ownerSql('v')} AND (
+        WHERE ${ownerSql('v', 'vehicle')} AND (
           (service_due IS NOT NULL AND service_due <= $2)
           OR (odometer_km IS NOT NULL AND service_due_km IS NOT NULL AND odometer_km >= service_due_km)
         ) ORDER BY service_due NULLS LAST, service_due_km`, [req.user.id, soon]),
-      many(`SELECT id, name, maintenance_due, maintenance_note FROM properties p WHERE ${ownerSql('p')} AND maintenance_due IS NOT NULL AND maintenance_due <= $2 ORDER BY maintenance_due`, [req.user.id, soon]),
+      many(`SELECT id, name, maintenance_due, maintenance_note FROM properties p WHERE ${ownerSql('p', 'property')} AND maintenance_due IS NOT NULL AND maintenance_due <= $2 ORDER BY maintenance_due`, [req.user.id, soon]),
       many(`SELECT k.id, k.label, a.due_at, a.copy_no, pe.name person, a.lost_at FROM key_assignments a JOIN keys k ON k.id=a.key_id
-            LEFT JOIN people pe ON pe.id=a.person_id AND ${ownerSql('pe', '$2')}
-            WHERE ${ownerSql('k')} AND a.returned_at IS NULL AND (a.lost_at IS NOT NULL OR a.due_at < current_date) ORDER BY a.due_at`, [req.user.id, req.user.id]),
+            LEFT JOIN people pe ON pe.id=a.person_id AND ${ownerSql('pe', 'person', '$2')}
+            WHERE ${ownerSql('k', 'key')} AND a.returned_at IS NULL AND (a.lost_at IS NOT NULL OR a.due_at < current_date) ORDER BY a.due_at`, [req.user.id, req.user.id]),
     ]);
     return { counts, vehicle_service: service, property_maintenance: maint, key_alerts: keys };
   });
@@ -385,7 +380,7 @@ export default async function routes(app) {
     const parts = ['properties:name:house', 'vehicles:make_model:vehicle', 'keys:label:key'].map((s) => s.split(':'));
     const items = [];
     for (const [t, col, type] of parts) {
-      items.push(...(await many(`SELECT '${type}' type, x.id, x.${col} name, x.cost_amount amount, x.cost_interval interval, x.cost_interval_count interval_count, x.cost_tracking tracking, b.name budget_name FROM ${t} x LEFT JOIN budgets b ON b.id=x.cost_budget_id WHERE ${ownerSql('x')} AND x.cost_amount IS NOT NULL`, [req.user.id])));
+      items.push(...(await many(`SELECT '${type}' type, x.id, x.${col} name, x.cost_amount amount, x.cost_interval interval, x.cost_interval_count interval_count, x.cost_tracking tracking, b.name budget_name FROM ${t} x LEFT JOIN budgets b ON b.id=x.cost_budget_id WHERE ${ownerSql('x', MODULE_OF[t])} AND x.cost_amount IS NOT NULL`, [req.user.id])));
     }
     const factor = { once: 0, daily: 365, weekly: 52, monthly: 12, yearly: 1 };
     for (const i of items) i.yearly = (Number(i.amount) * (i.interval === 'custom' ? 365 : factor[i.interval]) / Number(i.interval_count || 1)).toFixed(2);
@@ -395,9 +390,9 @@ export default async function routes(app) {
   app.get('/assets/log', authz('key:read'), async (req) =>
     many(
       `SELECT * FROM (
-         SELECT a.issued_at at, 'issued' event, k.label, pe.name person, a.copy_no FROM key_assignments a JOIN keys k ON k.id=a.key_id LEFT JOIN people pe ON pe.id=a.person_id AND ${ownerSql('pe', '$1')} WHERE ${ownerSql('k')}
-         UNION ALL SELECT a.returned_at, 'returned', k.label, pe.name, a.copy_no FROM key_assignments a JOIN keys k ON k.id=a.key_id LEFT JOIN people pe ON pe.id=a.person_id AND ${ownerSql('pe', '$1')} WHERE ${ownerSql('k')} AND a.returned_at IS NOT NULL
-         UNION ALL SELECT a.lost_at, 'lost', k.label, pe.name, a.copy_no FROM key_assignments a JOIN keys k ON k.id=a.key_id LEFT JOIN people pe ON pe.id=a.person_id AND ${ownerSql('pe', '$1')} WHERE ${ownerSql('k')} AND a.lost_at IS NOT NULL
+         SELECT a.issued_at at, 'issued' event, k.label, pe.name person, a.copy_no FROM key_assignments a JOIN keys k ON k.id=a.key_id LEFT JOIN people pe ON pe.id=a.person_id AND ${ownerSql('pe', 'person')} WHERE ${ownerSql('k', 'key')}
+         UNION ALL SELECT a.returned_at, 'returned', k.label, pe.name, a.copy_no FROM key_assignments a JOIN keys k ON k.id=a.key_id LEFT JOIN people pe ON pe.id=a.person_id AND ${ownerSql('pe', 'person')} WHERE ${ownerSql('k', 'key')} AND a.returned_at IS NOT NULL
+         UNION ALL SELECT a.lost_at, 'lost', k.label, pe.name, a.copy_no FROM key_assignments a JOIN keys k ON k.id=a.key_id LEFT JOIN people pe ON pe.id=a.person_id AND ${ownerSql('pe', 'person')} WHERE ${ownerSql('k', 'key')} AND a.lost_at IS NOT NULL
        ) l ORDER BY at DESC LIMIT 200`, [req.user.id],
     ));
 }

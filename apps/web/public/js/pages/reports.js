@@ -11,7 +11,7 @@ const ASSET = { house: 'Häuser', vehicle: 'Fahrzeuge', key: 'Schlüssel', sonst
 export async function render(view) {
   let months = 6, scope = 'all';
   view.innerHTML = `<div class="page-head"><div><h1>Berichte</h1><p>Auswertungen und automatische Berichte per E-Mail</p></div>
-    <div class="actions"><div class="seg" id="r-scope"><button data-s="solo">Solo</button><button data-s="shared">Team</button><button data-s="all" class="on">Gesamt</button></div>
+    <div class="actions"><div class="seg" id="r-scope"><button data-s="solo">Solo</button><button data-s="shared">Organisation</button><button data-s="all" class="on">Gesamt</button></div>
     <select id="r-months" style="width:170px"><option value="3">3 Monate</option><option value="6" selected>6 Monate</option><option value="12">12 Monate</option></select></div></div>
     <div id="r-body"></div>
     <div class="card"><div class="card-head"><h2>Geplante Berichte</h2>${can('report:create') ? '<button class="btn ghost sm" id="s-new">Bericht planen</button>' : ''}</div><div id="s-body"></div></div>`;

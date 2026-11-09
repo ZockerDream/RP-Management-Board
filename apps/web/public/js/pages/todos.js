@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { $, esc, empty, fdate, fdatetime, tag, todayStr, openForm, confirmBox, toast } from '../ui.js';
 import { writableTeams, visibilityField, scopeTag } from './common.js';
+import { markdownBlock, MARKDOWN_HELP } from '../markdown.js';
 
 const dueOf = (todo) => (todo?.due_date ? String(todo.due_date).slice(0, 10) : '');
 const tomorrowStr = () => {
@@ -25,7 +26,7 @@ const todoForm = (todo, teams) => openForm({
     { name: 'title', label: 'Aufgabe', value: todo?.title, required: true, maxlength: 200, full: true },
     { name: 'due_date', label: 'Deadline (optional)', type: 'date', value: dueOf(todo), help: 'Erinnerung einen Tag vorher, am Fälligkeitstag und wenn es überfällig ist.' },
     visibilityField(teams, todo),
-    { name: 'note', label: 'Notiz', type: 'textarea', value: todo?.note, rows: 4, maxlength: 5000, full: true },
+    { name: 'note', label: 'Notiz', type: 'textarea', value: todo?.note, rows: 4, maxlength: 5000, full: true, help: MARKDOWN_HELP },
   ],
   onSubmit: async (values) => {
     const body = { title: values.title.trim(), note: values.note, due_date: values.due_date || null, team_id: values.team_id || null };
@@ -40,19 +41,19 @@ export async function render(view) {
   let todos = [];
   let status = 'open';
   let scope = 'all';
-  const teams = await writableTeams();
-  view.innerHTML = `<div class="page-head"><div><h1>ToDos</h1><p>Aufgaben für dich oder dein Team, auf Wunsch mit Deadline</p></div>
+  const teams = await writableTeams('todos');
+  view.innerHTML = `<div class="page-head"><div><h1>ToDos</h1><p>Aufgaben für dich oder deine Organisation, auf Wunsch mit Deadline</p></div>
     <div class="actions"><div class="seg" id="t-status"><button data-status="open" class="on">Offen</button><button data-status="done">Erledigt</button><button data-status="all">Alle</button></div>
-    <div class="seg" id="t-scope"><button data-s="all" class="on">Alle</button><button data-s="solo">Solo</button><button data-s="team">Team</button></div>
+    <div class="seg" id="t-scope"><button data-s="all" class="on">Alle</button><button data-s="solo">Solo</button><button data-s="team">Organisation</button></div>
     <button class="btn" id="t-new">Neues ToDo</button></div></div><div id="t-list"></div>`;
 
   const row = (todo, today) => {
     const done = Boolean(todo.done_at);
-    const readOnly = todo.role === 'viewer';
+    const readOnly = todo.level < 3;
     return `<div class="list-item todo-row">
       <input type="checkbox" data-done="${todo.id}" aria-label="${esc(todo.title)} erledigt" ${done ? 'checked' : ''} ${readOnly ? 'disabled' : ''}>
       <div class="grow"><b class="${done ? 'todo-done' : ''}">${esc(todo.title)}</b>
-        ${todo.note ? `<small class="text-block">${esc(todo.note)}</small>` : ''}
+        ${todo.note ? markdownBlock(todo.note, 'small text-block') : ''}
         ${done ? `<small>Erledigt ${fdatetime(todo.done_at)}${todo.done_by_name ? ` von ${esc(todo.done_by_name)}` : ''}</small>` : ''}</div>
       ${deadlineTag(todo, today)}${scopeTag(todo)}
       ${readOnly ? '' : `<div class="row start"><button class="btn ghost sm" data-edit="${todo.id}">Bearbeiten</button><button class="btn ghost sm" data-del="${todo.id}">Löschen</button></div>`}

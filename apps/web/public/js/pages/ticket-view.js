@@ -1,19 +1,20 @@
 import { api } from '../api.js';
 import { esc, fdatetime, confirmBox, toast } from '../ui.js';
 import { state } from '../app.js';
+import { markdownBlock } from '../markdown.js';
 
 const commentHtml = (ticket, comment, admin) => `<div class="ticket-comment">
   <div class="row"><small><b>${esc(comment.user_name)}</b> · ${fdatetime(comment.created_at)}</small>
   ${admin || comment.user_id === state.me.id ? `<button type="button" class="link" data-comment-del="${esc(comment.id)}" data-ticket="${esc(ticket.id)}">Löschen</button>` : ''}</div>
-  <p>${esc(comment.body)}</p></div>`;
+  ${markdownBlock(comment.body)}</div>`;
 
 // Gemeinsame Darstellung für „Tickets“ (Admin) und „Fehler melden“ (eigene Tickets)
 export const ticketHtml = (ticket, admin = false) => `<div class="list-item ticket">
   <div class="grow">
     <b>#${esc(ticket.id)} · ${esc(ticket.title)}</b>
     <small>${admin ? `${esc(ticket.user_name)} · ${esc(ticket.user_email)} · ` : ''}${fdatetime(ticket.created_at)}</small>
-    <p class="text-block">${esc(ticket.description)}</p>
-    ${ticket.steps ? `<small class="text-block">Schritte: ${esc(ticket.steps)}</small>` : ''}
+    ${markdownBlock(ticket.description, 'text-block')}
+    ${ticket.steps ? `<small class="muted">Schritte:</small>${markdownBlock(ticket.steps, 'small text-block')}` : ''}
     ${ticket.github_url ? `<small><a href="${esc(ticket.github_url)}" target="_blank" rel="noopener noreferrer">GitHub-Issue #${esc(ticket.github_issue_number)}</a></small>` : ''}
     ${ticket.github_sync_error ? `<small class="auth-error">GitHub-Synchronisierung fehlgeschlagen: ${esc(ticket.github_sync_error)}</small>` : ''}
     <div class="ticket-comments">${(ticket.comments || []).map((comment) => commentHtml(ticket, comment, admin)).join('')}</div>

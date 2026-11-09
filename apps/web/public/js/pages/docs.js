@@ -5,7 +5,7 @@ import { renderMarkdown } from '../markdown.js';
 import { writableTeams, visibilityField, scopeTag } from './common.js';
 
 const FORMAT_HELP = 'Formatierung: # Überschrift, **fett**, *kursiv*, - Liste, 1. nummerierte Liste, > Zitat, --- Trennlinie, [Text](https://…)';
-const scopeName = (category) => (category.team_id ? `Team: ${category.team_name}` : 'Solo');
+const scopeName = (category) => (category.team_id ? category.team_name : 'Solo');
 
 const categoryForm = (category, teams) => openForm({
   title: category ? 'Kategorie bearbeiten' : 'Neue Kategorie',
@@ -24,7 +24,7 @@ const categoryForm = (category, teams) => openForm({
 
 function pageForm(page, categories, preset) {
   // Neue Seiten in jede beschreibbare Kategorie; vorhandene nur innerhalb ihres Bereichs verschieben
-  const writable = categories.filter((c) => c.role !== 'viewer');
+  const writable = categories.filter((c) => c.level >= 3);
   const choices = page ? writable.filter((c) => (c.team_id || null) === (page.team_id || null)) : writable;
   if (!choices.length) { toast('Lege zuerst eine Kategorie an, in die du schreiben darfst', true); return Promise.resolve(false); }
   return openForm({
@@ -51,8 +51,9 @@ export async function render(view, params) {
   let current = null;
   let selected = '';
   let query = '';
-  const teams = can('team:read') ? await writableTeams() : [];
-  view.innerHTML = `<div class="page-head"><div><h1>Dokumentationen</h1><p>Gesetze, Funktionen und weitere Nachschlagewerke, solo oder im Team</p></div>
+  // Kategorien anlegen braucht „Verwalten“ bei Dokumentationen; Rechte gelten auch pro Kategorie
+  const teams = can('team:read') ? await writableTeams('doc', 4) : [];
+  view.innerHTML = `<div class="page-head"><div><h1>Dokumentationen</h1><p>Gesetze, Funktionen und weitere Nachschlagewerke, solo oder in einer Organisation</p></div>
     <div class="actions">${can('doc:create') ? '<button class="btn ghost" id="d-cat-new">Neue Kategorie</button><button class="btn" id="d-new">Neue Seite</button>' : ''}</div></div>
     <div class="toolbar"><input id="d-search" type="search" class="search" placeholder="Alle Seiten durchsuchen…" aria-label="Dokumentationen durchsuchen"></div>
     <div class="docs-layout"><div class="card" id="d-cats"></div><div class="stack" id="d-main"></div></div>`;
@@ -64,8 +65,8 @@ export async function render(view, params) {
       <button class="list-item doc-cat ${!selected ? 'on' : ''}" data-cat=""><span class="grow">Alle Seiten</span></button>
       ${[...groups].map(([scope, list]) => `<small class="muted doc-scope">${esc(scope)}</small>${list.map((c) => `<div class="doc-cat-row">
         <button class="list-item doc-cat ${selected === c.id ? 'on' : ''}" data-cat="${c.id}"><span class="grow">${esc(c.name)}</span><small class="muted">${c.pages}</small></button>
-        ${c.role !== 'viewer' && can('doc:update') ? `<button class="btn ghost sm" data-cat-edit="${c.id}" aria-label="Kategorie ${esc(c.name)} bearbeiten">Bearbeiten</button>` : ''}
-        ${c.role !== 'viewer' && can('doc:delete') && !c.pages ? `<button class="btn ghost sm" data-cat-del="${c.id}" aria-label="Kategorie ${esc(c.name)} löschen">Löschen</button>` : ''}</div>`).join('')}`).join('')}
+        ${c.level >= 4 && can('doc:update') ? `<button class="btn ghost sm" data-cat-edit="${c.id}" aria-label="Kategorie ${esc(c.name)} bearbeiten">Bearbeiten</button>` : ''}
+        ${c.level >= 4 && can('doc:delete') && !c.pages ? `<button class="btn ghost sm" data-cat-del="${c.id}" aria-label="Kategorie ${esc(c.name)} löschen">Löschen</button>` : ''}</div>`).join('')}`).join('')}
       ${categories.length ? '' : empty('Noch keine Kategorien. Lege zum Beispiel „Gesetze“ oder „Funktionen“ an.')}`;
   }
   function drawList() {
@@ -77,12 +78,12 @@ export async function render(view, params) {
   }
   function drawPage() {
     const p = current;
-    const writable = p.role !== 'viewer';
+    const writable = p.level >= 3;
     $('#d-main').innerHTML = `<article class="card doc-article"><div class="card-head"><div><h2>${esc(p.title)}</h2>
         <small class="muted">${esc(p.category_name)} · ${scopeTag({ team_id: p.team_id, team_name: categories.find((c) => c.id === p.category_id)?.team_name })} · geändert ${fdatetime(p.updated_at)}${p.updated_by_name ? ` von ${esc(p.updated_by_name)}` : ''}</small></div>
         <div class="row"><button class="btn ghost sm" id="d-back">Zurück</button>
         ${writable && can('doc:update') ? `<button class="btn ghost sm" id="d-edit">Bearbeiten</button>` : ''}
-        ${writable && can('doc:delete') ? `<button class="btn ghost sm" id="d-del">Löschen</button>` : ''}</div></div>
+        ${p.level >= 4 && can('doc:delete') ? `<button class="btn ghost sm" id="d-del">Löschen</button>` : ''}</div></div>
       <div class="doc-body">${p.body.trim() ? renderMarkdown(p.body) : empty('Diese Seite hat noch keinen Text.')}</div></article>`;
   }
   async function loadCategories() {

@@ -213,7 +213,15 @@ export default async function routes(app) {
       many(`SELECT c.id, c.name, COALESCE(json_agg(json_build_object('title', p.title, 'body', p.body, 'updated_at', p.updated_at) ORDER BY p.title) FILTER (WHERE p.id IS NOT NULL), '[]') pages
         FROM doc_categories c LEFT JOIN doc_pages p ON p.category_id=c.id WHERE c.owner_user_id=$1 GROUP BY c.id ORDER BY c.name`, [req.user.id]),
     ]);
-    return { exported_at: new Date().toISOString(), user: u, budgets, transactions, work_entries, work_projects, work_timer: timer, contacts, calendar_events, notes, todos, bug_reports, bug_report_comments, training_records, case_files, license_types, trainings, doc_categories };
+    // Mitgliedschaften in Organisationen: Rang, Gruppen und persönlich gesetzte Rechte
+    const organisations = await many(
+      `SELECT t.name, tm.is_owner, r.name rank,
+         COALESCE((SELECT array_agg(g.name ORDER BY g.name) FROM team_group_members gm JOIN team_groups g ON g.id=gm.group_id WHERE gm.team_id=tm.team_id AND gm.user_id=tm.user_id), '{}') groups,
+         COALESCE((SELECT json_agg(json_build_object('module', p.module, 'scope_id', p.scope_id, 'level', p.level)) FROM team_permissions p WHERE p.team_id=tm.team_id AND p.user_id=tm.user_id), '[]') personal_permissions
+       FROM team_members tm JOIN teams t ON t.id=tm.team_id LEFT JOIN team_ranks r ON r.id=tm.rank_id WHERE tm.user_id=$1 ORDER BY t.name`,
+      [req.user.id],
+    );
+    return { exported_at: new Date().toISOString(), user: u, organisations, budgets, transactions, work_entries, work_projects, work_timer: timer, contacts, calendar_events, notes, todos, bug_reports, bug_report_comments, training_records, case_files, license_types, trainings, doc_categories };
   });
 }
 
