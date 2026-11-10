@@ -45,6 +45,8 @@ const LABELS = {
   // Test im Tool (Schulungen)
   exam_required: 'Test nötig', exam_pass_percent: 'Bestehensgrenze', exam_time_limit: 'Zeitlimit', exam_max_attempts: 'Versuche',
   exam_shuffle: 'Mischen', exam_after_session: 'Test nach Teilnahme', options: 'Antworten', answers: 'Antworten', explanation: 'Erklärung',
+  // Zinsen, Bilder
+  interest_rate: 'Zinssatz', interest_period: 'Zinszeitraum', caption: 'Bildunterschrift',
 };
 
 function subject(path) {

@@ -8,6 +8,10 @@ import { markdownBlock } from '../markdown.js';
 import * as P from './case-parts.js';
 import { drawPeople } from './person-files.js';
 import { drawWanted, drawCodes, drawTemplates } from './case-admin.js';
+import { galleryHtml, fillGallery, galleryAction, uploadImageForm, isImage } from '../gallery.js';
+
+// Bilder einer Akte sind ihre PNG-/JPEG-Anhänge; Bild und Datei laufen über dieselbe Adresse
+const imageUrls = { file: (id) => `/case-file-attachments/${id}`, item: (id) => `/case-file-attachments/${id}` };
 
 export const { CASE_STATUS } = P;
 const KIND_SUGGESTIONS = ['Vermerk', 'Vernehmung', 'Verstoß', 'Beweismittel', 'Auszeichnung', 'Gespräch', 'Entscheidung', 'Telefonat', 'Ermittlung'];
@@ -185,9 +189,12 @@ export async function render(view, params) {
     const flags = { w, m: manageable(), me: state.me.id, owner: f.owner };
     const activeWarrants = f.warrants.filter((x) => x.status === 'active').length;
     const waiting = f.reports.filter((r) => r.status === 'submitted').length;
+    const images = f.attachments.filter(isImage);
+    const documents = f.attachments.filter((a) => !isImage(a));
     const tabs = [
       ['d-overview', 'Übersicht'], ['d-reports', `Berichte (${f.reports.length})`], ['d-charges', `Anklagen (${f.charges.length})`],
-      ['d-evidence', `Beweismittel (${f.evidence.length})`], ['d-warrants', `Fahndungen (${activeWarrants})`], ['d-entries', `Verlauf (${f.entries.length})`], ['d-files', `Anhänge (${f.attachments.length})`],
+      ['d-evidence', `Beweismittel (${f.evidence.length})`], ['d-warrants', `Fahndungen (${activeWarrants})`], ['d-entries', `Verlauf (${f.entries.length})`],
+      ['d-images', `Bilder (${images.length})`], ['d-files', `Anhänge (${documents.length})`],
     ];
     if (!tabs.some(([k]) => k === detailTab)) detailTab = 'd-overview';
     const panel = (key, html) => `<div class="tab-panel ${key === detailTab ? 'on' : ''}" data-panel="${key}">${html}</div>`;
@@ -225,10 +232,20 @@ export async function render(view, params) {
             <span class="grow"></span>${w ? `<button class="btn ghost sm" data-e-edit="${e.id}">Bearbeiten</button><button class="btn ghost sm" data-e-del="${e.id}">Löschen</button>` : ''}</div>
           ${markdownBlock(e.body)}
           <small class="muted">${esc(e.created_by_name || '–')}, ${fdatetime(e.created_at)}${e.updated_by_name && e.updated_at !== e.created_at ? ` · geändert von ${esc(e.updated_by_name)}, ${fdatetime(e.updated_at)}` : ''}</small></div>`).join('') : empty('Noch keine Einträge.')}</div>`)}
+      ${panel('d-images', `<div class="card"><div class="card-head"><h2>Bilder</h2>${w ? '<button class="btn ghost sm" id="img-add">Bild hochladen</button>' : ''}</div>
+        ${galleryHtml(images, { writable: w, none: 'Noch keine Bilder. Erlaubt sind PNG und JPEG.' })}</div>`)}
       ${panel('d-files', `<div class="card"><div class="card-head"><h2>Anhänge</h2>${w ? '<button class="btn ghost sm" id="a-add">Datei hochladen</button>' : ''}</div>
-        ${f.attachments.length ? f.attachments.map((a) => `<div class="list-item"><div class="grow"><button class="link" data-a-get="${a.id}">${esc(a.original_name)}</button><small>${sizeText(a.size)} · ${fdatetime(a.created_at)}${a.uploaded_by_name ? ` · ${esc(a.uploaded_by_name)}` : ''}</small></div>
-          ${w ? `<button class="btn ghost sm" data-a-del="${a.id}">Löschen</button>` : ''}</div>`).join('') : empty('Keine Anhänge. Erlaubt sind PDF, PNG und JPEG.')}</div>`)}`;
-    el.addEventListener('tabchange', (event) => { detailTab = event.target.dataset.tab; });
+        ${documents.length ? documents.map((a) => `<div class="list-item"><div class="grow"><button class="link" data-a-get="${a.id}">${esc(a.original_name)}</button><small>${sizeText(a.size)} · ${fdatetime(a.created_at)}${a.uploaded_by_name ? ` · ${esc(a.uploaded_by_name)}` : ''}</small></div>
+          ${w ? `<button class="btn ghost sm" data-a-del="${a.id}">Löschen</button>` : ''}</div>`).join('') : empty('Keine Anhänge. Erlaubt sind PDF, PNG und JPEG; Bilder erscheinen unter „Bilder“.')}</div>`)}`;
+    // Vorschaubilder erst laden, wenn der Tab „Bilder“ offen ist
+    let imagesLoaded = false;
+    const loadImages = () => {
+      if (imagesLoaded || detailTab !== 'd-images') return;
+      imagesLoaded = true;
+      fillGallery($('[data-panel="d-images"]', el), images, imageUrls.file);
+    };
+    el.addEventListener('tabchange', (event) => { detailTab = event.target.dataset.tab; loadImages(); });
+    loadImages();
   }
 
   async function reload() {
@@ -314,6 +331,9 @@ export async function render(view, params) {
     if (target.id === 'a-add') { $('#c-upload', view).click(); return false; }
     if (d.aGet) { await api.download(`/case-file-attachments/${d.aGet}`, find(f.attachments, d.aGet)?.original_name || 'anhang'); return false; }
     if (d.aDel) return (await confirmBox('Anhang löschen', 'Die Datei wird endgültig gelöscht.')) && api.del(`/case-file-attachments/${d.aDel}`);
+    // Bilder
+    if (target.id === 'img-add') return uploadImageForm(`Bild hochladen · ${f.file_number}`, `/case-files/${f.id}/attachments?images=1`);
+    if (d.imgOpen || d.imgDownload || d.imgCaption || d.imgDel) return galleryAction(target, f.attachments.filter(isImage), imageUrls);
     // Berichte
     if (target.id === 'r-new') return P.reportForm(f);
     if (d.rEdit) return P.reportForm(f, find(f.reports, d.rEdit));

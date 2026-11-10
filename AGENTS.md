@@ -12,7 +12,7 @@ Diese Datei gilt für jede KI, die an diesem Projekt weiterarbeitet (`CLAUDE.md`
 
 Selbst gehostete deutschsprachige Web-App: Finanzen, Zeiterfassung, Sport, Objekte (Fahrzeuge, Häuser, Personen, Schlüssel), Akten, Schulungen, Lizenzen, Dokumentationen, Organisationen mit Rängen, Gruppen und Rechten, Kalender und Administration. Betrieb per Docker Compose.
 
-Die Anforderungen wurden aus Code, Doku und Git-Historie abgeleitet (Stand 2026-11-08, Migration 016); die frühen Originalgespräche mit dem Auftraggeber lagen nicht vor. Akten, Schulungen, Lizenzen, Dokumentationen und die Nachtschicht-Regel (Migration 017) hat der Auftraggeber am 2026-11-08 direkt entschieden, Organisationen mit Rängen, Gruppen und Rechten (Migration 018), globale Personen (Migration 019), das Aktensystem (Migration 020) und den Test im Tool für Schulungen (Migration 021) am 2026-11-09. Im Zweifel beim Auftraggeber nachfragen und hier ergänzen. Fachliche Details: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Betrieb: [README.md](README.md).
+Die Anforderungen wurden aus Code, Doku und Git-Historie abgeleitet (Stand 2026-11-08, Migration 016); die frühen Originalgespräche mit dem Auftraggeber lagen nicht vor. Akten, Schulungen, Lizenzen, Dokumentationen und die Nachtschicht-Regel (Migration 017) hat der Auftraggeber am 2026-11-08 direkt entschieden, Organisationen mit Rängen, Gruppen und Rechten (Migration 018), globale Personen (Migration 019), das Aktensystem (Migration 020) und den Test im Tool für Schulungen (Migration 021) am 2026-11-09, Zinsen für Konten, Bilder zu Fahrzeugen und Akten, Fahrzeugbesitzer als Person, freie Kennzeichen ausgemusterter Fahrzeuge (Migration 022) sowie die Wünsche zu Stundenzettel, Kontoreihenfolge und ToDo-Terminen am 2026-11-10 (das Zinsmodell ist ein Vorschlag, noch zu bestätigen). Im Zweifel beim Auftraggeber nachfragen und hier ergänzen. Fachliche Details: [CONCEPT.md](CONCEPT.md), Technik: [TECHNICAL.md](TECHNICAL.md), Betrieb: [README.md](README.md).
 
 ## Arbeitsweise
 
@@ -77,6 +77,10 @@ Node 22, Fastify 5, reines ESM-JavaScript, `zod`, `pg` mit handgeschriebenem SQL
 - **Lösungen von Testfragen** (`options[].correct`) nie an Teilnehmende ausliefern: Für sie gibt es nur `publicQuestions` (`exam.js`); bewertet wird allein serverseitig gegen die gespeicherten Fragen. Antwort-IDs bleiben beim Bearbeiten einer Frage erhalten, sonst lassen sich alte Versuche nicht mehr lesen.
 - **`node --check datei.js` findet hier keine Syntaxfehler in Frontend-Modulen** (es prüft nicht als ES-Modul); so ging die Hilfe-Seite mit einem fehlenden Anführungszeichen kaputt in einen Commit. `test/frontend-syntax.test.js` prüft jedes Modul mit `--input-type=module`, von Hand: `node --input-type=module --check < datei.js`.
 - **Bereichsrechte (`scope_id`) hängen ohne Fremdschlüssel an Aktenarten und Doku-Kategorien:** Beim Löschen einer Art oder Kategorie die Zeilen in `team_permissions` mit löschen (wie in `casefiles.js` und `docs.js`).
+- **Zinsen:** Die Regeln stehen allein in `planInterest` (`interest.js`, ohne Datenbank testbar), gerechnet wird in Cent als BigInt. `interest_payments` hält je Konto und Zeitraumende genau eine Zeile, auch bei 0,00 und auch nach Löschen der Buchung; nie „zur Korrektur“ Zeilen löschen, sonst bucht der Job den Zeitraum erneut. `budgets` hat einen CHECK: `interest_rate`, `interest_period` und `interest_since` sind zusammen gesetzt oder leer.
+- **Kennzeichen sind nur unter nicht ausgemusterten Fahrzeugen eindeutig** (partielle Indizes): Auch ein PATCH kann 23505 auslösen (wieder in Betrieb nehmen), `objects.js` fängt das beim Anlegen und Ändern ab. Neue Abfragen für Service, Erinnerungen oder Übersichten filtern `status <> 'retired'`.
+- **Bildunterschrift beim Upload:** `receiveUpload` liest `caption` aus `part.fields`; das Feld muss im FormData vor der Datei stehen, sonst kommt es nicht an.
+- **Dateien im Upload-Volume** werden nur gelöscht, wo der Code es tut (Anhang, Akte, Foto, Fahrzeugbild, Fahrzeug). Kaskaden der Datenbank (z. B. beim Löschen einer Organisation) lassen die Dateien liegen.
 
 ## Testen
 
@@ -105,6 +109,8 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 
 ### Konten und Buchungen
 - Konten sind persönlich oder geteilt (Organisation) und zeigen Kontostand, Einkommen und Ausgaben. **Kein Limit und kein Zeitraum im Kontoformular**; Limits gehören zu den Budgets. Kategorien dürfen weiter eigene Limits haben.
+- **Persönliche Konten zuerst (Wunsch des Auftraggebers vom 2026-11-10):** `GET /budgets` sortiert persönliche vor geteilten; Kontenseite und alle Auswahllisten wählen damit ein persönliches Konto vor.
+- **Zinsen (optional, Wunsch vom 2026-11-10, z. B. Sparkonto):** Satz in % pro Tag, Woche (Mo–So), Monat oder Jahr, gutgeschrieben als Einnahme am letzten Tag jedes abgeschlossenen Zeitraums auf den durchschnittlichen Tagessaldo (Minus-Tage zählen 0, Zinseszins, ab Einschalten). Geänderter Satz gilt für alles noch nicht Gutgeschriebene; abgerechnete Zeiträume werden nicht nachberechnet. Zinsbuchungen nicht änderbar, nur löschbar. Das Modell ist ein Vorschlag und vom Auftraggeber zu bestätigen.
 - Buchungstypen: Einnahme, Ausgabe, Einzahlung auf ein Sparziel. Viewer dürfen nicht buchen. CSV-Export, Belege.
 - **Kontostand und Dashboard zeigen nur, was wirklich auf dem Konto ist** (Entscheidung des Auftraggebers): Einnahmen minus Ausgaben bis heute. Sparziel-Einzahlungen bleiben auf dem Konto und ändern den Saldo nicht; Buchungen mit Datum in der Zukunft zählen erst ab diesem Datum. KPIs, Cashflow und letzte Buchungen im Dashboard folgen derselben Regel; die Transaktionsliste und Berichte zeigen weiter auch Zukünftiges.
 - Das Dashboard wechselt zwischen **Tag, Woche und Monat**. KPIs und Kategorien folgen dem gewählten Zeitraum, der Cashflow zeigt 14 Tage, 8 Wochen oder 6 Monate, der Gesamtsaldo bleibt der heutige Stand. Die Woche beginnt mit dem Wochenstart aus dem Profil.
@@ -125,6 +131,7 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 - **Nachtschicht (Entscheidung des Auftraggebers):** Stunden zählen an dem Kalendertag, an dem gearbeitet wurde. Timer und manuelle Einträge werden an Mitternacht in einen Eintrag je Tag geteilt; in der Nacht von Sonntag auf Montag gehören die Stunden nach 0 Uhr zur neuen Woche. Läuft um 03:45 noch ein Timer (jünger als 24 Stunden), wartet die Gutschrift seines Starttags bis zum Ausstempeln und folgt spätestens eine Stunde danach. Timer über 24 Stunden lassen sich nur verwerfen.
 - Nachgetragene Stunden derselben Woche kommen mit der nächsten Gutschrift dazu; abgeschlossene Wochen werden nicht nachberechnet, sonst würde ein geändertes Wochen-Soll alte Wochen neu bewerten. Stunden über dem Wochen-Soll (Mo–So) zusätzlich mit Stundenlohn plus Zuschlag. Idempotent, Ausfälle werden nachgeholt.
 - Mit „Lesen“ beim Stundenzettel sieht man die Zeiten aller Mitglieder der Organisation, mit „Lesen & Schreiben“ bearbeitet man sie und die Mitarbeitereinstellungen.
+- **Wünsche vom 2026-11-10:** Der Stundenzettel der Organisation zeigt die eigene Person nicht (deren Zeiten stehen oben) und hat eine Suche nach Mitarbeitern. Im Eintragsformular rechnen sich die Stunden bei jeder Änderung von Beginn, Ende oder Pause neu (über Mitternacht eingeschlossen), von Hand überschreibbar.
 
 ### Sport
 - Getrennte Seiten für Laufen, Schwimmen, Biken. Strecken gehören einer Organisation, mit Checkpoints, Distanz, Notizen. Bestenliste nach Punkten absteigend, dann Zeit.
@@ -136,10 +143,11 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 - **Personen per CSV (Wunsch des Auftraggebers vom 2026-11-09):** Export mit `person:export` (Spalten ID, Name, Art, Funktion, Telefon, E-Mail, Aktiv, Notiz; lässt sich unverändert wieder importieren). Import mit `person:create`, erst Prüfen, dann Importieren. Mit ID ändern (zusätzlich `person:update`, nur Spalten der Datei), ohne ID anlegen; vorhandene oder doppelte Namen werden übersprungen, damit ein zweiter Import nichts verdoppelt. Fehlerhafte Zeilen fallen mit Zeilennummer weg. Regeln in `planPeopleImport` (`people.js`), ohne Datenbank testbar.
 - Tür-PINs verschlüsselt, nie in Listen, nur nach Passwort und ggf. 2FA sichtbar, jeder Zugriff im Audit-Log.
 - „Verwaltung“ bündelt Übersicht, Kosten, Protokoll und Auditlog (nur mit `audit:read`). Keine Versicherungsangabe an Fahrzeugen.
+- **Fahrzeuge (Wünsche vom 2026-11-10, Migration 022):** Besitzer aus der globalen Personenliste (`owner_person_id`), das Fahrzeug erscheint automatisch in dessen Personenakte und Personenübersicht; Freitext nur für Besitzer ohne Personeneintrag; Personen mit Fahrzeugen nicht löschbar. Ausgemusterte Fahrzeuge geben das Kennzeichen frei, fehlen im Dashboard und erzeugen keine Service-/Verbandskasten-Termine und -Erinnerungen. Bilder (PNG/JPEG, Bildunterschrift, höchstens 50) sehen alle, die das Fahrzeug sehen; ändern ab „Lesen & Schreiben“.
 
 ### Akten, Schulungen, Lizenzen, Dokumentationen (Entscheidungen des Auftraggebers vom 2026-11-08)
 - Alle vier solo oder pro Organisation, Bereich beim Anlegen fest. Rechte nach „Organisationen und Rechte“; Fremde sehen nichts; zusätzlich Katalogrechte `casefile`, `training`, `license`, `doc`. Beteiligte Personen, Lizenzinhaber und Teilnehmer-Personen kommen aus der globalen Personenliste.
-- **Akten:** Fall- bzw. Vorgangsakten mit Aktenzeichen (automatisch `Jahr-Nummer`), Status offen/ruhend/abgeschlossen, beteiligten Personen mit Rolle, chronologischen Einträgen und Anhängen. Auf jeder Person zeigt die „Übersicht“ alle Akten und Einträge zu ihr, dazu Lizenzen und Schulungen.
+- **Akten:** Fall- bzw. Vorgangsakten mit Aktenzeichen (automatisch `Jahr-Nummer`), Status offen/ruhend/abgeschlossen, beteiligten Personen mit Rolle, chronologischen Einträgen und Anhängen. Bilder (Wunsch vom 2026-11-10) sind PNG-/JPEG-Anhänge mit Bildunterschrift im eigenen Tab „Bilder“. Auf jeder Person zeigt die „Übersicht“ alle Akten und Einträge zu ihr, dazu Lizenzen und Schulungen.
 - **Aktensystem (Wunsch des Auftraggebers vom 2026-11-09, Migration 020):** „wie ein richtiges Aktensystem bei Polizei, Medics und Co.“: Fallakten mit Priorität, Ort, Zeit, Sachbearbeitung, Fahrzeugen und Verknüpfungen; Berichte mit Vorlagen (Polizei, Rettungsdienst, allgemein) und Freigabe nach dem Vier-Augen-Prinzip; Strafkatalog mit CSV und Anklagepunkte mit Entscheidung und Vorstrafen; Beweismittel mit Übergabekette; Fahndungen mit Fahndungsliste und Abfrage; Personenakte je Bereich mit Foto, Warnhinweisen, Vermerken und medizinischen Angaben. Details in `CONCEPT.md` Abschnitt 9.
 - **Lizenzen für Personen:** frei anlegbare Lizenzarten mit Standard-Gültigkeit; Lizenz mit Nummer, Aussteller, Ausstellung, Ablauf, Status gültig/gesperrt/entzogen mit Begründung; Erinnerung 30 Tage vorher und nach Ablauf.
 - **Schulungen, Teilnahme und Nachweis:** Termine, Teilnehmer (Benutzer oder Personen), Ergebnis, Gültigkeit mit Erinnerung, Übersicht wer was hat. Keine Lerninhalte im Tool, nur der Test.
@@ -160,7 +168,7 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 - Sicher vor Code aus dem Text: HTML erscheint als Text bis auf wenige Tags ohne Attribute; externe Bilder nur als Link (Datenschutz, CSP). Ein Zeilenumbruch bleibt ein Zeilenumbruch.
 
 ### Kalender und Benachrichtigungen
-- Monat, Woche, Tag, Agenda; eigene Termine plus abgeleitete (Zahlungen, Service, Schlüsselfristen, Wartung, Schulungstermine, Ablauf von Lizenzen und Schulungsnachweisen, Feiertage); iCal-Abo. Glocke mit Zähler. Täglicher Job erinnert an Termine, Service, Verbandskasten, Schlüsselrückgaben, ablaufende Lizenzen und Schulungsnachweise.
+- Monat, Woche, Tag, Agenda; eigene Termine plus abgeleitete (Zahlungen, Service, Schlüsselfristen, Wartung, Schulungstermine, Ablauf von Lizenzen und Schulungsnachweisen, Deadlines offener ToDos seit 2026-11-10, Feiertage); iCal-Abo. Glocke mit Zähler. Täglicher Job erinnert an Termine, Service, Verbandskasten, Schlüsselrückgaben, ablaufende Lizenzen und Schulungsnachweise.
 
 ### Notizblock und ToDos
 - Beide solo oder pro Organisation. Mit „Lesen & Schreiben“ ändern, mit „Lesen“ nur lesen ohne Aktionen; Fremde sehen nichts.
@@ -178,6 +186,7 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 
 ## Offene Punkte
 
+- **Zinsmodell bestätigen:** Satz je Zeitraum auf den durchschnittlichen Tagessaldo, Gutschrift am Ende des Zeitraums, ist ein Vorschlag vom 2026-11-10. Buchungen, die für einen schon verzinsten Zeitraum nachgetragen werden, ändern dessen Zinsen nicht.
 - **Stunden für abgeschlossene Wochen**, die nachgetragen werden, bringen keinen Bonus mehr. Nachtschichten sind davon seit Migration 017 nicht mehr betroffen. Einträge über Mitternacht von vor dieser Regel wurden nicht umgerechnet.
 - **„Heute“ ist im Server UTC:** `today()` in `lib.js` nimmt das UTC-Datum. Zwischen Mitternacht und 1 Uhr (Sommer 2 Uhr) ist „heute“ deshalb noch gestern, etwa beim Abschlussdatum einer Akte oder als Vorgabe für Buchungen. Ein Umstieg auf `TZ` betrifft viele Stellen und ist noch nicht entschieden; Tests mit Datum schlagen in diesem Zeitfenster fehl.
 - **Eigene Rollen** aus der Administration bekommen neue Katalogrechte nicht automatisch; Admin und User schon.

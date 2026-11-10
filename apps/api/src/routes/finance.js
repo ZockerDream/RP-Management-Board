@@ -7,6 +7,9 @@ import { periodRange, budgetUsed, budgetWatch, toCsv, today, notify } from '../l
 import { audit } from '../audit.js';
 import { timelineWindow } from '../periods.js';
 import { patchSchema } from '../validation.js';
+import { config } from '../config.js';
+import { dateInZone } from '../periods.js';
+import { INTEREST_PERIODS, nextInterestDate } from '../interest.js';
 
 const money = z.union([z.string(), z.number()]).transform((v) => String(v).replace(',', '.')).refine((v) => /^\d{1,12}(\.\d{1,2})?$/.test(v), 'Ungültiger Betrag');
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -21,7 +24,23 @@ const budgetBody = z.object({
   period_start: date.nullish(),
   period_end: date.nullish(),
   limit_amount: money.default('0'),
+  // Zinsen (optional): Satz in Prozent je Zeitraum, gutgeschrieben am Ende jedes Zeitraums (interest.js)
+  interest_rate: z.union([z.string(), z.number()]).transform((v) => String(v).trim().replace(',', '.'))
+    .refine((v) => /^\d{1,3}(\.\d{1,4})?$/.test(v) && Number(v) > 0 && Number(v) <= 100, 'muss größer als 0 und höchstens 100 sein (bis zu vier Nachkommastellen)').nullish(),
+  interest_period: z.enum(INTEREST_PERIODS).nullish(),
 });
+const localToday = () => dateInZone(config.tz);
+
+// Zinsfelder für INSERT/UPDATE. Beim Einschalten zählt der Saldo ab heute; ein geänderter Satz oder Zeitraum gilt für alles,
+// was noch nicht gutgeschrieben ist. Ohne Satz ist der Zins aus.
+function interestValues(b, current = null) {
+  if (!('interest_rate' in b) && !('interest_period' in b)) return null;
+  const rate = 'interest_rate' in b ? b.interest_rate || null : current?.interest_rate ?? null;
+  const period = 'interest_period' in b ? b.interest_period || null : current?.interest_period ?? null;
+  if (!rate) return { interest_rate: null, interest_period: null, interest_since: null };
+  if (!period) throw bad('Zinsen brauchen einen Zeitraum');
+  return { interest_rate: rate, interest_period: period, interest_since: current?.interest_since || localToday() };
+}
 
 async function decorate(b, level, teamName) {
   const used = await budgetUsed(b);
@@ -37,7 +56,14 @@ async function decorate(b, level, teamName) {
      FROM transactions WHERE budget_id=$1 AND booked_at <= $2`,
     [b.id, today()],
   );
-  return { ...b, level, team_name: teamName || null, income: totals.income, expenses: totals.expenses, balance: (Number(totals.income) - Number(totals.expenses)).toFixed(2), used, pct: lim > 0 ? Math.round((Number(used) / lim) * 1000) / 10 : 0, categories: cats };
+  const interest = b.interest_rate
+    ? await one("SELECT COALESCE(sum(amount),0) total, max(booked_at) last_on FROM transactions WHERE budget_id=$1 AND source='interest'", [b.id])
+    : null;
+  return {
+    ...b, level, team_name: teamName || null, income: totals.income, expenses: totals.expenses, balance: (Number(totals.income) - Number(totals.expenses)).toFixed(2), used, pct: lim > 0 ? Math.round((Number(used) / lim) * 1000) / 10 : 0, categories: cats,
+    interest_total: interest?.total ?? null, interest_last_on: interest?.last_on ?? null,
+    interest_next_on: b.interest_rate ? nextInterestDate(localToday(), String(b.interest_since).slice(0, 10), b.interest_period) : null,
+  };
 }
 
 export default async function routes(app) {
@@ -48,7 +74,7 @@ export default async function routes(app) {
          SELECT b.*, t.name team_name, CASE WHEN b.type='solo' THEN 4 ELSE team_level(b.team_id, $1, 'budget') END AS level
          FROM budgets b LEFT JOIN teams t ON t.id=b.team_id
          WHERE (b.type='solo' AND b.owner_user_id=$1) OR b.type='shared'
-       ) x WHERE x.level >= 2 ORDER BY x.archived, x.type, x.name`,
+       ) x WHERE x.level >= 2 ORDER BY x.archived, x.type <> 'solo', lower(x.name), x.name`,
       [req.user.id],
     );
     return Promise.all(rows.map(({ level, ...b }) => decorate(b, level, b.team_name)));
@@ -65,13 +91,15 @@ export default async function routes(app) {
       const n = (await one("SELECT count(*)::int n FROM budgets WHERE owner_user_id=$1 AND NOT archived", [req.user.id])).n;
       if (n >= (max || 1e9)) throw bad(`Kontolimit erreicht (${max})`, 'limit');
     }
+    const interest = interestValues(b) || { interest_rate: null, interest_period: null, interest_since: null };
     const id_ = await tx(async (c) => {
       const r = (
         await c.query(
-          `INSERT INTO budgets(name,type,owner_user_id,team_id,currency,period_type,period_start,period_end,limit_amount)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+          `INSERT INTO budgets(name,type,owner_user_id,team_id,currency,period_type,period_start,period_end,limit_amount,interest_rate,interest_period,interest_since)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
           // Ohne Angabe gilt die Profilwährung, sonst wäre das Konto nicht als Gehaltskonto wählbar
-          [b.name, b.type, b.type === 'solo' ? req.user.id : null, b.type === 'shared' ? b.team_id : null, b.currency || req.user.currency || 'EUR', b.period_type, b.period_start || null, b.period_end || null, b.limit_amount],
+          [b.name, b.type, b.type === 'solo' ? req.user.id : null, b.type === 'shared' ? b.team_id : null, b.currency || req.user.currency || 'EUR', b.period_type, b.period_start || null, b.period_end || null, b.limit_amount,
+            interest.interest_rate, interest.interest_period, interest.interest_since],
         )
       ).rows[0].id;
       await addDefaultCategories(c, r);
@@ -83,12 +111,17 @@ export default async function routes(app) {
 
   app.patch('/budgets/:id', authz('budget:update'), async (req) => {
     const { budget } = await budgetAccess(req.user.id, req.params.id, true);
-    const b = patchSchema(budgetBody.pick({ name: true, currency: true, period_type: true, period_start: true, period_end: true, limit_amount: true })).extend({ archived: z.boolean().optional() }).parse(req.body);
+    const b = patchSchema(budgetBody.pick({ name: true, currency: true, period_type: true, period_start: true, period_end: true, limit_amount: true, interest_rate: true, interest_period: true })).extend({ archived: z.boolean().optional() }).parse(req.body);
     if (b.currency && b.currency !== budget.currency && (await one('SELECT 1 FROM users WHERE payroll_budget_id=$1 AND currency<>$2', [budget.id, b.currency]))) {
       throw bad('Dieses Konto ist ein Gehaltskonto und muss in der Profilwährung bleiben');
     }
-    const keys = Object.keys(b);
-    if (keys.length) await q(`UPDATE budgets SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')}, updated_at=now() WHERE id=$1`, [budget.id, ...keys.map((k) => b[k] ?? null)]);
+    const interest = interestValues(b, budget);
+    const patch = { ...b, ...interest };
+    const keys = Object.keys(patch);
+    if (keys.length) await q(`UPDATE budgets SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')}, updated_at=now() WHERE id=$1`, [budget.id, ...keys.map((k) => patch[k] ?? null)]);
+    if (interest && (Number(interest.interest_rate ?? 0) !== Number(budget.interest_rate ?? 0) || interest.interest_period !== budget.interest_period)) {
+      await audit(req, 'budget.interest_changed', 'budget', budget.id, { rate: interest.interest_rate, period: interest.interest_period });
+    }
     return { ok: true };
   });
 
@@ -209,6 +242,7 @@ export default async function routes(app) {
     const t = await one('SELECT * FROM transactions WHERE id=$1', [req.params.id]);
     if (!t) throw notFound();
     if (t.source === 'payroll') throw bad('Automatische Gehaltsbuchungen können nicht geändert werden');
+    if (t.source === 'interest') throw bad('Zinsgutschriften lassen sich nicht ändern, nur löschen');
     const { budget } = await budgetAccess(req.user.id, t.budget_id, true);
     const b = patchSchema(txBody.omit({ budget_id: true })).parse(req.body);
     await checkRefs(b, budget);

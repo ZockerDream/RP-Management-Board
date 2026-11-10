@@ -3,6 +3,10 @@ import { $, esc, eur, empty, budgetTag, progress, openForm, confirmBox, toast, p
 import { loadBudgets } from './common.js';
 import { can, state } from '../app.js';
 
+const INTEREST_PERIODS = [{ v: 'daily', l: 'pro Tag' }, { v: 'weekly', l: 'pro Woche' }, { v: 'monthly', l: 'pro Monat' }, { v: 'yearly', l: 'pro Jahr' }];
+const rateText = (rate) => Number(rate).toLocaleString('de-DE', { maximumFractionDigits: 4 });
+const interestText = (b) => `${rateText(b.interest_rate)} % ${INTEREST_PERIODS.find((p) => p.v === b.interest_period)?.l || ''}`;
+
 async function budgetForm(b) {
   const teams = !b && can('team:read') ? (await api.get('/teams')).filter((t) => t.levels.budget >= 3) : [];
   const currency = b?.currency || state.me.currency || 'EUR';
@@ -11,11 +15,15 @@ async function budgetForm(b) {
     ...(b ? [] : [{ name: 'type', label: 'Typ', type: 'select', options: [{ v: 'solo', l: 'Solo' }, ...(teams.length ? [{ v: 'shared', l: 'Geteilt (Organisation)' }] : [])], value: 'solo' },
       { name: 'team_id', label: 'Organisation (bei geteilt)', type: 'select', options: teams.map((t) => ({ v: t.id, l: t.name })), value: teams[0]?.id }]),
     { name: 'currency', label: 'Währung', type: 'select', options: [...new Set(['EUR', 'USD', 'CHF', 'GBP', currency])].map((c) => ({ v: c, l: c })), value: currency, help: 'Beträge werden beim Ändern nicht umgerechnet.' },
+    { type: 'html', html: '<div class="cost-block"><b>Zinsen (optional, z. B. für ein Sparkonto)</b><p class="muted">Gutschrift am Ende jedes Zeitraums auf den durchschnittlichen Tagessaldo; Tage im Minus zählen nicht. Leer lassen für keine Zinsen.</p></div>' },
+    { name: 'interest_rate', label: 'Zinssatz in %', value: b?.interest_rate ? rateText(b.interest_rate) : '', placeholder: 'z. B. 1,5' },
+    { name: 'interest_period', label: 'Zeitraum', type: 'select', options: INTEREST_PERIODS, value: b?.interest_period || 'monthly', help: b?.interest_rate ? 'Ein geänderter Satz gilt für alles, was noch nicht gutgeschrieben ist.' : 'Der Saldo zählt ab heute.' },
   ];
   return openForm({
     title: b ? 'Konto bearbeiten' : 'Neues Konto', fields,
     onSubmit: async (v) => {
-      const body = { name: v.name.trim(), currency: v.currency };
+      const rate = v.interest_rate.trim() ? parseAmount(v.interest_rate) : null;
+      const body = { name: v.name.trim(), currency: v.currency, interest_rate: rate, interest_period: rate ? v.interest_period : null };
       if (b) await api.patch(`/budgets/${b.id}`, body);
       else await api.post('/budgets', { ...body, type: v.type, team_id: v.type === 'shared' ? v.team_id : null });
       toast('Konto gespeichert');
@@ -54,6 +62,8 @@ export async function render(view) {
       <div class="row"><b>${eur(b.balance)}</b><span class="muted">Kontostand</span></div>
       <div class="row"><span class="muted">Einkommen</span><b style="color:var(--success,#16a34a)">${eur(b.income)}</b></div>
       <div class="row"><span class="muted">Ausgaben</span><b>${eur(b.expenses)}</b></div>
+      ${b.interest_rate ? `<div class="row"><span class="muted">Zinsen ${esc(interestText(b))}</span><b class="up">${eur(b.interest_total)}</b></div>
+      <small class="muted">Nächste Gutschrift am ${fdate(b.interest_next_on)}${b.interest_last_on ? ` · zuletzt ${fdate(b.interest_last_on)}` : ''}</small>` : ''}
       <div class="chips">${b.categories.slice(0, 4).map((c) => `<span class="chip">${esc(c.name)}</span>`).join('')}</div>
       <div class="row">${can('budget:update') && b.level >= 3 ? `<button class="btn ghost sm" data-edit="${b.id}">Bearbeiten</button>` : ''}${can('budget:delete') && b.level >= 4 ? `<button class="btn ghost sm" data-del="${b.id}">Löschen</button>` : ''}</div></div>`).join('')}</div>` : `<div class="card">${empty('Noch keine Konten vorhanden.')}</div>`)
       + (cur ? `<div class="card"><div class="card-head"><h2>Kategorien · ${esc(cur.name)}</h2>${can('budget:update') && cur.level >= 3 ? '<button class="btn ghost sm" id="c-new">Kategorie hinzufügen</button>' : ''}</div>

@@ -148,7 +148,7 @@ export default async function routes(app) {
         FROM case_file_entries e ${personJoin('pe', 'e.person_id')}
           LEFT JOIN users cu ON cu.id=e.created_by LEFT JOIN users uu ON uu.id=e.updated_by
         WHERE e.case_file_id=$1 ORDER BY e.entry_date DESC, e.created_at DESC`, [file.id]),
-      many(`SELECT a.id, a.original_name, a.mime, a.size, a.created_at, u.name uploaded_by_name FROM case_file_attachments a
+      many(`SELECT a.id, a.original_name, a.mime, a.size, a.caption, a.created_at, u.name uploaded_by_name FROM case_file_attachments a
         LEFT JOIN users u ON u.id=a.uploaded_by WHERE a.case_file_id=$1 ORDER BY a.created_at`, [file.id]),
       file.lead_user_id ? one('SELECT name FROM users WHERE id=$1', [file.lead_user_id]) : null,
       // Auswahl für die Sachbearbeitung nur für die, die die Akte ändern dürfen
@@ -295,10 +295,11 @@ export default async function routes(app) {
   // ---- Anhänge
   app.post('/case-files/:id/attachments', authz('casefile:update'), async (req) => {
     const { file } = await loadFile(req, req.params.id, write);
-    const upload = await receiveUpload(req);
+    // ?images=1: nur PNG und JPEG (Bilder der Akte); Bilder sind Anhänge vom Typ PNG/JPEG mit Bildunterschrift
+    const upload = await receiveUpload(req, { images: req.query?.images === '1' });
     const row = await one(
-      'INSERT INTO case_file_attachments(case_file_id,storage_key,original_name,mime,size,sha256,uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
-      [file.id, upload.key, upload.name, upload.mime, upload.size, upload.sha256, req.user.id],
+      'INSERT INTO case_file_attachments(case_file_id,storage_key,original_name,mime,size,sha256,uploaded_by,caption) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
+      [file.id, upload.key, upload.name, upload.mime, upload.size, upload.sha256, req.user.id, upload.caption],
     );
     await audit(req, 'casefile.attachment_added', 'case_file', file.id, { name: upload.name });
     return row;
@@ -311,6 +312,12 @@ export default async function routes(app) {
     return attachment;
   }
   app.get('/case-file-attachments/:id', authz('casefile:read'), async (req, reply) => sendUpload(reply, await loadAttachment(req, LEVEL.READ)));
+  app.patch('/case-file-attachments/:id', authz('casefile:update'), async (req) => {
+    const attachment = await loadAttachment(req, write);
+    const b = z.object({ caption: z.string().trim().max(200) }).parse(req.body);
+    await q('UPDATE case_file_attachments SET caption=$2 WHERE id=$1', [attachment.id, b.caption]);
+    return { ok: true };
+  });
   app.delete('/case-file-attachments/:id', authz('casefile:update'), async (req) => {
     const attachment = await loadAttachment(req, write);
     await q('DELETE FROM case_file_attachments WHERE id=$1', [attachment.id]);
@@ -414,7 +421,14 @@ export default async function routes(app) {
     const personId = uuid.parse(req.params.id);
     const person = await one('SELECT * FROM people WHERE id=$1', [personId]);
     if (!person) throw notFound();
-    const result = { person, case_files: null, entries: null, licenses: null, trainings: null };
+    const result = { person, case_files: null, entries: null, licenses: null, trainings: null, vehicles: null };
+    // Fahrzeuge, deren Besitzer die Person ist (Objektverwaltung), soweit sichtbar
+    if (can(req, 'vehicle:read')) {
+      result.vehicles = await many(
+        `SELECT v.id, v.plate, v.make_model, v.status, t.name team_name FROM vehicles v LEFT JOIN teams t ON t.id=v.team_id
+         WHERE v.owner_person_id=$1 AND ${visibleSql('v', 'vehicle', '$2')} ORDER BY v.status = 'retired', v.plate`, [personId, req.user.id],
+      );
+    }
     if (can(req, 'casefile:read')) {
       result.case_files = await many(
         `SELECT c.id, c.file_number, c.title, c.status, c.opened_on, c.closed_on, cp.role FROM case_file_people cp JOIN case_files c ON c.id=cp.case_file_id

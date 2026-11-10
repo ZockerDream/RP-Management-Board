@@ -63,9 +63,15 @@ const KINDS = {
     perm: 'vehicle', asset: 'vehicle', label: (r) => `${r.make_model} (${r.plate})`,
     schema: z.object({
       plate: z.string().min(1).max(20), make_model: z.string().min(1).max(100), status: z.enum(['available', 'in_use', 'workshop', 'retired']).default('available'), ...ownerFields,
-      registered_owner: str(100).default(''), service_due: date.nullish(), odometer_km: z.number().int().min(0).nullish(), service_interval_km: z.number().int().min(1).nullish(), service_due_km: z.number().int().min(0).nullish(), first_aid_kit_expires_on: date.nullish(), note: str(2000).default(''), ...costFields,
+      // Besitzer: Person aus der globalen Liste (erscheint in ihrer Personenakte) oder Freitext für Besitzer ohne Personeneintrag
+      owner_person_id: id.nullish(), registered_owner: str(100).default(''),
+      service_due: date.nullish(), odometer_km: z.number().int().min(0).nullish(), service_interval_km: z.number().int().min(1).nullish(), service_due_km: z.number().int().min(0).nullish(), first_aid_kit_expires_on: date.nullish(), note: str(2000).default(''), ...costFields,
     }),
-    cols: ['plate', 'make_model', 'status', 'registered_owner', 'service_due', 'odometer_km', 'service_interval_km', 'service_due_km', 'first_aid_kit_expires_on', 'note'],
+    cols: ['plate', 'make_model', 'status', 'owner_person_id', 'registered_owner', 'service_due', 'odometer_km', 'service_interval_km', 'service_due_km', 'first_aid_kit_expires_on', 'note'],
+    // Bei Fahrzeugen mit Besitzer-Namen und Zahl der Bilder
+    select: ', op.name owner_person_name, (SELECT count(*)::int FROM vehicle_images vi WHERE vi.vehicle_id=x.id) images',
+    join: ' LEFT JOIN people op ON op.id=x.owner_person_id',
+    duplicate: 'Dieses Kennzeichen hat schon ein anderes Fahrzeug (ausgemusterte Fahrzeuge zählen nicht)',
   },
   keys: {
     perm: 'key', asset: 'key', label: (r) => r.label,
@@ -164,10 +170,11 @@ async function personRecords(personId) {
               OR EXISTS (SELECT 1 FROM case_file_report_people WHERE person_id=$1) OR EXISTS (SELECT 1 FROM case_file_charges WHERE person_id=$1)
               OR EXISTS (SELECT 1 FROM case_file_evidence WHERE person_id=$1) OR EXISTS (SELECT 1 FROM case_file_vehicles WHERE owner_person_id=$1) files,
             EXISTS (SELECT 1 FROM warrants WHERE person_id=$1) warrants, EXISTS (SELECT 1 FROM person_files WHERE person_id=$1) person_files,
-            EXISTS (SELECT 1 FROM licenses WHERE person_id=$1) licenses, EXISTS (SELECT 1 FROM training_records WHERE person_id=$1) trainings`,
+            EXISTS (SELECT 1 FROM licenses WHERE person_id=$1) licenses, EXISTS (SELECT 1 FROM training_records WHERE person_id=$1) trainings,
+            EXISTS (SELECT 1 FROM vehicles WHERE owner_person_id=$1) vehicles`,
     [personId],
   );
-  return [r.files && 'Akten', r.warrants && 'Fahndungen', r.person_files && 'Personenakten', r.licenses && 'Lizenzen', r.trainings && 'Schulungsnachweise'].filter(Boolean);
+  return [r.files && 'Akten', r.warrants && 'Fahndungen', r.person_files && 'Personenakten', r.licenses && 'Lizenzen', r.trainings && 'Schulungsnachweise', r.vehicles && 'Fahrzeuge'].filter(Boolean);
 }
 
 export default async function routes(app) {
@@ -252,7 +259,8 @@ export default async function routes(app) {
     const kind = path;
     app.get(`/${path}`, authz(`${K.perm}:read`), async (req) => {
       if (path === 'keys') return (await many(`${keyStatusSql} WHERE ${ownerSql('k', 'key')} ORDER BY k.label`, [req.user.id])).map(withStatus);
-      const rows = await many(`SELECT x.*, ${levelSql('x', K.perm)} AS level, b.name cost_budget_name FROM ${table} x LEFT JOIN budgets b ON b.id=x.cost_budget_id WHERE ${ownerSql('x', K.perm)} ORDER BY ${path === 'vehicles' ? 'x.plate' : 'x.name'}`, [req.user.id]);
+      const rows = await many(`SELECT x.*, ${levelSql('x', K.perm)} AS level, b.name cost_budget_name${K.select || ''} FROM ${table} x LEFT JOIN budgets b ON b.id=x.cost_budget_id${K.join || ''}
+        WHERE ${ownerSql('x', K.perm)} ORDER BY ${path === 'vehicles' ? "x.status = 'retired', x.plate" : 'x.name'}`, [req.user.id]);
       if (path === 'properties') return rows.map(({ door_pin_enc, ...property }) => property);
       return rows;
     });
@@ -262,6 +270,7 @@ export default async function routes(app) {
       if (b.property_id) await assertVisible(req, 'properties', b.property_id);
       if (b.vehicle_id) await assertVisible(req, 'vehicles', b.vehicle_id);
       if (b.responsible_person_id) await assertPerson(b.responsible_person_id);
+      if (b.owner_person_id) await assertPerson(b.owner_person_id);
       await checkCostBudget(req, b);
       const cols = [...K.cols, ...COST_COLS, 'owner_user_id', 'team_id'];
       try {
@@ -275,7 +284,7 @@ export default async function routes(app) {
         await audit(req, `${path}.created`, path, row.id);
         return { id: row.id };
       } catch (e) {
-        if (e.code === '23505') throw bad('Eintrag mit dieser Kennung existiert bereits');
+        if (e.code === '23505') throw bad(K.duplicate || 'Eintrag mit dieser Kennung existiert bereits');
         throw e;
       }
     });
@@ -288,17 +297,24 @@ export default async function routes(app) {
       if (merged.property_id) await assertVisible(req, 'properties', merged.property_id);
       if (merged.vehicle_id) await assertVisible(req, 'vehicles', merged.vehicle_id);
       if (merged.responsible_person_id) await assertPerson(merged.responsible_person_id);
+      if (b.owner_person_id) await assertPerson(b.owner_person_id);
       await checkCostBudget(req, merged);
       const patch = { ...b };
       if (patch.scope) Object.assign(patch, await ownerValues(req, { scope: patch.scope, team_id: patch.team_id }, K.perm));
       else delete patch.team_id;
       delete patch.scope;
       const keys = Object.keys(patch).filter((k) => [...K.cols, ...COST_COLS, 'owner_user_id', 'team_id'].includes(k));
-      await tx(async (c) => {
-        let after = before;
-        if (keys.length) after = (await c.query(`UPDATE ${table} SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1 RETURNING *`, [before.id, ...keys.map((k) => k === 'cost_interval_count' ? patch[k] ?? 1 : patch[k] ?? null)])).rows[0];
-        await syncCost(c, table, kind, before, after, req.user.id);
-      });
+      try {
+        await tx(async (c) => {
+          let after = before;
+          if (keys.length) after = (await c.query(`UPDATE ${table} SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1 RETURNING *`, [before.id, ...keys.map((k) => k === 'cost_interval_count' ? patch[k] ?? 1 : patch[k] ?? null)])).rows[0];
+          await syncCost(c, table, kind, before, after, req.user.id);
+        });
+      } catch (e) {
+        // z. B. ein ausgemustertes Fahrzeug wieder in Betrieb nehmen, dessen Kennzeichen inzwischen vergeben ist
+        if (e.code === '23505') throw bad(K.duplicate || 'Eintrag mit dieser Kennung existiert bereits');
+        throw e;
+      }
       await audit(req, `${path}.updated`, path, before.id);
       return { ok: true };
     });
@@ -308,7 +324,9 @@ export default async function routes(app) {
       await assertOwner(req, before, K.perm, LEVEL.MANAGE);
       if (before.cost_recurring_id) await q('DELETE FROM recurring_rules WHERE id=$1', [before.cost_recurring_id]);
       if (path === 'keys' && (await one('SELECT 1 FROM key_assignments WHERE key_id=$1 AND returned_at IS NULL', [before.id]))) throw bad('Schlüssel ist ausgegeben');
+      const images = path === 'vehicles' ? await many('SELECT storage_key FROM vehicle_images WHERE vehicle_id=$1', [before.id]) : [];
       await q(`DELETE FROM ${table} WHERE id=$1`, [before.id]);
+      for (const image of images) removeUpload(image.storage_key);
       await audit(req, `${path}.deleted`, path, before.id);
       return { ok: true };
     });
@@ -404,7 +422,7 @@ export default async function routes(app) {
             (SELECT count(*)::int FROM people pe WHERE pe.active) people,
             (SELECT count(*)::int FROM key_assignments a JOIN keys k ON k.id=a.key_id WHERE ${ownerSql('k', 'key')} AND a.returned_at IS NULL AND a.lost_at IS NULL) issued`, [req.user.id]),
       many(`SELECT id, plate, make_model, service_due, odometer_km, service_due_km FROM vehicles v
-        WHERE ${ownerSql('v', 'vehicle')} AND (
+        WHERE ${ownerSql('v', 'vehicle')} AND v.status <> 'retired' AND (
           (service_due IS NOT NULL AND service_due <= $2)
           OR (odometer_km IS NOT NULL AND service_due_km IS NOT NULL AND odometer_km >= service_due_km)
         ) ORDER BY service_due NULLS LAST, service_due_km`, [req.user.id, soon]),

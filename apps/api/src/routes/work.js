@@ -233,9 +233,10 @@ export default async function routes(app) {
     const members = await many(
       `SELECT u.id,u.name,u.weekly_work_hours,u.daily_salary,u.hourly_bonus_percent,u.currency
        FROM team_members tm JOIN users u ON u.id=tm.user_id
-       WHERE tm.team_id=$1 AND u.status='active' AND u.deleted_at IS NULL
+       WHERE tm.team_id=$1 AND u.status='active' AND u.deleted_at IS NULL AND u.id <> $2
        ORDER BY u.name`,
-      [teamId],
+      // Die eigenen Zeiten stehen schon oben im eigenen Stundenzettel (Wunsch des Auftraggebers vom 2026-11-10)
+      [teamId, req.user.id],
     );
     return {
       team_id: teamId,

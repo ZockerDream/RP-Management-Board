@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { $, esc, eur, fdate, fdatetime, empty, debounce, openForm, confirmBox, toast, parseAmount, todayStr, showSecret } from '../ui.js';
 import { loadBudgets } from './common.js';
 import { can, state } from '../app.js';
+import { openGalleryModal } from '../gallery.js';
 
 const STATUS = { available: ['ok', 'Verfügbar'], out: ['warn', 'Ausgegeben'], overdue: ['bad', 'Überfällig'], lost: ['bad', 'Verloren'] };
 const VSTATUS = { available: 'Verfügbar', in_use: 'Im Einsatz', workshop: 'Werkstatt', retired: 'Ausgemustert' };
@@ -22,6 +23,7 @@ async function showPersonRecord(personId) {
   const expired = (date) => date && date < todayStr();
   const html = [
     `<p class="muted">${esc([PKIND[r.person.kind], r.person.function, r.person.active ? '' : 'inaktiv'].filter(Boolean).join(' · '))}</p>`,
+    section('Fahrzeuge (Besitzer)', r.vehicles, (v) => item(`<b>${esc(v.plate)}</b> ${esc(v.make_model)}`, `${VSTATUS[v.status]}${v.team_name ? ` · ${esc(v.team_name)}` : ' · privat'}`, '#/assets-vehicles'), 'Keine Fahrzeuge.'),
     section('Akten', r.case_files, (c) => item(`<b>${esc(c.file_number)}</b> ${esc(c.title)}`, `${CASE_STATUS[c.status]}${c.role ? ` · ${esc(c.role)}` : ''} · eröffnet ${fdate(c.opened_on)}`, `#/casefiles?id=${c.id}`), 'An keiner Akte beteiligt.'),
     section('Einträge zur Person', r.entries, (e) => item(`<b>${fdate(e.entry_date)}</b> ${esc(e.kind || 'Eintrag')}`, `${esc(e.file_number)} · ${esc(e.body.length > 140 ? `${e.body.slice(0, 140)}…` : e.body)}`, `#/casefiles?id=${e.case_file_id}`), 'Keine Einträge.'),
     section('Lizenzen', r.licenses, (l) => item(`<b>${esc(l.type_name)}</b>${l.number ? ` ${esc(l.number)}` : ''}`, `${LICENSE_STATUS[l.status]}${l.status === 'valid' && expired(l.valid_until) ? ' · abgelaufen' : ''} · ${l.valid_until ? `gültig bis ${fdate(l.valid_until)}` : 'unbefristet'}${l.status_reason ? ` · ${esc(l.status_reason)}` : ''}`, '#/licenses'), 'Keine Lizenzen.'),
@@ -104,15 +106,22 @@ async function formProperty(o, people) {
     onSubmit: (v) => save('properties', o, { name: v.name.trim(), type: v.type, address: v.address, responsible_person_id: v.responsible_person_id || null, maintenance_due: v.maintenance_due || null, maintenance_note: v.maintenance_note, note: v.note, ...ownershipBody(v), ...costBody(v) }),
   });
 }
-async function formVehicle(o) {
+// Besitzer aus der Personenliste: Das Fahrzeug erscheint dann in seiner Personenakte. Inaktive Personen nur, wenn schon gewählt.
+function ownerOptions(o, people) {
+  const options = people.filter((p) => p.active || p.id === o?.owner_person_id).map((p) => ({ v: p.id, l: `${p.name}${p.function ? ` · ${p.function}` : ''}` }));
+  if (o?.owner_person_id && !options.some((option) => option.v === o.owner_person_id)) options.push({ v: o.owner_person_id, l: o.owner_person_name || 'Person' });
+  return [{ v: '', l: '– keine Person –' }, ...options];
+}
+async function formVehicle(o, people) {
   const budgets = await loadBudgets();
   const ownership = await ownershipFields(o, 'vehicle');
-  return costForm({
+  const dialog = costForm({
     title: o ? 'Fahrzeug bearbeiten' : 'Neues Fahrzeug', wide: true, fields: [
       { name: 'plate', label: 'Kennzeichen', value: o?.plate, required: true },
       { name: 'make_model', label: 'Marke / Modell', value: o?.make_model, required: true },
-      { name: 'status', label: 'Status', type: 'select', options: Object.entries(VSTATUS).map(([v, l]) => ({ v, l })), value: o?.status || 'available' },
-      { name: 'registered_owner', label: 'Besitzer', value: o?.registered_owner, full: true },
+      { name: 'status', label: 'Status', type: 'select', options: Object.entries(VSTATUS).map(([v, l]) => ({ v, l })), value: o?.status || 'available', help: 'Ausgemusterte Fahrzeuge geben ihr Kennzeichen frei und fehlen im Dashboard.' },
+      { name: 'owner_person_id', label: 'Besitzer (Person)', type: 'select', options: ownerOptions(o, people), value: o?.owner_person_id || '', help: 'Das Fahrzeug erscheint automatisch in der Personenakte.' },
+      { name: 'registered_owner', label: 'Besitzer ohne Personeneintrag', value: o?.registered_owner, maxlength: 100, full: true, help: 'Nur nötig, wenn der Besitzer nicht in der Personenliste steht.' },
       { name: 'service_due', label: 'Service fällig', type: 'date', value: o?.service_due?.slice(0, 10) },
       { name: 'odometer_km', label: 'Kilometerstand', type: 'number', min: 0, value: o?.odometer_km },
       { name: 'service_interval_km', label: 'Service-Intervall (km)', type: 'number', min: 1, value: o?.service_interval_km },
@@ -128,9 +137,16 @@ async function formVehicle(o) {
       const serviceDueKm = v.service_due_km === ''
         ? (odometerKm !== null && serviceIntervalKm !== null ? odometerKm + serviceIntervalKm : null)
         : Number(v.service_due_km);
-      return save('vehicles', o, { plate: v.plate.trim(), make_model: v.make_model.trim(), status: v.status, registered_owner: v.registered_owner.trim(), service_due: v.service_due || null, odometer_km: odometerKm, service_interval_km: serviceIntervalKm, service_due_km: serviceDueKm, first_aid_kit_expires_on: v.first_aid_kit_expires_on || null, note: v.note, ...ownershipBody(v), ...costBody(v) });
+      return save('vehicles', o, { plate: v.plate.trim(), make_model: v.make_model.trim(), status: v.status, owner_person_id: v.owner_person_id || null, registered_owner: v.owner_person_id ? '' : v.registered_owner.trim(), service_due: v.service_due || null, odometer_km: odometerKm, service_interval_km: serviceIntervalKm, service_due_km: serviceDueKm, first_aid_kit_expires_on: v.first_aid_kit_expires_on || null, note: v.note, ...ownershipBody(v), ...costBody(v) });
     },
   });
+  // Freitext nur ohne gewählte Person
+  const person = $('#f-owner_person_id');
+  const text = $('#f-registered_owner')?.closest('label');
+  const toggle = () => { if (text) text.hidden = Boolean(person?.value); };
+  person?.addEventListener('change', toggle);
+  toggle();
+  return dialog;
 }
 async function formKey(o, props, vehicles) {
   const budgets = await loadBudgets();
@@ -312,7 +328,12 @@ export async function render(view, params, section) {
     },
     async vehicles(el) {
       await fetchAll();
-      el.innerHTML = `<div class="card">${D.vehicles.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Kennzeichen</th><th>Modell</th><th>Besitzer</th><th>Status</th><th>Service</th><th>Verbandskasten</th><th>Schlüssel-Inventur</th><th>Kosten</th><th></th></tr></thead><tbody>${D.vehicles.map((v) => `<tr><td><b>${esc(v.plate)}</b></td><td>${esc(v.make_model)}</td><td>${esc(v.registered_owner || '–')}</td><td>${VSTATUS[v.status]}</td><td>${fdate(v.service_due)}${v.service_due_km != null ? `<br><small class="muted">bei ${Number(v.service_due_km).toLocaleString('de-DE')} km</small>` : ''}</td><td>${fdate(v.first_aid_kit_expires_on)}</td><td>${keyInventory('vehicle_id', v.id, 'vehicle')}</td><td>${v.cost_amount ? `${eur(v.cost_amount)} ${costIntervalText(v.cost_interval, v.cost_interval_count)}` : '–'}</td><td style="white-space:nowrap">${actions(v, 'vehicle')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Fahrzeuge.')}</div>`;
+      // Besitzer als Person verlinkt auf die Personenakte, sonst der Freitext
+      const owner = (v) => {
+        if (!v.owner_person_id) return esc(v.registered_owner || '–');
+        return can('casefile:read') && can('person:read') ? `<a href="#/casefiles?person=${v.owner_person_id}">${esc(v.owner_person_name)}</a>` : esc(v.owner_person_name || '–');
+      };
+      el.innerHTML = `<div class="card">${D.vehicles.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Kennzeichen</th><th>Modell</th><th>Besitzer</th><th>Status</th><th>Service</th><th>Verbandskasten</th><th>Schlüssel-Inventur</th><th>Kosten</th><th></th></tr></thead><tbody>${D.vehicles.map((v) => `<tr${v.status === 'retired' ? ' class="muted"' : ''}><td><b>${esc(v.plate)}</b></td><td>${esc(v.make_model)}</td><td>${owner(v)}</td><td>${v.status === 'retired' ? `<span class="tag">${VSTATUS[v.status]}</span>` : VSTATUS[v.status]}</td><td>${fdate(v.service_due)}${v.service_due_km != null ? `<br><small class="muted">bei ${Number(v.service_due_km).toLocaleString('de-DE')} km</small>` : ''}</td><td>${fdate(v.first_aid_kit_expires_on)}</td><td>${keyInventory('vehicle_id', v.id, 'vehicle')}</td><td>${v.cost_amount ? `${eur(v.cost_amount)} ${costIntervalText(v.cost_interval, v.cost_interval_count)}` : '–'}</td><td style="white-space:nowrap"><button class="btn ghost sm" data-images="${v.id}">Bilder${v.images ? ` (${v.images})` : ''}</button> ${actions(v, 'vehicle')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Fahrzeuge.')}</div>`;
     },
     async people(el) {
       await fetchAll();
@@ -444,7 +465,7 @@ export async function render(view, params, section) {
         const rid = g('[data-edit]')?.dataset.edit;
         const list = { keys: D.keys, properties: D.props, vehicles: D.vehicles, people: D.people }[k];
         const o = rid ? list.find((x) => x.id === rid) : null;
-        changed = await ({ keys: () => formKey(o, D.props, D.vehicles), properties: () => formProperty(o, D.people), vehicles: () => formVehicle(o), people: () => formPerson(o) }[k]());
+        changed = await ({ keys: () => formKey(o, D.props, D.vehicles), properties: () => formProperty(o, D.people), vehicles: () => formVehicle(o, D.people), people: () => formPerson(o) }[k]());
       } else if (g('[data-del]')) {
         if (await confirmBox('Löschen', 'Eintrag wirklich löschen? Verknüpfte Kosten-Daueraufträge werden ebenfalls entfernt.')) { await api.del(`/${{ keys: 'keys', properties: 'properties', vehicles: 'vehicles', people: 'people' }[k]}/${id.del}`); changed = true; }
       } else if (g('[data-assign]')) changed = await assign(D.keys.find((x) => x.id === id.assign));
@@ -460,6 +481,14 @@ export async function render(view, params, section) {
       else if (g('[data-set-pin]')) { await pinAccess(g('[data-set-pin]').dataset.setPin, false); show('properties'); }
       else if (g('[data-qr]')) await showKeyQr(g('[data-qr]').dataset.qr);
       else if (g('[data-record]')) await showPersonRecord(g('[data-record]').dataset.record);
+      else if (g('[data-images]')) {
+        const vehicle = D.vehicles.find((v) => v.id === g('[data-images]').dataset.images);
+        changed = await openGalleryModal({
+          title: `${vehicle.make_model} (${vehicle.plate})`, listUrl: `/vehicles/${vehicle.id}/images`, uploadUrl: `/vehicles/${vehicle.id}/images`,
+          urls: { file: (imageId) => `/vehicle-images/${imageId}`, item: (imageId) => `/vehicle-images/${imageId}` },
+          writable: can('vehicle:update') && writable(vehicle),
+        });
+      }
       else if (g('#scan-keys')) await scanKeyQr();
       else if (g('#a-csv')) await api.download('/admin/audit/export.csv', 'audit.csv');
       else if (g('#p-csv')) await api.download('/people/export.csv', 'personen.csv');

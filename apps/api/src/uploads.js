@@ -40,7 +40,9 @@ export async function receiveUpload(req, { images = false } = {}) {
     throw e;
   }
   const name = path.basename(part.filename || 'datei').replace(/[^\w.\- äöüÄÖÜß]/g, '_').slice(0, 120);
-  return { key, name, mime: part.mimetype, size, sha256: hash.digest('hex') };
+  // Bildunterschrift als Formularfeld vor der Datei (FormData: zuerst „caption“, dann „file“)
+  const caption = typeof part.fields?.caption?.value === 'string' ? part.fields.caption.value.trim().slice(0, 200) : '';
+  return { key, name, mime: part.mimetype, size, sha256: hash.digest('hex'), caption };
 }
 
 export function sendUpload(reply, file) {
