@@ -69,7 +69,7 @@ export async function buildFeed(userId, from, to) {
     }
   }
   for (const v of await many(`SELECT v.id, v.plate, v.make_model, v.service_due, v.first_aid_kit_expires_on FROM vehicles v
-    WHERE ${visibleSql('v', 'vehicle')}`, [userId])) {
+    WHERE ${visibleSql('v', 'vehicle')} AND v.status <> 'retired'`, [userId])) {
     if (v.service_due) out.push(ro(`veh:${v.id}:service`, 'vehicle', `Service: ${v.make_model}`, v.service_due, { note: v.plate }));
     if (v.first_aid_kit_expires_on) out.push(ro(`veh:${v.id}:kit`, 'vehicle', `Verbandskasten läuft ab: ${v.make_model}`, v.first_aid_kit_expires_on, { note: v.plate }));
   }
@@ -98,6 +98,11 @@ export async function buildFeed(userId, from, to) {
       AND NOT EXISTS (SELECT 1 FROM training_records n WHERE n.training_id=r.training_id AND n.result='passed'
         AND COALESCE(n.user_id, n.person_id)=COALESCE(r.user_id, r.person_id) AND n.completed_on > r.completed_on)`, [userId, from, to])) {
     out.push(ro(`trv:${r.id}`, 'training', `Schulung läuft ab: ${r.name}`, r.valid_until, { note: r.participant || '' }));
+  }
+  // Offene ToDos mit Deadline (solo und aus Organisationen, die man bei ToDos lesen darf); erledigte verschwinden
+  for (const t of await many(`SELECT td.id, td.title, td.due_date, t.name team_name FROM todos td LEFT JOIN teams t ON t.id=td.team_id
+    WHERE ${visibleSql('td', 'todos')} AND td.done_at IS NULL AND td.due_date BETWEEN $2 AND $3`, [userId, from, to])) {
+    out.push(ro(`todo:${t.id}`, 'todo', `ToDo: ${t.title}`, t.due_date, { note: t.team_name || 'Solo' }));
   }
   for (const g of await many('SELECT id, name, target_date FROM goals WHERE target_date IS NOT NULL AND budget_id = ANY($1)', [ids])) {
     out.push(ro(`goal:${g.id}`, 'finance', `Sparziel: ${g.name}`, g.target_date));

@@ -19,6 +19,7 @@ export const TYPES = {
   house: { label: 'Häuser', color: 'var(--ok)' },
   license: { label: 'Lizenzen', color: '#d97706' },
   training: { label: 'Schulungen', color: '#14b8a6' },
+  todo: { label: 'ToDo-Deadlines', color: '#db2777' },
   external: { label: 'Google / Outlook', color: '#0ea5e9' },
   team: { label: 'Organisation', color: '#8b5cf6' },
   personal: { label: 'Privat', color: '#0ea5e9' },

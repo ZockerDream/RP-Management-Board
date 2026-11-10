@@ -55,7 +55,7 @@ export default async function routes(app) {
     const level = owner.team_id ? await teamLevel(req.user.id, owner.team_id, 'casefile') : LEVEL.MANAGE;
     const p = [req.user.id, owner.team_id || owner.owner_user_id, personId];
     const typeArea = (alias) => `${alias}.${owner.team_id ? 'team_id' : 'owner_user_id'}=$2`;
-    const [file, caseFiles, warrants, charges, reports, evidence, vehicles, entries, licenses, trainings] = await Promise.all([
+    const [file, caseFiles, warrants, charges, reports, evidence, vehicles, entries, licenses, trainings, ownedVehicles] = await Promise.all([
       one(`SELECT pf.*, u.name updated_by_name FROM person_files pf LEFT JOIN users u ON u.id=pf.updated_by
         WHERE pf.person_id=$2 AND pf.${owner.team_id ? 'team_id' : 'owner_user_id'}=$1`, [p[1], personId]),
       many(`SELECT c.id, c.file_number, c.title, c.status, c.priority, c.opened_on, c.closed_on, cp.role, ct.name type_name
@@ -79,6 +79,9 @@ export default async function routes(app) {
       can(req, 'training:read') ? many(`SELECT r.id, tr.name training_name, r.result, r.completed_on, r.valid_until FROM training_records r
         JOIN trainings tr ON tr.id=r.training_id WHERE r.person_id=$3 AND ${typeArea('tr')} AND ${visibleSql('tr', 'training')}
         ORDER BY r.completed_on DESC NULLS LAST`, p) : null,
+      // Fahrzeuge aus der Objektverwaltung mit der Person als Besitzer, im selben Bereich und soweit sichtbar
+      can(req, 'vehicle:read') ? many(`SELECT v.id, v.plate, v.make_model, v.status FROM vehicles v
+        WHERE v.owner_person_id=$3 AND ${typeArea('v')} AND ${visibleSql('v', 'vehicle')} ORDER BY v.status = 'retired', v.plate`, p) : null,
     ]);
     // Vorstrafen: Summe der verurteilten Anklagepunkte (Strafe je Punkt mal Anzahl)
     const convicted = charges.filter((c) => c.status === 'convicted');
@@ -88,7 +91,7 @@ export default async function routes(app) {
       jail: convicted.reduce((sum, c) => sum + c.jail * c.count, 0),
       points: convicted.reduce((sum, c) => sum + c.points * c.count, 0),
     };
-    return { person, area: owner, level, file, case_files: caseFiles, warrants, charges, totals, reports, evidence, vehicles, entries, licenses, trainings };
+    return { person, area: owner, level, file, case_files: caseFiles, warrants, charges, totals, reports, evidence, vehicles, entries, licenses, trainings, owned_vehicles: ownedVehicles };
   });
 
   app.put('/person-files/:personId', authz('casefile:update'), async (req) => {

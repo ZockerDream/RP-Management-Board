@@ -2,6 +2,8 @@ import { chromium } from 'playwright';
 const BASE = process.env.BASE || 'http://localhost:18088';
 const out = '/work/shots';
 const fails = [], problems = [];
+// Gültiges 1×1-PNG, damit der Browser die Vorschau wirklich darstellen kann
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 let passed = 0;
 const check = (name, ok, extra = '') => { if (ok) passed++; else { fails.push(`${name} ${extra}`); console.log(`FAIL ${name} ${extra}`); } };
 
@@ -87,6 +89,8 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   const dashboardText = await page.textContent('#d-body');
   check('Dashboard zeigt Budget-Auslastung', /Budget-Auslastung/.test(dashboardText) && !/Konto-Auslastung/.test(dashboardText));
   check('Auslastung nennt echte Budgets', await page.locator('.gauge', { hasText: 'Gesamt' }).count() === 1);
+  // Der Golf (E2E-R) ist ausgemustert: weder im Fuhrpark noch mit Service unter „Als Nächstes“
+  check('Dashboard ohne ausgemusterte Fahrzeuge', /Fuhrpark/.test(dashboardText) && !/Golf|Ausgemustert/.test(dashboardText), dashboardText.slice(dashboardText.indexOf('Fuhrpark'), dashboardText.indexOf('Fuhrpark') + 300));
   await go(page, '#/transactions');
   check('Transaktionen zeigen zukünftige Buchung', /Zukunft Test/.test(await page.textContent('#view')));
 
@@ -274,6 +278,16 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.waitForTimeout(400);
   check('Glocke meldet ToDo-Deadline', /ToDo morgen fällig: Steuer abgeben/.test(await page.textContent('#notification-items')));
   await page.click('#bell');
+  // ToDo-Deadlines stehen im Kalender, mit eigenem Filter
+  await go(page, '#/calendar');
+  await until(page, () => !!document.querySelector('#cal-filters [data-filter="todo"]')).catch(() => {});
+  check('Kalenderfilter für ToDo-Deadlines', /ToDo-Deadlines/.test(await page.textContent('#cal-filters')));
+  await page.click('#cal [data-view=agenda]');
+  await page.waitForTimeout(200);
+  check('ToDo-Deadline in der Agenda', /ToDo: Steuer abgeben/.test(await page.textContent('#cal-body')), (await page.textContent('#cal-body')).slice(0, 300));
+  await page.uncheck('#cal-filters [data-filter="todo"]');
+  check('Filter blendet ToDo-Deadlines aus', !/ToDo: Steuer abgeben/.test(await page.textContent('#cal-body')));
+  await page.check('#cal-filters [data-filter="todo"]');
 
   // Eigene Tickets
   at('alice tickets');
@@ -312,6 +326,27 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.fill('.modal.open [name=name]', 'UI Konto');
   await submit(page);
   check('Konto über UI angelegt', /UI Konto/.test(await page.textContent('#view')));
+  // Persönliche Konten stehen vorn und sind vorausgewählt (vorher kam „Team-Kasse“ zuerst)
+  const firstCard = page.locator('#b-body [data-sel]').first();
+  check('Persönliches Konto zuerst gewählt', /Persönlich/.test(await firstCard.textContent()) && /outline/.test(await firstCard.getAttribute('style')), await firstCard.textContent());
+  // Zinsen einschalten, anzeigen und wieder abschalten
+  const uiCard = () => page.locator('#b-body [data-sel]', { hasText: 'UI Konto' });
+  await uiCard().locator('[data-edit]').click();
+  await page.waitForSelector('.modal.open [name=interest_rate]');
+  await page.fill('.modal.open [name=interest_rate]', '1,5');
+  await page.selectOption('.modal.open [name=interest_period]', 'monthly');
+  await submit(page);
+  await until(page, () => /Zinsen 1,5/.test(document.querySelector('#b-body')?.textContent || '')).catch(() => {});
+  const interestCard = await uiCard().textContent();
+  check('Konto zeigt Zinsen und nächste Gutschrift', /Zinsen 1,5 % pro Monat/.test(interestCard) && /Nächste Gutschrift am \d\d\.\d\d\.\d{4}/.test(interestCard), interestCard);
+  await page.screenshot({ path: `${out}/alice-konto-zinsen.png` });
+  await uiCard().locator('[data-edit]').click();
+  await page.waitForSelector('.modal.open [name=interest_rate]');
+  check('Zinssatz im Formular', (await page.inputValue('.modal.open [name=interest_rate]')) === '1,5' && (await page.inputValue('.modal.open [name=interest_period]')) === 'monthly');
+  await page.fill('.modal.open [name=interest_rate]', '');
+  await submit(page);
+  await until(page, () => !/Zinsen 1,5/.test(document.querySelector('#b-body')?.textContent || '')).catch(() => {});
+  check('Zinsen wieder aus', !/Zinsen/.test(await uiCard().textContent()));
 
   // Budgets
   at('alice budgets');
@@ -433,8 +468,59 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.waitForTimeout(500);
   await go(page, '#/work');
   check('Im Profil gewähltes Konto gilt auch hier', /Gutschrift auf Giro neu/.test(await page.textContent('#pay-summary')));
+  // Stundenzettel der Organisation ohne die eigene Person, mit Mitarbeitersuche; Stunden aus Beginn, Ende und Pause
+  at('alice stundenzettel suche');
+  await until(page, () => document.querySelectorAll('#team-work-report h3').length > 0).catch(() => {});
+  const teamNames = () => page.$$eval('#team-work-report h3', (h) => h.map((x) => x.textContent.trim()));
+  check('Eigene Person nicht im Stundenzettel der Organisation', (await teamNames()).length > 0 && !(await teamNames()).includes('alice'), (await teamNames()).join());
+  await page.fill('#team-work-search', 'car');
+  check('Mitarbeitersuche filtert', (await teamNames()).join() === 'carol', (await teamNames()).join());
+  await page.fill('#team-work-search', 'niemand');
+  check('Suche ohne Treffer erklärt sich', /Kein Mitarbeiter passt zur Suche/.test(await page.textContent('#team-work-report')));
+  await page.fill('#team-work-search', '');
+  check('Leere Suche zeigt wieder alle', (await teamNames()).length >= 2, (await teamNames()).join());
+  await page.click('#work-new');
+  await page.waitForSelector('.modal.open [name=started_at]');
+  await page.fill('.modal.open [name=started_at]', '22:00');
+  await page.fill('.modal.open [name=ended_at]', '02:30');
+  await page.fill('.modal.open [name=break_minutes]', '30');
+  check('Stunden aus Beginn, Ende und Pause (über Mitternacht)', (await page.inputValue('.modal.open [name=hours]')) === '4', await page.inputValue('.modal.open [name=hours]'));
+  await page.fill('.modal.open [name=ended_at]', '23:15');
+  check('Stunden folgen jeder Änderung', (await page.inputValue('.modal.open [name=hours]')) === '0.75', await page.inputValue('.modal.open [name=hours]'));
+  await page.fill('.modal.open [name=hours]', '1.5');
+  check('Stunden bleiben von Hand änderbar', (await page.inputValue('.modal.open [name=hours]')) === '1.5');
+  await page.click('.modal.open [data-x]');
 
   // Objekte: QR, PIN, Filter, Legacy-Links
+  // Fahrzeuge: Besitzer als Person, ausgemusterte markiert, Bilder mit Galerie und Großansicht
+  at('alice fahrzeuge');
+  await go(page, '#/assets-vehicles');
+  check('Besitzerin als Link zur Personenakte', await page.locator('#view a[href^="#/casefiles?person="]', { hasText: 'Hanna Halter' }).count() === 1);
+  check('Ausgemustertes Fahrzeug markiert', /Ausgemustert/.test(await page.locator('#view tr', { hasText: 'Golf' }).textContent()));
+  await page.locator('#view tr', { hasText: 'Polo' }).locator('[data-edit]').click();
+  await page.waitForSelector('.modal.open [name=owner_person_id]');
+  check('Besitzer aus der Personenliste vorausgewählt', /Hanna Halter/.test(await page.$eval('.modal.open [name=owner_person_id]', (s) => s.selectedOptions[0].textContent)));
+  check('Freitext versteckt, solange eine Person gewählt ist', await page.$eval('.modal.open [name=registered_owner]', (i) => i.closest('label').hidden));
+  await page.selectOption('.modal.open [name=owner_person_id]', '');
+  check('Freitext erscheint ohne Person', !(await page.$eval('.modal.open [name=registered_owner]', (i) => i.closest('label').hidden)));
+  await page.click('.modal.open [data-x]');
+  await page.locator('#view tr', { hasText: 'E2E-1' }).locator('[data-images]').click();
+  await page.waitForSelector('.modal.open [data-gallery]');
+  await page.click('.modal.open [data-img-add]');
+  await page.waitForSelector('.modal.open #f-file');
+  await page.setInputFiles('.modal.open #f-file', { name: 'auto.png', mimeType: 'image/png', buffer: PNG });
+  await page.fill('.modal.open [name=caption]', 'Seitenansicht');
+  await page.click('.modal.open button[type=submit]');
+  await until(page, () => !!document.querySelector('.modal.open [data-gallery] .gallery-thumb img')).catch(() => {});
+  check('Fahrzeugbild in der Galerie mit Vorschau', /Seitenansicht/.test(await page.textContent('.modal.open [data-gallery]')) && await page.locator('.modal.open [data-gallery] .gallery-thumb img').count() === 1);
+  await page.screenshot({ path: `${out}/alice-fahrzeugbilder.png` });
+  await page.click('.modal.open [data-gallery] .gallery-thumb');
+  await page.waitForSelector('.modal.open .lightbox-img');
+  check('Großansicht des Fahrzeugbilds', (await page.getAttribute('.modal.open .lightbox-img', 'src')).startsWith('data:image/png'));
+  await page.locator('.modal.open').last().locator('[data-x]').click();
+  await page.locator('.modal.open').last().locator('[data-x]').click();
+  await until(page, () => /Bilder \(1\)/.test(document.querySelector('#view')?.textContent || '')).catch(() => {});
+  check('Fahrzeugliste zählt das Bild', /Bilder \(1\)/.test(await page.locator('#view tr', { hasText: 'E2E-1' }).textContent()));
   at('alice objekte');
   await go(page, '#/assets-keys');
   await page.click('#view [data-qr]');
@@ -535,6 +621,21 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await submit(page);
   await waitFor('#view .case-detail .card', /aktive Fahndung/);
   check('Aktive Fahndung im Kopf der Akte', /Eine aktive Fahndung/.test(await page.textContent('#view .case-detail .card')));
+  // Bilder der Akte: eigener Tab mit Vorschau, Bildunterschrift und Großansicht
+  await page.click('#d-tabs [data-tab=d-images]');
+  await page.click('#img-add');
+  await page.waitForSelector('.modal.open #f-file');
+  await page.setInputFiles('.modal.open #f-file', { name: 'tatort.png', mimeType: 'image/png', buffer: PNG });
+  await page.fill('.modal.open [name=caption]', 'Tatort Pier 4');
+  await submit(page);
+  await waitFor('#view [data-panel=d-images]', /Tatort Pier 4/);
+  await until(page, () => !!document.querySelector('#view [data-panel=d-images] .gallery-thumb img')).catch(() => {});
+  check('Aktenbild mit Vorschau und Bildunterschrift', /Tatort Pier 4/.test(await page.textContent('#view [data-panel=d-images]')) && await page.locator('#view [data-panel=d-images] .gallery-thumb img').count() === 1);
+  check('Bilder getrennt von Anhängen gezählt', /Bilder \(1\)/.test(await page.textContent('#d-tabs')) && /Anhänge \(0\)/.test(await page.textContent('#d-tabs')), await page.textContent('#d-tabs'));
+  await page.click('#view [data-panel=d-images] .gallery-thumb');
+  await page.waitForSelector('.modal.open .lightbox-img');
+  check('Großansicht des Aktenbilds', (await page.getAttribute('.modal.open .lightbox-img', 'src')).startsWith('data:image/png'));
+  await page.click('.modal.open [data-x]');
   await page.click('#c-print');
   await page.screenshot({ path: `${out}/alice-akte.png`, fullPage: true });
   // Personenakte mit Warnhinweis

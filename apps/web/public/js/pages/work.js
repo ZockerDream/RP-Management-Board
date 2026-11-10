@@ -27,16 +27,27 @@ function range(mode, value) {
   return [localDate(start), localDate(end)];
 }
 
+// Arbeitszeit aus Beginn, Ende und Pause; Ende vor Beginn heißt über Mitternacht, Ende 00:00 bis Mitternacht
+function shiftHours(start, end, breakMinutes) {
+  if (!start || !end) return null;
+  const minutes = (time) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+  const from = minutes(start);
+  const to = minutes(end);
+  if (from === to) return null;
+  const net = (to > from ? to - from : 1440 - from + to) - (Number(breakMinutes) || 0);
+  return net > 0 ? Math.round((net / 60) * 100) / 100 : null;
+}
+
 async function entryForm(entry, projects) {
   const projectOptions = entry?.project_id && !projects.some((project) => project.id === entry.project_id)
     ? [...projects, { id: entry.project_id, name: entry.project_name }]
     : projects;
-  return openForm({
+  const dialog = openForm({
     title: entry ? 'Stundeneintrag bearbeiten' : 'Stunden manuell erfassen',
     fields: [
       { name: 'work_date', label: 'Datum', type: 'date', value: entry?.work_date?.slice(0, 10) || todayStr(), required: true },
       { name: 'project_id', label: 'Projekt / Kunde', type: 'select', options: [{ v: '', l: '– Ohne Projekt –' }, ...projectOptions.map((p) => ({ v: p.id, l: `${p.name}${p.team_name ? ` · ${p.team_name}` : ''}` }))], value: entry?.project_id || '' },
-      { name: 'hours', label: 'Arbeitsstunden', type: 'number', min: 0.01, max: 24, step: 0.01, value: entry?.hours || '', required: true },
+      { name: 'hours', label: 'Arbeitsstunden', type: 'number', min: 0.01, max: 24, step: 0.01, value: entry?.hours || '', required: true, help: 'Rechnet sich aus Beginn, Ende und Pause, sobald du eins davon änderst.' },
       { name: 'started_at', label: 'Beginn (optional)', type: 'time', value: entry?.started_at?.slice(0, 5) || '' },
       { name: 'ended_at', label: 'Ende (optional)', type: 'time', value: entry?.ended_at?.slice(0, 5) || '', help: 'Ende vor Beginn heißt über Mitternacht: Die Stunden werden auf beide Tage aufgeteilt.' },
       { name: 'break_minutes', label: 'Pause in Minuten', type: 'number', min: 0, max: 1440, value: entry?.break_minutes || 0 },
@@ -48,6 +59,18 @@ async function entryForm(entry, projects) {
       if (result?.entries > 1) toast('Über Mitternacht: auf zwei Tage aufgeteilt');
     },
   });
+  // Stunden folgen Beginn, Ende und Pause (Wunsch des Auftraggebers vom 2026-11-10); von Hand überschreiben bleibt möglich
+  const modal = $('#modals .modal:last-child');
+  const field = (name) => $(`#f-${name}`, modal);
+  const update = () => {
+    const hours = shiftHours(field('started_at').value, field('ended_at').value, field('break_minutes').value);
+    if (hours !== null) field('hours').value = hours;
+  };
+  for (const name of ['started_at', 'ended_at', 'break_minutes']) {
+    field(name)?.addEventListener('input', update);
+    field(name)?.addEventListener('change', update);
+  }
+  return dialog;
 }
 
 export async function render(view) {
@@ -81,7 +104,8 @@ export async function render(view) {
     <div class="card"><div class="card-head"><h2>Auswertung</h2><b id="work-total" class="up"></b></div>
       <div class="toolbar" style="gap:8px;flex-wrap:wrap"><select id="work-mode"><option value="week">Woche</option><option value="day">Tag</option><option value="month">Monat</option></select>
       <input id="work-date" type="date" value="${today}"><span id="work-range" class="muted"></span></div><div id="work-list"></div></div>
-    ${teams.length ? `<div class="card"><div class="card-head"><h2>Stundenzettel der Organisation</h2><div class="toolbar"><select id="work-team">${teams.map((team) => `<option value="${team.id}">${esc(team.name)}</option>`).join('')}</select><input id="team-work-month" type="month" value="${today.slice(0, 7)}"></div></div><div id="team-work-report"></div></div>` : ''}
+    ${teams.length ? `<div class="card"><div class="card-head"><h2>Stundenzettel der Organisation</h2><div class="toolbar" style="flex-wrap:wrap"><input id="team-work-search" type="search" class="search" placeholder="Mitarbeiter suchen…" aria-label="Mitarbeiter suchen"><select id="work-team" aria-label="Organisation">${teams.map((team) => `<option value="${team.id}">${esc(team.name)}</option>`).join('')}</select><input id="team-work-month" type="month" value="${today.slice(0, 7)}" aria-label="Monat"></div></div>
+      <small class="muted">Deine eigenen Zeiten stehen oben unter „Auswertung“.</small><div id="team-work-report"></div></div>` : ''}
     <div class="card"><div class="card-head"><h2>Projekte / Kunden</h2></div><div id="project-list"></div></div>`;
 
   function updateProjectOptions() {
@@ -190,21 +214,29 @@ export async function render(view) {
         ${separatedEntries}`
       : separatedEntries;
   }
+  // Stundenzettel der Organisation: alle anderen Mitglieder (die eigenen Zeiten stehen oben), Suche nach Namen ohne neue Anfrage
+  let teamReport = null;
   async function loadTeamHours() {
     if (!teams.length) return;
-    const report = await api.get(`/work-hours/team/monthly?${new URLSearchParams({ team_id: $('#work-team').value, month: $('#team-work-month').value })}`);
+    teamReport = await api.get(`/work-hours/team/monthly?${new URLSearchParams({ team_id: $('#work-team').value, month: $('#team-work-month').value })}`);
+    drawTeamHours();
+  }
+  function drawTeamHours() {
+    if (!teamReport) return;
     teamEntries.clear();
+    for (const member of teamReport.members) for (const item of member.items) teamEntries.set(item.id, item);
     const editable = teamWritable();
-    $('#team-work-report').innerHTML = report.members.length ? report.members.map((member) => {
+    const search = ($('#team-work-search')?.value || '').trim().toLocaleLowerCase('de');
+    const members = search ? teamReport.members.filter((member) => member.name.toLocaleLowerCase('de').includes(search)) : teamReport.members;
+    $('#team-work-report').innerHTML = members.length ? members.map((member) => {
       const general = member.items.filter((item) => !item.project_id);
       const project = member.items.filter((item) => item.project_id);
-      for (const item of member.items) teamEntries.set(item.id, item);
       return `<div class="card"><div class="card-head"><div class="grow"><h3>${esc(member.name)}</h3>
         <small>Gesamt ${hoursText(member.total_hours)} · Über dem Soll ${hoursText(member.overtime_hours)} · Vergütung ${payText(member.total_pay, member.currency)}</small></div>
         ${editable ? `<button class="btn ghost sm" data-team-settings="${member.user_id}">Mitarbeitereinstellungen</button>` : ''}</div>
         <p class="muted">${salaryText(member.daily_salary, member.weekly_target, member.hourly_bonus_percent, member.currency)}</p>
         <h4>Allgemeine Arbeitszeiten</h4>${entriesTable(general, editable)}<h4 style="margin-top:16px">Projektzeiten</h4>${entriesTable(project, editable)}</div>`;
-    }).join('') : empty('Keine aktiven Mitglieder gefunden.');
+    }).join('') : empty(search ? 'Kein Mitarbeiter passt zur Suche.' : 'Keine weiteren aktiven Mitglieder.');
   }
   async function employeeSettingsForm(userId) {
     const member = (await api.get(`/work-hours/team/monthly?${new URLSearchParams({ team_id: $('#work-team').value, month: $('#team-work-month').value })}`)).members.find((item) => item.user_id === userId);
@@ -232,6 +264,9 @@ export async function render(view) {
   view.addEventListener('change', (event) => {
     if (event.target.matches('#work-mode, #work-date')) load().catch((error) => toast(error.message, true));
     if (event.target.matches('#work-team, #team-work-month')) loadTeamHours().catch((error) => toast(error.message, true));
+  });
+  view.addEventListener('input', (event) => {
+    if (event.target.matches('#team-work-search')) drawTeamHours();
   });
   view.addEventListener('click', async (event) => {
     const target = event.target.closest('button');

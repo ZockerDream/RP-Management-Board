@@ -8,6 +8,7 @@ import { planPayroll, mondayOf, nextDate, payrollCutoff } from './payroll.js';
 import { localDateTime } from './work-split.js';
 import { todoStage, dateInZone } from './periods.js';
 import { teamUsers } from './org.js';
+import { planInterest, toCents, centsText, interestTitle, PERIOD_TEXT } from './interest.js';
 
 const localDate = (date = new Date()) => dateInZone(config.tz, date);
 
@@ -129,6 +130,56 @@ export async function recurringRun(log) {
   return `${booked} Buchungen`;
 }
 
+// Zinsen: je Konto mit Zinssatz alle abgeschlossenen Zeiträume bis gestern (Ortszeit) gutschreiben. Regeln in interest.js;
+// interest_payments hält je Zeitraum genau eine Zeile, auch ohne Betrag, damit nichts doppelt oder nachträglich neu gerechnet wird.
+const SALDO = "CASE type WHEN 'income' THEN amount WHEN 'expense' THEN -amount ELSE 0 END";
+export async function interestRun(log) {
+  const lastDate = previousDate(localDate());
+  const accounts = await many(
+    `SELECT b.id, b.type, b.owner_user_id, b.currency, b.interest_rate, b.interest_period, b.interest_since,
+       (SELECT max(period_end) FROM interest_payments p WHERE p.budget_id=b.id) covered_until
+     FROM budgets b WHERE b.interest_rate IS NOT NULL AND NOT b.archived AND b.interest_since <= $1`,
+    [lastDate],
+  );
+  let booked = 0;
+  for (const account of accounts) {
+    const since = String(account.interest_since).slice(0, 10);
+    const coveredUntil = account.covered_until ? String(account.covered_until).slice(0, 10) : null;
+    const from = coveredUntil && coveredUntil >= since ? nextDate(coveredUntil) : since;
+    if (from > lastDate) continue;
+    const [opening, days] = await Promise.all([
+      one(`SELECT COALESCE(sum(${SALDO}),0) s FROM transactions WHERE budget_id=$1 AND booked_at < $2`, [account.id, from]),
+      many(`SELECT booked_at, sum(${SALDO}) s FROM transactions WHERE budget_id=$1 AND booked_at BETWEEN $2 AND $3 GROUP BY booked_at`, [account.id, from, lastDate]),
+    ]);
+    const plan = planInterest({
+      since, coveredUntil, lastDate, period: account.interest_period, rate: account.interest_rate,
+      openingBalance: toCents(opening.s), deltas: new Map(days.map((row) => [String(row.booked_at).slice(0, 10), toCents(row.s)])),
+    });
+    for (const item of plan) {
+      const amount = centsText(item.amount);
+      await tx(async (client) => {
+        const reservation = await client.query(
+          `INSERT INTO interest_payments(budget_id, period_start, period_end, rate, period, average_balance, amount)
+           VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (budget_id, period_end) DO NOTHING RETURNING id`,
+          [account.id, item.period_start, item.period_end, account.interest_rate, account.interest_period, centsText(item.average), amount],
+        );
+        if (!reservation.rowCount || item.amount <= 0n) return;
+        const rate = Number(account.interest_rate).toLocaleString('de-DE', { maximumFractionDigits: 4 });
+        const transaction = await client.query(
+          `INSERT INTO transactions(budget_id, created_by, type, amount, booked_at, title, note, source, income_kind)
+           VALUES ($1,$2,'income',$3,$4,$5,$6,'interest','other') RETURNING id`,
+          [account.id, account.type === 'solo' ? account.owner_user_id : null, amount, item.period_end, interestTitle(item, account.interest_period),
+            `${rate} % ${PERIOD_TEXT[account.interest_period]} auf durchschnittlich ${centsText(item.average)} ${account.currency} (Tagessaldo ${item.period_start} bis ${item.period_end})`],
+        );
+        await client.query('UPDATE interest_payments SET transaction_id=$2 WHERE id=$1', [reservation.rows[0].id, transaction.rows[0].id]);
+        booked++;
+      });
+    }
+  }
+  log.info(`Zinsen bis ${lastDate}: ${booked} Gutschriften`);
+  return `${booked} Zinsgutschriften`;
+}
+
 const REMIND_DAYS = { '1d': 1, '3d': 3, '7d': 7, '14d': 14 };
 function nextOccurrence(e, from) {
   if (e.repeat === 'none') return e.date >= from ? e.date : null;
@@ -157,9 +208,9 @@ export async function reminders(log) {
   const soon = addInterval(t, 'daily', 14);
   const kitSoon = addInterval(t, 'daily', 30);
   for (const v of await many(`SELECT id, plate, make_model, service_due, odometer_km, service_due_km, first_aid_kit_expires_on, owner_user_id, team_id
-    FROM vehicles WHERE (service_due IS NOT NULL AND service_due <= $1)
+    FROM vehicles WHERE status <> 'retired' AND ((service_due IS NOT NULL AND service_due <= $1)
       OR (odometer_km IS NOT NULL AND service_due_km IS NOT NULL AND odometer_km >= service_due_km)
-      OR (first_aid_kit_expires_on IS NOT NULL AND first_aid_kit_expires_on <= $2)`, [soon, kitSoon])) {
+      OR (first_aid_kit_expires_on IS NOT NULL AND first_aid_kit_expires_on <= $2))`, [soon, kitSoon])) {
     const users = v.owner_user_id ? [v.owner_user_id] : await teamUsers(v.team_id, 'vehicle');
     for (const userId of users) {
       const details = [
@@ -284,6 +335,8 @@ export const JOBS = {
   // Stündlich: Gebucht wird der Vortag ab 03:45 Uhr; wartet ein Tag auf das Ausstempeln, folgt er spätestens eine Stunde danach
   'payroll.run': { cron: '45 * * * *', fn: payrollRun },
   'recurring.run': { cron: '*/15 * * * *', fn: recurringRun },
+  // Stündlich, damit eine Tagesgutschrift kurz nach Mitternacht kommt; jeder Zeitraum wird genau einmal gutgeschrieben
+  'interest.run': { cron: '20 * * * *', fn: interestRun },
   reminders: { cron: '0 7 * * *', fn: reminders },
   // Stündlich, damit auch ein heute angelegtes ToDo noch erinnert; nachts bleibt es still
   'todos.remind': { cron: '5 7-20 * * *', fn: todoReminders },

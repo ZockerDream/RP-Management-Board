@@ -114,6 +114,8 @@ ok('konto umbenennen (nur name)', await alice.patch(`/budgets/${solo.id}`, { nam
 const cat = ok('kategorie', await alice.post(`/budgets/${solo.id}/categories`, { name: 'E2E-Essen', limit_amount: '100' }));
 const budgets = ok('konten', await alice.get('/budgets'));
 const giro = budgets.find((b) => b.id === solo.id);
+// „Haushalt“ (geteilt) stand früher vorn, weil „shared“ alphabetisch vor „solo“ kommt, und war damit überall vorausgewählt
+check('Persönliche Konten stehen zuerst', budgets[0].id === solo.id && budgets.findIndex((b) => b.type === 'shared') > budgets.findLastIndex((b) => b.type === 'solo' && !b.archived), budgets.map((b) => `${b.type}:${b.name}`).join());
 check('Konto umbenannt', giro.name === 'Giro neu');
 check('Konto hat Standardkategorien', giro.categories.length >= 2, String(giro.categories.length));
 const tx1 = ok('einnahme', await alice.post('/transactions', { budget_id: solo.id, type: 'income', amount: '1000.50', booked_at: today, title: 'Lohn' }));
@@ -128,6 +130,39 @@ const txs = ok('buchungen', await alice.get(`/transactions?budget_id=${solo.id}`
 check('Buchungsliste', (txs.items || txs).length === 2, JSON.stringify(txs).slice(0, 200));
 const csv = await alice.raw('/transactions/export.csv');
 check('CSV Export', csv.status === 200 && /csv/.test(csv.headers.get('content-type')));
+
+// ---------- Zinsen (optional je Konto), gebucht vom echten Worker-Job
+invalid('Zinssatz 0', await alice.post('/budgets', { name: 'Z0', type: 'solo', interest_rate: '0', interest_period: 'monthly' }));
+invalid('Zinssatz über 100', await alice.post('/budgets', { name: 'Z1', type: 'solo', interest_rate: '100,5', interest_period: 'monthly' }));
+invalid('Zinssatz mit fünf Nachkommastellen', await alice.post('/budgets', { name: 'Z2', type: 'solo', interest_rate: '1.00001', interest_period: 'monthly' }));
+invalid('Zinsen ohne Zeitraum', await alice.post('/budgets', { name: 'Z3', type: 'solo', interest_rate: '1' }));
+invalid('Unbekannter Zinszeitraum', await alice.post('/budgets', { name: 'Z4', type: 'solo', interest_rate: '1', interest_period: 'hourly' }));
+const savings = ok('Sparkonto mit Zinsen', await alice.post('/budgets', { name: 'Sparkonto', type: 'solo', interest_rate: '1,5', interest_period: 'monthly' }));
+const savingsRow = async () => (await alice.get('/budgets')).data.find((b) => b.id === savings.id);
+const fresh = await savingsRow();
+check('Zinsen gespeichert, zählen ab heute', Number(fresh.interest_rate) === 1.5 && fresh.interest_period === 'monthly' && fresh.interest_since === dayAt(0) && fresh.interest_next_on?.slice(0, 7) === dayAt(0).slice(0, 7), JSON.stringify(fresh));
+// Täglich 1 %: ab vorgestern 1.000 → 10,00, dann 10,10 und 10,20 (gutgeschriebene Zinsen werden mitverzinst); heute ist noch offen
+ok('Zinsen auf täglich umstellen', await alice.patch(`/budgets/${savings.id}`, { interest_rate: '1', interest_period: 'daily' }));
+ok('Einzahlung vor drei Tagen', await alice.post('/transactions', { budget_id: savings.id, type: 'income', amount: '1000', booked_at: dayAt(-3), title: 'Startguthaben' }));
+psql(`UPDATE budgets SET interest_since='${dayAt(-3)}' WHERE id='${savings.id}'`);
+runJob('interest.run');
+const interestRows = async () => (await alice.get(`/transactions?budget_id=${savings.id}`)).data.items.filter((t) => t.source === 'interest').sort((a, b) => a.booked_at.localeCompare(b.booked_at));
+const credited = await interestRows();
+check('Zinsen je abgeschlossenem Tag mit Zinseszins', credited.map((t) => `${t.booked_at.slice(0, 10)}=${t.amount}`).join() === `${dayAt(-3)}=10.00,${dayAt(-2)}=10.10,${dayAt(-1)}=10.20`, credited.map((t) => `${t.booked_at}=${t.amount}`).join());
+check('Zinsbuchung als Einnahme mit Titel', credited[0]?.type === 'income' && credited[0]?.title === `Zinsen ${dayAt(-3).split('-').reverse().join('.')}`, credited[0]?.title);
+check('Kontokarte zeigt Zinsen', (await savingsRow()).interest_total === '30.30' && (await savingsRow()).balance === '1030.30');
+runJob('interest.run');
+check('Zweiter Lauf bucht nichts doppelt', (await interestRows()).length === 3);
+invalid('Zinsgutschrift lässt sich nicht ändern', await alice.patch(`/transactions/${credited[0].id}`, { amount: '99' }));
+ok('Zinsgutschrift löschen', await alice.del(`/transactions/${credited[0].id}`));
+runJob('interest.run');
+check('Gelöschte Gutschrift kommt nicht wieder', (await interestRows()).length === 2);
+check('Zinsen im Audit-Log', psql(`SELECT count(*) FROM audit_log WHERE action='budget.interest_changed' AND entity_id='${savings.id}'`) === '1');
+ok('Zinsen abschalten', await alice.patch(`/budgets/${savings.id}`, { interest_rate: null }));
+const off = await savingsRow();
+check('Zinsen aus', off.interest_rate === null && off.interest_period === null && off.interest_since === null && off.interest_next_on === null, JSON.stringify(off));
+denied('Leserin ändert keine Zinsen am geteilten Konto', await carol.patch(`/budgets/${shared.id}`, { interest_rate: '5', interest_period: 'daily' }), [403, 404]);
+ok('Sparkonto löschen', await alice.del(`/budgets/${savings.id}`));
 { const r = await bob.get(`/transactions?budget_id=${solo.id}`); check('IDOR: bob liest Solo-Buchung nicht', r.status !== 200 || r.data.items.length === 0, JSON.stringify(r.data)); }
 denied('IDOR: bob bucht nicht auf Alice-Konto', await bob.post('/transactions', { budget_id: solo.id, type: 'expense', amount: '1', booked_at: today }));
 denied('IDOR: bob ändert Alice-Buchung nicht', await bob.patch(`/transactions/${tx1.id}`, { amount: '1' }));
@@ -297,8 +332,11 @@ const pdf = await alice.raw(`/work-hours/monthly.pdf?month=${month}`);
 check('Monats-PDF', pdf.status === 200 && pdf.buf.slice(0, 4).toString() === '%PDF', `status=${pdf.status}`);
 check('Stunden CSV', (await alice.raw('/work-hours/export.csv')).status === 200);
 const teamRep = ok('Team-Monat', await alice.get(`/work-hours/team/monthly?team_id=${team.id}&month=${month}`));
-const tm = (teamRep.members || teamRep).find?.((m) => m.user_id === meAlice.user.id);
-check('Team-Bericht weekly_target pro Mitglied', tm && tm.weekly_target === 7, JSON.stringify(tm)?.slice(0, 240));
+// Die eigenen Zeiten stehen im eigenen Stundenzettel, nicht noch einmal unter der Organisation
+check('Team-Bericht ohne die eigene Person', !teamRep.members.some((m) => m.user_id === meAlice.user.id), teamRep.members.map((m) => m.name).join());
+const bobMonth = (await bob.get(`/work-hours/team/monthly?team_id=${team.id}&month=${month}`)).data;
+const tm = bobMonth.members?.find((m) => m.user_id === meAlice.user.id);
+check('Team-Bericht weekly_target pro Mitglied', tm && tm.weekly_target === 7 && !bobMonth.members.some((m) => m.user_id === uB.id), JSON.stringify(tm)?.slice(0, 240));
 denied('Viewer sieht Teamzeiten nicht', await carol.get(`/work-hours/team/monthly?team_id=${team.id}&month=${month}`));
 denied('Fremder sieht Teamzeiten nicht', await dave.get(`/work-hours/team/monthly?team_id=${team.id}&month=${month}`));
 ok('Editor setzt Mitarbeiter-Einstellung', await bob.patch(`/work-hours/team/${team.id}/members/${meAlice.user.id}/settings`, { daily_salary: 11 }));
@@ -502,6 +540,34 @@ invalid('Import ohne Spalte Name', await bob.post('/people/import', { csv: 'Vorn
 invalid('Import mit offenem Anführungszeichen', await bob.post('/people/import', { csv: 'Name\n"offen' }));
 invalid('Leerer Import', await bob.post('/people/import', { csv: '' }));
 ok('Importierte Person wieder löschen', await bob.del(`/people/${anna.id}`));
+// ---------- Fahrzeuge: ausgemusterte geben ihr Kennzeichen frei; Besitzer als Person erscheint in der Personenakte
+const calendarIds = async (who) => (await who.get(`/calendar?from=${dayAt(-5)}&to=${dayAt(60)}`)).data.map((e) => e.id);
+const oldCar = ok('Fahrzeug mit Service', await alice.post('/vehicles', { plate: 'E2E-R', make_model: 'Golf', service_due: dayAt(10), first_aid_kit_expires_on: dayAt(20) }));
+const duplicatePlate = await alice.post('/vehicles', { plate: 'E2E-R', make_model: 'Polo' });
+check('Kennzeichen doppelt abgelehnt', duplicatePlate.status === 400 && /Kennzeichen/.test(duplicatePlate.data?.message), JSON.stringify(duplicatePlate));
+check('Service im Kalender', (await calendarIds(alice)).includes(`veh:${oldCar.id}:service`));
+ok('Fahrzeug ausmustern', await alice.patch(`/vehicles/${oldCar.id}`, { status: 'retired' }));
+const afterRetire = await calendarIds(alice);
+check('Ausgemustert: kein Service und kein Verbandskasten im Kalender', !afterRetire.includes(`veh:${oldCar.id}:service`) && !afterRetire.includes(`veh:${oldCar.id}:kit`));
+check('Ausgemustert: kein Service-Hinweis in der Verwaltung', !(await alice.get('/assets/overview')).data.vehicle_service.some((v) => v.id === oldCar.id));
+const newCar = ok('Kennzeichen eines ausgemusterten Fahrzeugs neu vergeben', await alice.post('/vehicles', { plate: 'E2E-R', make_model: 'Polo' }));
+const reactivate = await alice.patch(`/vehicles/${oldCar.id}`, { status: 'available' });
+check('Wieder in Betrieb nur ohne doppeltes Kennzeichen', reactivate.status === 400 && /Kennzeichen/.test(reactivate.data?.message), JSON.stringify(reactivate));
+const vehicleList = (await alice.get('/vehicles')).data;
+check('Ausgemusterte stehen hinten', vehicleList.findIndex((v) => v.id === oldCar.id) > vehicleList.findIndex((v) => v.id === newCar.id));
+check('Anderer Bereich darf dasselbe Kennzeichen haben', (await dave.post('/vehicles', { plate: 'E2E-R', make_model: 'Fiat' })).status === 200);
+const ownerPerson = ok('Besitzerin anlegen', await alice.post('/people', { name: 'Hanna Halter', kind: 'external' }));
+invalid('Besitzer muss eine Person sein', await alice.patch(`/vehicles/${newCar.id}`, { owner_person_id: '00000000-0000-4000-8000-000000000000' }));
+ok('Besitzerin zuordnen', await alice.patch(`/vehicles/${newCar.id}`, { owner_person_id: ownerPerson.id, registered_owner: '' }));
+check('Liste nennt die Besitzerin', (await alice.get('/vehicles')).data.find((v) => v.id === newCar.id)?.owner_person_name === 'Hanna Halter');
+const ownerRecord = ok('Personenübersicht mit Fahrzeug', await alice.get(`/people/${ownerPerson.id}/record`));
+check('Fahrzeug in der Personenübersicht', ownerRecord.vehicles?.some((v) => v.id === newCar.id && v.plate === 'E2E-R'), JSON.stringify(ownerRecord.vehicles));
+check('Fremder sieht fremde Fahrzeuge nicht in der Übersicht', (await dave.get(`/people/${ownerPerson.id}/record`)).data.vehicles?.length === 0);
+const ownerFile = ok('Personenakte (privat) mit Fahrzeug', await alice.get(`/person-files/${ownerPerson.id}`));
+check('Fahrzeug automatisch in der Personenakte', ownerFile.owned_vehicles?.some((v) => v.id === newCar.id), JSON.stringify(ownerFile.owned_vehicles));
+check('Fremder Bereich zeigt das Fahrzeug nicht', (await dave.get(`/person-files/${ownerPerson.id}`)).data.owned_vehicles?.length === 0);
+const ownerDelete = await alice.del(`/people/${ownerPerson.id}`);
+check('Person mit Fahrzeug lässt sich nicht löschen', ownerDelete.status === 400 && /Fahrzeuge/.test(ownerDelete.data?.message), JSON.stringify(ownerDelete));
 check('Stufe bei Schlüsseln', (await roleOf(carol, '/keys', teamKey.id)) === 2);
 const teamIssue = ok('Team-Schlüssel ausgeben', await alice.post(`/keys/${teamKey.id}/assign`, { person_id: teamPerson.id }));
 denied('Viewer gibt nicht aus', await carol.post(`/keys/${teamKey.id}/assign`, { person_id: teamPerson.id }));
@@ -717,7 +783,23 @@ denied('Gelöschtes ToDo ist weg', await alice.del(`/todos/${todoDone.id}`), [40
 const expNew = ok('DSGVO-Export mit Notizen und ToDos', await alice.get('/me/export'));
 check('Export enthält Notizen, ToDos, Tickets', expNew.notes.some((n) => n.id === noteSolo.id) && expNew.todos.some((t) => t.id === todoSolo.id) && expNew.bug_reports.some((b) => String(b.id) === String(bug.id)));
 check('Export ohne Notizen anderer', !expNew.notes.some((n) => n.id === noteTeam.id));
-ok('Team-ToDo für die Browser-Tests', await bob.post('/todos', { title: 'Team-Protokoll', due_date: dayAt(5), team_id: team.id }));
+const protocol = ok('Team-ToDo für die Browser-Tests', await bob.post('/todos', { title: 'Team-Protokoll', due_date: dayAt(5), team_id: team.id }));
+// ToDo-Deadlines stehen im Kalender: offene mit Deadline, soweit man sie lesen darf; erledigte verschwinden
+const todoEvents = async (who) => (await who.get(`/calendar?from=${dayAt(-10)}&to=${dayAt(40)}`)).data.filter((e) => e.type === 'todo');
+const aliceTodoEvents = await todoEvents(alice);
+check('Solo-ToDo mit Deadline im Kalender', aliceTodoEvents.some((e) => e.id === `todo:${todoSolo.id}` && e.date === dayAt(1) && e.title === 'ToDo: Steuer abgeben' && e.locked && e.allDay), JSON.stringify(aliceTodoEvents));
+check('Überfälliges ToDo im Kalender', aliceTodoEvents.some((e) => e.id === `todo:${todoOverdue.id}` && e.date === dayAt(-3)));
+check('ToDo ohne Deadline nicht im Kalender', !aliceTodoEvents.some((e) => e.id === `todo:${todoFree.id}`));
+check('Team-ToDo im Kalender der Leserin', (await todoEvents(carol)).some((e) => e.id === `todo:${protocol.id}` && e.note === 'E2E Team'));
+check('Solo-ToDo nicht bei anderen', !(await todoEvents(bob)).some((e) => e.id === `todo:${todoSolo.id}`));
+check('Fremde sehen keine ToDo-Termine', (await todoEvents(dave)).length === 0, JSON.stringify(await todoEvents(dave)));
+const todoCal = ok('ToDo für den Kalender', await alice.post('/todos', { title: 'Kalenderprobe', due_date: dayAt(2) }));
+check('Neues ToDo sofort im Kalender', (await todoEvents(alice)).some((e) => e.id === `todo:${todoCal.id}`));
+ok('Kalenderprobe abhaken', await alice.patch(`/todos/${todoCal.id}`, { done: true }));
+check('Erledigtes ToDo verschwindet aus dem Kalender', !(await todoEvents(alice)).some((e) => e.id === `todo:${todoCal.id}`));
+const icsText = await (await fetch(`${BASE}/api/calendar/ical/${icsToken}.ics`)).text();
+check('ToDo-Deadline im iCal-Abo', icsText.includes(`UID:todo:${todoSolo.id}@budget-manager`) && icsText.includes('SUMMARY:ToDo: Steuer abgeben'), icsText.slice(0, 200));
+ok('Kalenderprobe löschen', await alice.del(`/todos/${todoCal.id}`));
 const systemInfo = (await admin.get('/admin/system')).data;
 const jobNames = systemInfo.jobs.map((job) => job.name);
 // Die angezeigte Version kommt aus package.json
@@ -1008,6 +1090,53 @@ const photo = await carol.raw(`/people/${orgPerson.id}/photo`);
 check('Foto abrufen', photo.status === 200 && photo.buf.subarray(1, 4).toString() === 'PNG');
 check('Liste kennt das Foto', (await carol.get(`/person-files?team_id=${team.id}`)).data.find((p) => p.id === orgPerson.id)?.has_photo === true);
 invalid('Person mit Fahndung und Akten lässt sich nicht löschen', await alice.del(`/people/${orgPerson.id}`));
+
+// ---------- Bilder zu Fahrzeugen und Akten (Bob Mitglied, Carol Leserin, Dave fremd)
+const uploadImage = async (who, path, content, name, type, caption) => {
+  const form = new FormData();
+  // Die Bildunterschrift steht vor der Datei, sonst liest der Server sie nicht mit
+  if (caption !== undefined) form.append('caption', caption);
+  form.append('file', new Blob([content], { type }), name);
+  const res = await fetch(`${BASE}/api${path}`, { method: 'POST', headers: { authorization: `Bearer ${who.token.t}` }, body: form });
+  if (res.status >= 500) fives.push(`POST ${path} -> ${res.status}`);
+  return { status: res.status, data: await res.json().catch(() => null) };
+};
+const uploadExists = (key) => execFileSync('docker', ['exec', `${project}-api-1`, 'sh', '-c', `test -e /data/uploads/${key} && echo da || echo weg`]).toString().trim() === 'da';
+const carImage = ok('Fahrzeugbild hochladen', await uploadImage(bob, `/vehicles/${car.id}/images`, png, 'auto.png', 'image/png', 'Front links'));
+invalid('Kein PDF als Fahrzeugbild', await uploadImage(bob, `/vehicles/${car.id}/images`, pdfBytes, 'x.pdf', 'application/pdf'));
+invalid('Fahrzeugbild: Inhalt passt nicht zum Typ', await uploadImage(bob, `/vehicles/${car.id}/images`, Buffer.from('kein Bild'), 'x.png', 'image/png'));
+denied('Leserin lädt kein Fahrzeugbild hoch', await uploadImage(carol, `/vehicles/${car.id}/images`, png, 'x.png', 'image/png'), [403]);
+const carImages = ok('Fahrzeugbilder', await carol.get(`/vehicles/${car.id}/images`));
+check('Fahrzeugbild mit Bildunterschrift', carImages.length === 1 && carImages[0].caption === 'Front links' && carImages[0].mime === 'image/png', JSON.stringify(carImages));
+const carImageFile = await carol.raw(`/vehicle-images/${carImage.id}`);
+check('Fahrzeugbild abrufen', carImageFile.status === 200 && carImageFile.headers.get('content-type') === 'image/png' && carImageFile.buf.subarray(1, 4).toString() === 'PNG');
+denied('Fremder sieht Fahrzeugbilder nicht', await dave.get(`/vehicles/${car.id}/images`), [404]);
+denied('Fremder lädt Fahrzeugbild nicht', await dave.get(`/vehicle-images/${carImage.id}`), [404]);
+denied('Fremder lädt kein Bild hoch', await uploadImage(dave, `/vehicles/${car.id}/images`, png, 'x.png', 'image/png'), [404]);
+check('Fahrzeugliste zählt die Bilder', (await carol.get('/vehicles')).data.find((v) => v.id === car.id)?.images === 1);
+denied('Leserin beschriftet nicht', await carol.patch(`/vehicle-images/${carImage.id}`, { caption: 'x' }), [403]);
+ok('Bildunterschrift ändern', await bob.patch(`/vehicle-images/${carImage.id}`, { caption: 'Front rechts' }));
+invalid('Bildunterschrift zu lang', await bob.patch(`/vehicle-images/${carImage.id}`, { caption: 'x'.repeat(201) }));
+const carImageKey = psql(`SELECT storage_key FROM vehicle_images WHERE id='${carImage.id}'`);
+check('Datei liegt im Upload-Volume', uploadExists(carImageKey));
+denied('Leserin löscht kein Bild', await carol.del(`/vehicle-images/${carImage.id}`), [403]);
+ok('Fahrzeugbild löschen', await bob.del(`/vehicle-images/${carImage.id}`));
+check('Datei des Bilds entfernt', !uploadExists(carImageKey));
+check('Bild löschen im Audit-Log', psql(`SELECT count(*) FROM audit_log WHERE action IN ('vehicles.image_added','vehicles.image_deleted') AND entity_id='${car.id}'`) === '2');
+const tempCar = ok('Fahrzeug zum Löschen', await alice.post('/vehicles', { plate: 'E2E-BILD', make_model: 'Bus' }));
+const tempImage = ok('Bild am Fahrzeug', await uploadImage(alice, `/vehicles/${tempCar.id}/images`, png, 'bus.png', 'image/png'));
+const tempKey = psql(`SELECT storage_key FROM vehicle_images WHERE id='${tempImage.id}'`);
+ok('Fahrzeug mit Bild löschen', await alice.del(`/vehicles/${tempCar.id}`));
+check('Bilder gehen mit dem Fahrzeug', !uploadExists(tempKey) && psql(`SELECT count(*) FROM vehicle_images WHERE vehicle_id='${tempCar.id}'`) === '0');
+// Bilder einer Akte sind PNG-/JPEG-Anhänge mit Bildunterschrift
+invalid('Aktenbild: kein PDF', await uploadImage(bob, `/case-files/${hitFile.id}/attachments?images=1`, pdfBytes, 'x.pdf', 'application/pdf'));
+const caseImage = ok('Aktenbild hochladen', await uploadImage(bob, `/case-files/${hitFile.id}/attachments?images=1`, png, 'tatort.png', 'image/png', 'Tatort'));
+check('Bild in der Akte mit Bildunterschrift', (await carol.get(`/case-files/${hitFile.id}`)).data.attachments.some((a) => a.id === caseImage.id && a.caption === 'Tatort' && a.mime === 'image/png'));
+denied('Leserin beschriftet Aktenbild nicht', await carol.patch(`/case-file-attachments/${caseImage.id}`, { caption: 'x' }), [403]);
+ok('Aktenbild beschriften', await bob.patch(`/case-file-attachments/${caseImage.id}`, { caption: 'Tatort, Blick nach Norden' }));
+check('Bildunterschrift geändert', (await bob.get(`/case-files/${hitFile.id}`)).data.attachments.find((a) => a.id === caseImage.id)?.caption === 'Tatort, Blick nach Norden');
+denied('Fremder sieht Aktenbild nicht', await dave.get(`/case-file-attachments/${caseImage.id}`), [404]);
+denied('Fremder beschriftet Aktenbild nicht', await dave.patch(`/case-file-attachments/${caseImage.id}`, { caption: 'x' }), [404]);
 
 ok('Haftbefehl vollstreckt', await bob.post(`/warrants/${warrant.id}/close`, { status: 'executed', note: 'Festnahme am Hafen' }));
 check('Vollstreckt steht nicht mehr in der Fahndungsliste', !(await carol.get('/warrants')).data.some((w) => w.id === warrant.id) && (await carol.get('/warrants?status=all')).data.some((w) => w.id === warrant.id && w.status === 'executed'));

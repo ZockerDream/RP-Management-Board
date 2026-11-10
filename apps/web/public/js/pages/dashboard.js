@@ -63,7 +63,8 @@ export async function render(view) {
     ${can('transaction:create') ? '<button class="btn" id="d-new">Buchung</button>' : ''}</div></div>
     <div id="d-body"></div>`;
 
-  const vehiclesRequest = can('vehicle:read') ? api.get('/vehicles') : Promise.resolve([]);
+  // Ausgemusterte Fahrzeuge gehören nicht mehr zum Fuhrpark (Wunsch des Auftraggebers vom 2026-11-10)
+  const vehiclesRequest = can('vehicle:read') ? api.get('/vehicles').then((list) => list.filter((v) => v.status !== 'retired')) : Promise.resolve([]);
   const eventsRequest = can('calendar:read') ? api.get('/calendar') : Promise.resolve([]);
 
   async function load() {
@@ -97,8 +98,8 @@ export async function render(view) {
       });
     }
     upcoming.sort((a, b) => a.occurrence.localeCompare(b.occurrence) || (a.start || '').localeCompare(b.start || ''));
-    const vehicleStatus = { available: ['ok', 'Verfügbar'], in_use: ['warn', 'Im Einsatz'], workshop: ['bad', 'Werkstatt'], retired: ['sys', 'Ausgemustert'] };
-    const eventTypes = { finance: 'Zahlung', vehicle: 'Fahrzeug', key: 'Schlüssel', house: 'Wartung', license: 'Lizenz', training: 'Schulung', team: 'Organisation', personal: 'Privat' };
+    const vehicleStatus = { available: ['ok', 'Verfügbar'], in_use: ['warn', 'Im Einsatz'], workshop: ['bad', 'Werkstatt'] };
+    const eventTypes = { finance: 'Zahlung', vehicle: 'Fahrzeug', key: 'Schlüssel', house: 'Wartung', license: 'Lizenz', training: 'Schulung', todo: 'ToDo', team: 'Organisation', personal: 'Privat' };
     const vehicleItems = vehicles.slice(0, 5);
     $('#d-body').innerHTML = `
       <div class="grid cols-4">
