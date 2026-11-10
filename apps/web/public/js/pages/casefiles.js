@@ -1,8 +1,9 @@
-// Aktensystem: Fallakten mit Berichten, Anklagepunkten, Beweismitteln, Fahndungen, Fahrzeugen und Verlauf; dazu
-// Personenakten, Fahndungsliste, Strafkatalog, Berichtsvorlagen und Aktenarten als eigene Tabs.
+// Aktensystem: Personenakten (Startseite, Wunsch des Auftraggebers vom 2026-11-10), Fallakten mit Berichten,
+// Anklagepunkten, Beweismitteln, Fahndungen, Fahrzeugen und Verlauf; dazu Fahndungsliste, Strafkatalog, Berichtsvorlagen
+// und Aktenarten als eigene Tabs. Alles außer den Personenakten lässt sich systemweit ausschalten (caseFeature).
 import { api } from '../api.js';
 import { $, esc, empty, fdate, fdatetime, tag, openForm, confirmBox, toast, todayStr, debounce, printArea } from '../ui.js';
-import { can, state } from '../app.js';
+import { can, state, caseFeature } from '../app.js';
 import { visibilityField, scopeTag } from './common.js';
 import { markdownBlock } from '../markdown.js';
 import * as P from './case-parts.js';
@@ -18,7 +19,9 @@ const KIND_SUGGESTIONS = ['Vermerk', 'Vernehmung', 'Verstoß', 'Beweismittel', '
 const statusOptions = Object.entries(CASE_STATUS).map(([v, [, l]]) => ({ v, l }));
 const priorityOptions = Object.entries(P.PRIORITY).map(([v, [, l]]) => ({ v, l }));
 const sizeText = (bytes) => (bytes > 1048576 ? `${(bytes / 1048576).toFixed(1).replace('.', ',')} MB` : `${Math.ceil(bytes / 1024)} KB`);
-const MAIN_TABS = [['files', 'Fallakten'], ['people', 'Personenakten'], ['wanted', 'Fahndung'], ['codes', 'Strafkatalog'], ['templates', 'Berichtsvorlagen'], ['types', 'Aktenarten']];
+// Tab, Bezeichnung, Schalter; Personenakten zuerst und immer an
+const ALL_TABS = [['people', 'Personenakten', null], ['files', 'Fallakten', 'files'], ['wanted', 'Fahndung', 'wanted'], ['codes', 'Strafkatalog', 'codes'], ['templates', 'Berichtsvorlagen', 'templates'], ['types', 'Aktenarten', 'types']];
+const mainTabs = () => ALL_TABS.filter(([, , feature]) => !feature || caseFeature(feature));
 
 // Aktenarten im Auswahlfeld: mit Bereich, damit gleichnamige Arten verschiedener Organisationen unterscheidbar sind
 const typeLabel = (t) => `${t.name} (${t.team_name || 'privat'})`;
@@ -44,7 +47,7 @@ const fileForm = (file, teams, types) => {
       { name: 'location', label: 'Tat- bzw. Einsatzort', value: file?.location, maxlength: 200 },
       { name: 'opened_on', label: 'Eröffnet am', type: 'date', value: file?.opened_on || todayStr(), required: true },
       ...(file ? [{ name: 'closed_on', label: 'Abgeschlossen am', type: 'date', value: file.closed_on || '', help: 'Nur bei Status „Abgeschlossen“; leer heißt heute.' }] : [visibilityField(teams, null)]),
-      ...(!file || canRetype ? [{ name: 'type_id', label: 'Aktenart', type: 'select', options: typeOptions(choosable), value: file?.type_id || '', help: file ? 'Eine andere Art ändert, wer die Akte sieht.' : 'Die Art muss zum gewählten Bereich gehören.' }] : []),
+      ...(caseFeature('types') && (!file || canRetype) ? [{ name: 'type_id', label: 'Aktenart', type: 'select', options: typeOptions(choosable), value: file?.type_id || '', help: file ? 'Eine andere Art ändert, wer die Akte sieht.' : 'Die Art muss zum gewählten Bereich gehören.' }] : []),
       { name: 'description', label: 'Sachverhalt', type: 'textarea', rows: 8, value: file?.description, maxlength: 20000, full: true, markdown: true },
     ],
     onSubmit: async (values) => {
@@ -53,7 +56,7 @@ const fileForm = (file, teams, types) => {
         priority: values.priority, location: values.location.trim(), incident_at: P.fromLocalInput(values.incident_at), lead_user_id: values.lead_user_id || null,
       };
       if (file) {
-        await api.patch(`/case-files/${file.id}`, { ...body, closed_on: values.closed_on || null, ...(canRetype ? { type_id: values.type_id || null } : {}) });
+        await api.patch(`/case-files/${file.id}`, { ...body, closed_on: values.closed_on || null, ...(canRetype && caseFeature('types') ? { type_id: values.type_id || null } : {}) });
         return file.id;
       }
       // Die Sachbearbeitung einer neuen Akte in einer Organisation ist man selbst; privat ohnehin
@@ -133,14 +136,16 @@ export async function render(view, params) {
   let detailTab = 'd-overview';
   let types = [];
   let pending = [];
-  let tab = 'files';
+  let tab = 'people';
+  const MAIN_TABS = mainTabs();
   const filter = { status: '', type_id: '', priority: '', q: '' };
   const orgs = can('team:read') ? await api.get('/teams') : [];
   // Bereiche für Personenakten, Strafkatalog, Vorlagen und Fahndung: Organisationen mit Leserecht für Akten, dazu privat
   const areas = [...orgs.filter((o) => (o.levels.casefile ?? 0) >= 2).map((o) => ({ id: o.id, name: o.name, level: o.levels.casefile })), { id: '', name: 'Privat', level: 4 }];
   const ctx = { areas, area: areas[0].id, openFile: (id) => openFile(id), openPerson: (id, areaId) => openPerson(id, areaId), url: (hash) => history.replaceState(null, '', hash) };
-  view.innerHTML = `<div class="page-head"><div><h1>Akten</h1><p>Fallakten, Personenakten, Berichte, Fahndungen und Strafkatalog</p></div>
-    <div class="actions">${can('casefile:create') ? '<button class="btn" id="c-new">Neue Akte</button>' : ''}</div></div>
+  const subtitle = ['Personenakten', caseFeature('files') && 'Fallakten und Berichte', caseFeature('wanted') && 'Fahndungen', caseFeature('codes') && 'Strafkatalog'].filter(Boolean);
+  view.innerHTML = `<div class="page-head"><div><h1>Akten</h1><p>${subtitle.length > 1 ? `${subtitle.slice(0, -1).join(', ')} und ${subtitle.at(-1)}` : subtitle[0]}</p></div>
+    <div class="actions">${can('casefile:create') && caseFeature('files') ? '<button class="btn" id="c-new">Neue Akte</button>' : ''}</div></div>
     <div class="tabs" id="c-tabs">${MAIN_TABS.map(([k, l], i) => `<button data-tab="${k}" class="${i ? '' : 'on'}">${l}</button>`).join('')}</div>
     <div id="c-main"></div><input type="file" id="c-upload" accept="application/pdf,image/png,image/jpeg" hidden>`;
   const writable = () => detail.level >= 3 && can('casefile:update');
@@ -150,6 +155,8 @@ export async function render(view, params) {
   const typeTeams = () => orgs.filter((o) => o.levels.casefile >= 4);
   // Jeder Tab zeichnet in ein frisches Element; so hängen keine Klick-Listener eines anderen Tabs nach
   const fresh = () => { const el = document.createElement('div'); $('#c-main').replaceChildren(el); return el; };
+  // Ohne Aktenarten (ausgeschaltet) gibt es keine Auswahl und keinen Filter
+  const loadTypes = () => (caseFeature('types') ? api.get('/case-file-types') : Promise.resolve([]));
 
   function drawList() {
     const el = fresh();
@@ -161,8 +168,8 @@ export async function render(view, params) {
       ${types.length ? `<select id="c-type" aria-label="Aktenart"><option value="">Alle Aktenarten</option>${types.map((t) => `<option value="${t.id}" ${filter.type_id === t.id ? 'selected' : ''}>${esc(typeLabel(t))}</option>`).join('')}</select>` : ''}</div>
       <div class="card">${files.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Aktenzeichen</th><th>Titel</th><th>Personen</th><th>Status</th><th>Sachbearbeitung</th><th>Letzter Eintrag</th><th>Bereich</th><th></th></tr></thead><tbody>
       ${files.map((f) => `<tr><td><b>${esc(f.file_number)}</b>${f.priority !== 'normal' ? `<br>${P.st(P.PRIORITY, f.priority)}` : ''}</td>
-        <td>${esc(f.title)}${f.restricted ? ` ${tag('warn', 'Beschränkt')}` : ''}${f.active_warrants ? ` ${tag('bad', `${f.active_warrants} Fahndung${f.active_warrants === 1 ? '' : 'en'}`)}` : ''}${f.reports_pending ? ` ${tag('warn', 'Bericht wartet')}` : ''}
-          <br><small class="muted">${[f.type_name, f.location, f.incident_at && fdatetime(f.incident_at)].filter(Boolean).map(esc).join(' · ')}</small></td>
+        <td>${esc(f.title)}${f.restricted ? ` ${tag('warn', 'Beschränkt')}` : ''}${f.active_warrants && caseFeature('wanted') ? ` ${tag('bad', `${f.active_warrants} Fahndung${f.active_warrants === 1 ? '' : 'en'}`)}` : ''}${f.reports_pending ? ` ${tag('warn', 'Bericht wartet')}` : ''}
+          <br><small class="muted">${[caseFeature('types') && f.type_name, f.location, f.incident_at && fdatetime(f.incident_at)].filter(Boolean).map(esc).join(' · ')}</small></td>
         <td>${esc(f.people.join(', ') || '–')}</td><td>${tag(...CASE_STATUS[f.status])}</td><td>${esc(f.lead_name || '–')}</td>
         <td>${f.last_entry ? fdate(f.last_entry) : '–'} <small class="muted">(${f.entries})</small></td><td>${scopeTag(f)}</td><td><button class="btn ghost sm" data-open="${f.id}">Öffnen</button></td></tr>`).join('')}</tbody></table></div>`
       : empty(filter.q || filter.status || filter.type_id || filter.priority ? 'Keine passende Akte.' : 'Noch keine Akten angelegt.')}</div>`;
@@ -187,21 +194,22 @@ export async function render(view, params) {
     const f = detail;
     const w = writable();
     const flags = { w, m: manageable(), me: state.me.id, owner: f.owner };
-    const activeWarrants = f.warrants.filter((x) => x.status === 'active').length;
+    const activeWarrants = caseFeature('wanted') ? f.warrants.filter((x) => x.status === 'active').length : 0;
     const waiting = f.reports.filter((r) => r.status === 'submitted').length;
     const images = f.attachments.filter(isImage);
     const documents = f.attachments.filter((a) => !isImage(a));
+    // Anklagen nur mit Strafkatalog, Fahndungen nur mit Fahndung (Schalter in Server-Management → Sicherheit & Einstellungen)
     const tabs = [
-      ['d-overview', 'Übersicht'], ['d-reports', `Berichte (${f.reports.length})`], ['d-charges', `Anklagen (${f.charges.length})`],
-      ['d-evidence', `Beweismittel (${f.evidence.length})`], ['d-warrants', `Fahndungen (${activeWarrants})`], ['d-entries', `Verlauf (${f.entries.length})`],
+      ['d-overview', 'Übersicht'], ['d-reports', `Berichte (${f.reports.length})`], caseFeature('charges') && ['d-charges', `Anklagen (${f.charges.length})`],
+      ['d-evidence', `Beweismittel (${f.evidence.length})`], caseFeature('wanted') && ['d-warrants', `Fahndungen (${activeWarrants})`], ['d-entries', `Verlauf (${f.entries.length})`],
       ['d-images', `Bilder (${images.length})`], ['d-files', `Anhänge (${documents.length})`],
-    ];
+    ].filter(Boolean);
     if (!tabs.some(([k]) => k === detailTab)) detailTab = 'd-overview';
     const panel = (key, html) => `<div class="tab-panel ${key === detailTab ? 'on' : ''}" data-panel="${key}">${html}</div>`;
     const el = fresh();
     el.className = 'case-detail';
     el.innerHTML = `<div class="card"><div class="card-head"><div><h2>${esc(f.file_number)} · ${esc(f.title)}</h2>
-        <div class="row wrap">${tag(...CASE_STATUS[f.status])} ${P.st(P.PRIORITY, f.priority)} ${scopeTag(f)}${f.type_name ? ` ${tag('', f.type_name)}` : ''}${f.restricted ? ` ${tag('warn', 'Beschränkt')}` : ''}</div></div>
+        <div class="row wrap">${tag(...CASE_STATUS[f.status])} ${P.st(P.PRIORITY, f.priority)} ${scopeTag(f)}${f.type_name && caseFeature('types') ? ` ${tag('', f.type_name)}` : ''}${f.restricted ? ` ${tag('warn', 'Beschränkt')}` : ''}</div></div>
         <div class="row wrap no-print"><button class="btn ghost sm" id="c-back">Zurück</button><button class="btn ghost sm" id="c-print">Drucken</button>${w ? '<button class="btn ghost sm" id="c-edit">Bearbeiten</button>' : ''}
         ${f.team_id && f.level >= 4 && can('casefile:update') ? '<button class="btn ghost sm" id="c-access">Zugriff</button>' : ''}
         ${f.level >= 4 && can('casefile:delete') ? '<button class="btn ghost sm" id="c-del">Löschen</button>' : ''}</div></div>
@@ -224,9 +232,9 @@ export async function render(view, params) {
         </div>
         ${P.linksHtml(f, flags)}`)}
       ${panel('d-reports', P.reportsHtml(f, flags))}
-      ${panel('d-charges', P.chargesHtml(f, flags))}
+      ${caseFeature('charges') ? panel('d-charges', P.chargesHtml(f, flags)) : ''}
       ${panel('d-evidence', P.evidenceHtml(f, flags))}
-      ${panel('d-warrants', P.warrantsHtml(f, flags))}
+      ${caseFeature('wanted') ? panel('d-warrants', P.warrantsHtml(f, flags)) : ''}
       ${panel('d-entries', `<div class="card"><div class="card-head"><h2>Verlauf</h2>${w ? '<button class="btn ghost sm" id="e-new">Neuer Eintrag</button>' : ''}</div>
         ${f.entries.length ? f.entries.map((e) => `<div class="case-entry"><div class="row"><b>${fdate(e.entry_date)}</b>${e.kind ? tag('', e.kind) : ''}${e.person_name ? `<small class="muted">betrifft ${esc(e.person_name)}</small>` : ''}
             <span class="grow"></span>${w ? `<button class="btn ghost sm" data-e-edit="${e.id}">Bearbeiten</button><button class="btn ghost sm" data-e-del="${e.id}">Löschen</button>` : ''}</div>
@@ -251,7 +259,7 @@ export async function render(view, params) {
   async function reload() {
     try {
       const qs = new URLSearchParams(Object.entries(filter).filter(([, v]) => v));
-      [files, types, pending] = await Promise.all([api.get(`/case-files?${qs}`), api.get('/case-file-types'), api.get('/case-file-reports/pending')]);
+      [files, types, pending] = await Promise.all([api.get(`/case-files?${qs}`), loadTypes(), api.get('/case-file-reports/pending')]);
       if (filter.type_id && !types.some((t) => t.id === filter.type_id)) filter.type_id = '';
       detail = null;
       setTab('files');
@@ -265,9 +273,12 @@ export async function render(view, params) {
   function setTab(next) {
     tab = next;
     $('#c-tabs', view).querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+    // Berichte, die auf die eigene Freigabe warten, stehen unter „Fallakten“; die Zahl am Tab zeigt sie auch von der Startseite aus
+    const filesTab = $('#c-tabs [data-tab="files"]', view);
+    if (filesTab) filesTab.innerHTML = `Fallakten${pending.length ? ` ${tag('warn', String(pending.length))}` : ''}`;
   }
   async function openFile(id, keepTab = false) {
-    if (!types.length) types = await api.get('/case-file-types');
+    if (!types.length) types = await loadTypes();
     if (!keepTab && detail?.id !== id) detailTab = 'd-overview';
     detail = await api.get(`/case-files/${id}`);
     setTab('files');
@@ -283,10 +294,10 @@ export async function render(view, params) {
   }
   async function openTab(next) {
     detail = null;
-    if (next === 'files') { await reload(); ctx.url('#/casefiles'); return; }
+    if (next === 'files') { await reload(); ctx.url('#/casefiles?tab=files'); return; }
     setTab(next);
     ctx.url(`#/casefiles?tab=${next}`);
-    if (next === 'types') { types = await api.get('/case-file-types'); drawTypes(); }
+    if (next === 'types') { types = await loadTypes(); drawTypes(); }
     else if (next === 'people') await drawPeople(fresh(), ctx);
     else if (next === 'wanted') await drawWanted(fresh(), ctx);
     else if (next === 'codes') await drawCodes(fresh(), ctx);
@@ -312,7 +323,7 @@ export async function render(view, params) {
   async function detailAction(target, d) {
     const f = detail;
     const find = (list, id) => list.find((x) => x.id === id);
-    if (target.id === 'c-back') { await reload(); ctx.url('#/casefiles'); return false; }
+    if (target.id === 'c-back') { await reload(); ctx.url('#/casefiles?tab=files'); return false; }
     if (target.id === 'c-print') { printArea($('#c-main .case-detail')); return false; }
     if (target.id === 'c-edit') return fileForm(f, fileTeams(), types);
     if (target.id === 'c-access') return accessForm(f);
@@ -320,7 +331,7 @@ export async function render(view, params) {
       if (!(await confirmBox('Akte löschen', `Akte ${f.file_number} wird mit allen Berichten, Anklagepunkten, Beweismitteln, Fahndungen, Einträgen und Anhängen endgültig gelöscht.`))) return false;
       await api.del(`/case-files/${f.id}`);
       await reload();
-      ctx.url('#/casefiles');
+      ctx.url('#/casefiles?tab=files');
       return false;
     }
     if (target.id === 'p-add') return personForm(f);
@@ -386,11 +397,11 @@ export async function render(view, params) {
       if (d.open) { await openFile(d.open); return; }
       if (d.person) { await openPerson(d.person, d.area); return; }
       if (tab === 'types' && !detail) {
-        if (target.id === 't-new') { if (await typeForm(null, typeTeams())) { types = await api.get('/case-file-types'); drawTypes(); } }
-        else if (d.tEdit) { if (await typeForm(types.find((t) => t.id === d.tEdit))) { types = await api.get('/case-file-types'); drawTypes(); } }
+        if (target.id === 't-new') { if (await typeForm(null, typeTeams())) { types = await loadTypes(); drawTypes(); } }
+        else if (d.tEdit) { if (await typeForm(types.find((t) => t.id === d.tEdit))) { types = await loadTypes(); drawTypes(); } }
         else if (d.tDel && await confirmBox('Aktenart löschen', 'Die Aktenart und ihre Rechte werden gelöscht.')) {
           await api.del(`/case-file-types/${d.tDel}`);
-          types = await api.get('/case-file-types');
+          types = await loadTypes();
           drawTypes();
         }
         return;
@@ -405,11 +416,14 @@ export async function render(view, params) {
   const initialPerson = params?.get('person');
   const initialTab = params?.get('tab');
   try {
-    if (initial) { await openFile(initial); return; }
+    // Wartende Freigaben für die Zahl am Tab „Fallakten“, auch wenn die Seite mit den Personenakten startet
+    if (caseFeature('files')) pending = await api.get('/case-file-reports/pending').catch(() => []);
+    if (initial && caseFeature('files')) { await openFile(initial); return; }
     if (initialPerson) { await openPerson(initialPerson, params.get('area') ?? undefined); return; }
     if (initialTab && MAIN_TABS.some(([k]) => k === initialTab)) { await openTab(initialTab); return; }
+    // Startseite sind die Personenakten (Wunsch des Auftraggebers vom 2026-11-10)
+    await openTab('people');
   } catch (error) {
     toast(error.message, true);
   }
-  await reload();
 }

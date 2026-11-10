@@ -98,8 +98,90 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   check('Auslastung nennt echte Budgets', await page.locator('.gauge', { hasText: 'Gesamt' }).count() === 1);
   // Der Golf (E2E-R) ist ausgemustert: weder im Fuhrpark noch mit Service unter „Als Nächstes“
   check('Dashboard ohne ausgemusterte Fahrzeuge', /Fuhrpark/.test(dashboardText) && !/Golf|Ausgemustert/.test(dashboardText), dashboardText.slice(dashboardText.indexOf('Fuhrpark'), dashboardText.indexOf('Fuhrpark') + 300));
+  const forecastCard = page.locator('#d-body .card', { hasText: 'Prognose' });
+  check('Dashboard zeigt die Wochenprognose', await forecastCard.count() === 1 && /Diese Woche/.test(await forecastCard.textContent()) && /Nächste Woche/.test(await forecastCard.textContent()) && /Erwartet/.test(await forecastCard.textContent()) && !/NaN|undefined/.test(await forecastCard.textContent()), await forecastCard.textContent().catch(() => ''));
+  await page.screenshot({ path: `${out}/alice-dashboard-prognose.png`, fullPage: true });
   await go(page, '#/transactions');
   check('Transaktionen zeigen zukünftige Buchung', /Zukunft Test/.test(await page.textContent('#view')));
+
+  // Screenshot-Scanning: nachgebaute Bank-Apps rendern, als Bild scannen und die Vorschläge prüfen
+  at('alice screenshot scan');
+  const day = (offset) => page.evaluate((o) => { const d = new Date(); d.setDate(d.getDate() + o); return d.toLocaleDateString('sv-SE'); }, offset);
+  const [d0, d1, d2] = [await day(0), await day(-1), await day(-2)];
+  const de = (iso) => iso.split('-').reverse().join('.');
+  const css = (bg, fg) => `body{margin:0;background:${bg};color:${fg};font:16px/1.4 Arial,sans-serif}.app{padding:18px}.row{display:flex;justify-content:space-between;padding:10px 0 2px}.sub{font-size:13px;opacity:.75;padding-bottom:8px;border-bottom:1px solid #8884}.neg{color:#e5484d}.pos{color:#30a46c}h1{font-size:22px}h2{font-size:15px;margin:16px 0 4px;opacity:.8}`;
+  const mocks = [
+    { name: 'hell, Datum unter der Buchung', size: { width: 390, height: 520 },
+      html: `<style>${css('#fff', '#111')}</style><div class=app><h1>Fleeca Bank</h1><div>Kontostand: $ 48,250.00</div>
+        <div class=row><span>Benny's Motorworks</span><span class=neg>-$12,500.00</span></div><div class=sub>Heute, 14:32</div>
+        <div class=row><span>Gehalt LSPD</span><span class=pos>+$1,669.00</span></div><div class=sub>Heute, 03:45</div>
+        <div class=row><span>Burger Shot</span><span class=neg>-$23.50</span></div><div class=sub>Gestern, 19:10</div></div>`,
+      expect: [['Benny', '12500.00', 'expense', d0], ['Gehalt', '1669.00', 'income', d0], ['Burger', '23.50', 'expense', d1]] },
+    { name: 'dunkel, Datum als Überschrift, deutsche Beträge', size: { width: 390, height: 460 },
+      html: `<style>${css('#121418', '#f2f2f2')}</style><div class=app><h1>Umsätze</h1><h2>${de(d1)}</h2>
+        <div class=row><span>Überweisung von Max Mustermann</span><span class=pos>+5.000,00 $</span></div>
+        <div class=row><span>Tankstelle Route 68</span><span class=neg>-85,20 $</span></div><h2>${de(d2)}</h2>
+        <div class=row><span>Miete Apartment</span><span class=neg>-1.200,00 $</span></div></div>`,
+      expect: [['Max Mustermann', '5000.00', 'income', d1], ['Tankstelle', '85.20', 'expense', d1], ['Miete', '1200.00', 'expense', d2]] },
+    { name: 'Handy im Spielbild', size: { width: 1600, height: 900 },
+      html: `<style>body{margin:0;width:1600px;height:900px;background:linear-gradient(135deg,#2b5876,#4e4376 40%,#c06c84 70%,#f8b195);font:17px/1.4 Arial,sans-serif;position:relative;overflow:hidden}
+        .blob{position:absolute;border-radius:50%;opacity:.5}.phone{position:absolute;right:120px;top:90px;width:360px;height:700px;background:#0d0f14;border-radius:36px;border:10px solid #222;color:#fff;padding:28px 22px;box-sizing:border-box}
+        .row{display:flex;justify-content:space-between;padding:12px 0 2px}.sub{font-size:14px;color:#aab;padding-bottom:8px;border-bottom:1px solid #333}.neg{color:#ff6b6b}.pos{color:#5fdc8f}</style>
+        ${Array.from({ length: 14 }, (_, i) => `<div class=blob style="left:${(i * 97) % 1100}px;top:${(i * 53) % 800}px;width:${60 + (i * 37) % 160}px;height:${60 + (i * 37) % 160}px;background:hsl(${i * 47},70%,55%)"></div>`).join('')}
+        <div class=phone><div style="font-size:22px;font-weight:bold">Maze Bank</div><div class=sub>Verlauf</div>
+        <div class=row><span>Received from Jimmy</span><span class=pos>+$250</span></div><div class=sub>Today 21:04</div>
+        <div class=row><span>Paid to Ammu-Nation</span><span class=neg>-$1,450</span></div><div class=sub>Yesterday 18:22</div></div>`,
+      expect: [['Jimmy', '250.00', 'income', d0], ['Ammu', '1450.00', 'expense', d1]] },
+  ];
+  const shot = await ctx.newPage();
+  const scanRows = () => page.$$eval('.modal.open [data-scan-row]', (rows) => rows.map((r) => ({
+    use: r.querySelector('[data-k=use]').checked, date: r.querySelector('[data-k=booked_at]').value, title: r.querySelector('[data-k=title]').value,
+    type: r.querySelector('[data-k=type]').value, amount: r.querySelector('[data-k=amount]').value.replace(',', '.'), text: r.textContent,
+  })));
+  const scanImage = async (buffer) => {
+    await page.setInputFiles('.modal.open #scan-file', { name: 'screenshot.png', mimeType: 'image/png', buffer });
+    await until(page, () => !!document.querySelector('.modal.open [data-scan-row]') || /kein Betrag|Nur PNG|nicht/.test(document.querySelector('.modal.open #scan-status')?.textContent || ''), undefined, 60000).catch(() => {});
+    return scanRows();
+  };
+  const scanned = [];
+  for (const mock of mocks) {
+    await shot.setViewportSize(mock.size);
+    await shot.setContent(mock.html);
+    const buffer = await shot.screenshot();
+    await page.click('#t-scan');
+    await page.waitForSelector('.modal.open #scan-drop');
+    const rows = await scanImage(buffer);
+    scanned.push({ mock, buffer, rows });
+    const missing = mock.expect.filter(([title, amount, type, date]) => !rows.some((r) => r.title.includes(title) && r.amount === amount && r.type === type && r.date === date));
+    check(`Scan ${mock.name}: alle Buchungen erkannt`, !missing.length, `fehlt: ${JSON.stringify(missing)} erkannt: ${JSON.stringify(rows.map(({ text, ...r }) => r))} Text: ${(await page.textContent('.modal.open .scan-text').catch(() => '')).slice(0, 400)}`);
+    check(`Scan ${mock.name}: kein Kontostand als Buchung`, !rows.some((r) => r.amount === '48250.00'));
+    await page.screenshot({ path: `${out}/alice-scan-${scanned.length}.png`, fullPage: true });
+    await page.click('.modal.open [data-x]');
+  }
+  // Buchen: nur angehakte Vorschläge, danach als „schon gebucht“ erkannt
+  await page.click('#t-scan');
+  await page.waitForSelector('.modal.open #scan-drop');
+  const firstRows = await scanImage(scanned[0].buffer);
+  check('Neue Vorschläge sind angehakt', firstRows.length >= 3 && firstRows.every((r) => r.use), JSON.stringify(firstRows));
+  await page.locator('.modal.open [data-scan-row]', { has: page.locator('[data-k=title][value*="Gehalt"]') }).locator('[data-k=use]').uncheck();
+  await page.locator('.modal.open [data-scan-row]', { has: page.locator('[data-k=title][value*="Burger"]') }).locator('[data-k=title]').fill('Burger Shot Mittag');
+  await page.click('.modal.open button[type=submit]');
+  await until(page, () => !document.querySelector('.modal.open #scan-drop'), undefined, 10000).catch(() => {});
+  await page.waitForTimeout(500);
+  const listText = await page.textContent('#view');
+  check('Gebuchte Vorschläge mit Kennzeichen Import', /Benny's Motorworks/.test(listText) && /Burger Shot Mittag/.test(listText) && await page.locator('#view tr', { hasText: 'Burger Shot Mittag' }).locator('.tag', { hasText: 'Import' }).count() === 1);
+  check('Abgewählter Vorschlag nicht gebucht', await page.locator('#view tr', { hasText: 'Gehalt LSPD' }).count() === 0);
+  await page.click('#t-scan');
+  await page.waitForSelector('.modal.open #scan-drop');
+  const againRows = await scanImage(scanned[0].buffer);
+  check('Zweiter Scan erkennt Gebuchtes', againRows.filter((r) => /schon gebucht/.test(r.text)).length === 2 && againRows.filter((r) => r.use).length === againRows.length - 2, JSON.stringify(againRows.map((r) => [r.title, r.use])));
+  await page.click('.modal.open [data-x]');
+  await shot.close();
+  // Wieder entfernen, damit spätere Prüfungen dieselben Summen sehen
+  for (const title of ["Benny's Motorworks", 'Burger Shot Mittag']) {
+    await page.locator('#view tr', { hasText: title }).locator('[data-del]').click();
+    await submit(page);
+  }
 
   // Dashboard: Tag, Woche, Monat
   at('alice dashboard ansichten');
@@ -626,7 +708,9 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   // Nach jeder Aktion lädt die Akte neu: auf den erwarteten Text warten statt auf eine feste Zeit
   const waitFor = (selector, pattern) => until(page, ([s, p]) => new RegExp(p).test(document.querySelector(s)?.textContent || ''), [selector, pattern.source]).catch(() => {});
   await go(page, '#/casefiles');
-  check('Akten-Tabs', (await page.$$eval('#c-tabs [data-tab]', (t) => t.map((x) => x.textContent))).join() === 'Fallakten,Personenakten,Fahndung,Strafkatalog,Berichtsvorlagen,Aktenarten');
+  check('Akten-Tabs, Personenakten zuerst', (await page.$$eval('#c-tabs [data-tab]', (t) => t.map((x) => x.textContent.trim()))).join().replace(/Fallakten\s*\d+/, 'Fallakten') === 'Personenakten,Fallakten,Fahndung,Strafkatalog,Berichtsvorlagen,Aktenarten');
+  await page.waitForSelector('#pf-q');
+  check('Startseite der Akten sind die Personenakten', (await page.$eval('#c-tabs .on', (b) => b.dataset.tab)) === 'people' && (await page.evaluate(() => location.hash)) === '#/casefiles?tab=people', await page.evaluate(() => location.hash));
   await page.click('#c-new');
   await page.fill('.modal.open [name=title]', 'UI Einsatz Hafen');
   await page.selectOption('.modal.open [name=priority]', 'high');
@@ -742,6 +826,37 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.click('#c-tabs [data-tab=files]');
   await page.waitForTimeout(600);
   check('Liste zeigt Priorität und Fahndung', /UI Einsatz Hafen/.test(await page.textContent('#view')) && /Hoch/.test(await page.textContent('#view table')) && /Fahndung/.test(await page.textContent('#view table')));
+  check('Zurück aus der Liste bleibt bei Fallakten', (await page.evaluate(() => location.hash)) === '#/casefiles?tab=files');
+  // Personenakte: Einträge ohne Fallakte, Fahrzeuge und Schlüssel aus allen Bereichen (api.mjs: Max Muster hat ein privates
+  // Fahrzeug E2E-PF und eines der Organisation E2E-PT)
+  at('alice personenakte eintraege');
+  await go(page, '#/casefiles?tab=people');
+  await page.selectOption('#pf-area', { label: 'E2E Team' });
+  await page.waitForTimeout(500);
+  await page.fill('#pf-q', 'Max Muster');
+  await page.waitForTimeout(700);
+  await page.locator('#view tr', { hasText: 'Max Muster' }).locator('[data-pf-open]').click();
+  await page.waitForSelector('#view .person-head');
+  const vehiclesCard = page.locator('#view .card', { hasText: 'Fahrzeuge (Besitzer)' });
+  check('Privates Fahrzeug in der Akte der Organisation', /E2E-PF/.test(await vehiclesCard.textContent()) && /Privat/.test(await vehiclesCard.textContent()) && /E2E-PT/.test(await vehiclesCard.textContent()) && /E2E Team/.test(await vehiclesCard.textContent()), await vehiclesCard.textContent());
+  check('Privater Schlüssel in der Akte der Organisation', /Garage/.test(await page.locator('#view .card', { hasText: 'Schlüssel' }).last().textContent()));
+  await page.click('#pf-entry-new');
+  check('Eintrag mit Markdown-Editor', await page.locator('.modal.open .md-toolbar, .modal.open [data-md]').count() > 0);
+  await page.fill('.modal.open [name=kind]', 'Gespräch');
+  await page.fill('.modal.open [name=body]', 'Hat **bereitwillig** ausgesagt');
+  await submit(page);
+  await until(page, () => /bereitwillig/.test(document.querySelector('#pf-entries')?.textContent || '')).catch(() => {});
+  check('Eintrag erscheint in der Personenakte', /Gespräch/.test(await page.textContent('#pf-entries')) && await page.locator('#pf-entries strong', { hasText: 'bereitwillig' }).count() === 1);
+  await page.locator('#pf-entries [data-pe-edit]').first().click();
+  await page.fill('.modal.open [name=body]', 'Hat bereitwillig ausgesagt, Termin folgt');
+  await submit(page);
+  await until(page, () => /Termin folgt/.test(document.querySelector('#pf-entries')?.textContent || '')).catch(() => {});
+  check('Eintrag bearbeitet', /Termin folgt/.test(await page.textContent('#pf-entries')) && /geändert von/.test(await page.textContent('#pf-entries')));
+  await page.screenshot({ path: `${out}/alice-personenakte-eintraege.png`, fullPage: true });
+  await page.locator('#pf-entries [data-pe-del]').first().click();
+  await submit(page);
+  await until(page, () => !/Termin folgt/.test(document.querySelector('#pf-entries')?.textContent || 'Termin folgt')).catch(() => {});
+  check('Eintrag gelöscht', !/Termin folgt/.test(await page.textContent('#pf-entries')));
   // Schulung mit Test im Tool: Einstellungen, Fragen, Test mit Unterbrechung und Countdown, Ergebnis
   at('alice schulung test');
   await go(page, '#/trainings');
@@ -920,6 +1035,24 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.click('#view .tabs [data-tab=settings]');
   await page.waitForTimeout(400);
   check('Einstellungen zeigen TRUST_PROXY', /TRUST_PROXY/.test(await page.textContent('#view')));
+  at('admin akten schalter');
+  check('Schalter für Teile des Aktensystems', await page.locator('#view input[name="casefiles.files"]').isChecked() && await page.locator('#view input[name="casefiles.penal_codes"]').count() === 1);
+  await page.uncheck('#view input[name="casefiles.files"]');
+  check('Abhängige Schalter werden blass', await page.locator('#s-case-parts.muted-block').count() === 1);
+  await page.click('#s-form button:not([type=button])');
+  await page.waitForTimeout(600);
+  await go(page, '#/casefiles');
+  await page.waitForSelector('#pf-q');
+  check('Ohne Fallakten nur Personenakten und Strafkatalog', (await page.$$eval('#c-tabs [data-tab]', (t) => t.map((x) => x.dataset.tab))).join() === 'people,codes' && await page.locator('#c-new').count() === 0, (await page.$$eval('#c-tabs [data-tab]', (t) => t.map((x) => x.dataset.tab))).join());
+  await page.screenshot({ path: `${out}/admin-akten-ohne-fallakten.png` });
+  await go(page, '#/admin-server');
+  await page.click('#view .tabs [data-tab=settings]');
+  await page.waitForSelector('#view input[name="casefiles.files"]');
+  await page.check('#view input[name="casefiles.files"]');
+  await page.click('#s-form button:not([type=button])');
+  await page.waitForTimeout(600);
+  await go(page, '#/casefiles');
+  check('Fallakten wieder da', await page.locator('#c-tabs [data-tab=files]').count() === 1);
   at('admin ablaufdatum');
   await go(page, '#/admin-users');
   await page.locator('#view tr', { hasText: 'carol@e2e.test' }).locator('[data-uedit]').click();

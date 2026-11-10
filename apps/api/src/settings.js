@@ -18,6 +18,12 @@ export const DEFAULTS = {
   'retention.sessions_days': 30,
   'retention.trash_days': 30,
   'mail.enabled': true,
+  // Teile des Aktensystems ein- und ausschalten (features.js); Personenakten bleiben immer an
+  'casefiles.files': true,
+  'casefiles.wanted': true,
+  'casefiles.penal_codes': true,
+  'casefiles.report_templates': true,
+  'casefiles.types': true,
 };
 
 let cache = null;

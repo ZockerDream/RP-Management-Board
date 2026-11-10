@@ -30,3 +30,34 @@ export function todoStage(due, today) {
   if (days === 0) return 'today';
   return days === 1 ? 'tomorrow' : null;
 }
+
+// Aus lib.js hierher verschoben, damit sie ohne Datenbank nutzbar sind (forecast.js); lib.js exportiert sie weiter
+export function addInterval(dateStr, freq, interval = 1) {
+  const d = parse(dateStr);
+  const day = d.getUTCDate();
+  if (freq === 'daily' || freq === 'custom') d.setUTCDate(day + interval);
+  else if (freq === 'weekly') d.setUTCDate(day + 7 * interval);
+  else {
+    const months = freq === 'yearly' ? 12 * interval : interval;
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() + months);
+    const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+    d.setUTCDate(Math.min(day, last));
+  }
+  return format(d);
+}
+
+// n-te Wiederholung relativ zum Startdatum (verhindert Tagesdrift 31. → 28. → 28.)
+export function nthOccurrence(start, freq, interval, n) {
+  const d = parse(start);
+  if (freq === 'daily' || freq === 'custom') d.setUTCDate(d.getUTCDate() + interval * n);
+  else if (freq === 'weekly') d.setUTCDate(d.getUTCDate() + 7 * interval * n);
+  else {
+    const day = d.getUTCDate();
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() + (freq === 'yearly' ? 12 : 1) * interval * n);
+    const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+    d.setUTCDate(Math.min(day, last));
+  }
+  return format(d);
+}

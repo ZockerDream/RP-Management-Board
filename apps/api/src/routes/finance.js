@@ -10,6 +10,10 @@ import { patchSchema } from '../validation.js';
 import { config } from '../config.js';
 import { dateInZone } from '../periods.js';
 import { INTEREST_PERIODS, nextInterestDate } from '../interest.js';
+import { isoDate } from '../records.js';
+import { recognizeText } from '../ocr.js';
+import { parseStatement } from '../scan.js';
+import { HISTORY_WEEKS, weekOf, addDays, historyWeeks, ruleOccurrences, salaryDays, planForecast } from '../forecast.js';
 
 const money = z.union([z.string(), z.number()]).transform((v) => String(v).replace(',', '.')).refine((v) => /^\d{1,12}(\.\d{1,2})?$/.test(v), 'Ungültiger Betrag');
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -262,6 +266,53 @@ export default async function routes(app) {
     await q('DELETE FROM transactions WHERE id=$1', [req.params.id]);
     await audit(req, 'transaction.deleted', 'transaction', req.params.id);
     return { ok: true };
+  });
+
+  // ---- Screenshot-Scanning (Wunsch des Auftraggebers vom 2026-11-10): Texterkennung lokal (ocr.js), Vorschläge aus
+  // scan.js. Das Bild wird nur gelesen, nicht gespeichert; gebucht wird erst über /transactions/import nach Prüfung.
+  app.post('/transactions/scan', authz('transaction:create'), async (req) => {
+    const f = z.object({ today: isoDate.optional() }).parse(req.query);
+    const part = await req.file();
+    if (!part) throw bad('Bild fehlt');
+    if (!['image/png', 'image/jpeg'].includes(part.mimetype)) throw bad('Nur PNG und JPEG erlaubt');
+    let image;
+    try {
+      image = await part.toBuffer();
+    } catch (e) {
+      if (e.code === 'FST_REQ_FILE_TOO_LARGE') throw bad(`Bild größer als ${config.maxUploadBytes / 1048576} MB`);
+      throw e;
+    }
+    const magic = part.mimetype === 'image/png' ? [0x89, 0x50, 0x4e, 0x47] : [0xff, 0xd8, 0xff];
+    if (!magic.every((byte, i) => image[i] === byte)) throw bad('Dateiinhalt passt nicht zum Typ');
+    const text = await recognizeText(image);
+    return { ...parseStatement(text, { today: f.today || today() }), text: text.slice(0, 20000) };
+  });
+
+  // Geprüfte Vorschläge auf einmal buchen; Quelle „import“, sonst wie eine Buchung von Hand
+  app.post('/transactions/import', authz('transaction:create'), async (req) => {
+    const b = z.object({
+      budget_id: id,
+      items: z.array(z.object({
+        type: z.enum(['income', 'expense']), amount: money.refine((v) => Number(v) > 0, 'Betrag muss > 0 sein'), booked_at: isoDate,
+        title: z.string().trim().max(200).default(''), category_id: id.nullish(),
+      })).min(1).max(100),
+    }).parse(req.body);
+    const { budget } = await budgetAccess(req.user.id, b.budget_id, true);
+    for (const categoryId of new Set(b.items.map((x) => x.category_id).filter(Boolean))) await checkRefs({ category_id: categoryId }, budget);
+    const created = await tx(async (client) => {
+      let n = 0;
+      for (const x of b.items) {
+        await client.query(
+          `INSERT INTO transactions(budget_id,category_id,created_by,type,amount,booked_at,title,source) VALUES ($1,$2,$3,$4,$5,$6,$7,'import')`,
+          [budget.id, x.category_id || null, req.user.id, x.type, x.amount, x.booked_at, x.title],
+        );
+        n++;
+      }
+      return n;
+    });
+    if (b.items.some((x) => x.type === 'expense')) await budgetWatch(budget.id, req.log);
+    await audit(req, 'transaction.imported', 'budget', budget.id, { count: created, source: 'screenshot' });
+    return { created };
   });
 
   app.get('/transactions/export.csv', authz('transaction:export'), async (req, reply) => {
@@ -530,6 +581,49 @@ export default async function routes(app) {
        LEFT JOIN transactions t ON t.budget_id = ANY($1) AND date_trunc('month', t.booked_at) = m AND ($3::date IS NULL OR t.booked_at <= $3) GROUP BY m ORDER BY m`,
       [ids, String(f.months), f.to ?? null],
     );
+  });
+
+  // ---- Prognose dieser und nächster Woche (Regeln in forecast.js): gleicher Kontenumfang wie das Dashboard
+  app.get('/stats/forecast', authz('budget:read'), async (req) => {
+    const { ids } = await statScope(req);
+    const g = z.object({ week_start: z.coerce.number().int().min(0).max(1).default(1), today: isoDate.optional() }).parse(req.query);
+    // „Heute“ des Browsers, damit die Prognose zum Dashboard passt (der Server rechnet sonst in UTC)
+    const now = g.today || today();
+    const current = weekOf(now, g.week_start);
+    const last = addDays(current.end, 7);
+    const [transactions, rules, payroll, first] = await Promise.all([
+      many(`SELECT to_char(booked_at, 'YYYY-MM-DD') date, type, sum(amount) amount FROM transactions
+        WHERE budget_id = ANY($1) AND type IN ('income','expense') AND booked_at BETWEEN $2 AND $3 GROUP BY 1, 2`, [ids, current.start, last]),
+      // Geteilte Daueraufträge buchen den vollen Betrag auch beim Empfänger: jede sichtbare Seite zählt
+      many(`SELECT r.start_date, r.next_run, r.end_date, r.frequency, r.interval, r.type, r.amount, r.active,
+          (r.budget_id = ANY($1))::int + COALESCE((r.recipient_status = 'accepted' AND r.recipient_budget_id = ANY($1))::int, 0) copies
+        FROM recurring_rules r WHERE r.active AND (r.budget_id = ANY($1) OR (r.recipient_status = 'accepted' AND r.recipient_budget_id = ANY($1)))`, [ids]),
+      // Festgehalt nur auf ein gültiges Gehaltskonto im gewählten Umfang (wie payrollRun)
+      one(`SELECT u.daily_salary, to_char(u.payroll_start_date, 'YYYY-MM-DD') start_date FROM users u JOIN budgets b ON b.id=u.payroll_budget_id
+        WHERE u.id=$1 AND b.id = ANY($2) AND b.type='solo' AND b.owner_user_id=u.id AND NOT b.archived AND u.daily_salary > 0 AND u.payroll_start_date IS NOT NULL`, [req.user.id, ids]),
+      one(`SELECT to_char(min(booked_at), 'YYYY-MM-DD') date FROM transactions WHERE budget_id = ANY($1) AND type IN ('income','expense') AND booked_at < $2`, [ids, current.start]),
+    ]);
+    const weeks = historyWeeks(first?.date, current.start, g.week_start);
+    // Erfahrungswert ohne Daueraufträge und ohne Festgehalt; der Bonus aus dem Gehaltslauf zählt mit
+    const history = await one(
+      `SELECT COALESCE(sum(CASE WHEN t.source='payroll' THEN COALESCE(t.amount - pp.base_amount, 0) ELSE t.amount END) FILTER (WHERE t.type='income'), 0) income,
+         COALESCE(sum(t.amount) FILTER (WHERE t.type='expense'), 0) expense
+       FROM transactions t LEFT JOIN payroll_payments pp ON pp.transaction_id=t.id
+       WHERE t.budget_id = ANY($1) AND t.type IN ('income','expense') AND t.recurring_id IS NULL AND t.booked_at BETWEEN $2 AND $3`,
+      [ids, addDays(current.start, -7 * weeks), addDays(current.start, -1)],
+    );
+    const recurring = rules.flatMap((r) => ruleOccurrences(r, current.start, last).flatMap((d) => Array.from({ length: r.copies }, () => ({ date: d, type: r.type, amount: r.amount }))));
+    let salary = [];
+    if (payroll) {
+      const paid = new Set((await many(
+        "SELECT to_char(payroll_date, 'YYYY-MM-DD') d FROM payroll_payments WHERE user_id=$1 AND payroll_date BETWEEN $2 AND $3", [req.user.id, current.start, last],
+      )).map((x) => x.d));
+      salary = salaryDays({ from: current.start, to: last, startDate: payroll.start_date, paidDates: paid }).map((d) => ({ date: d, amount: payroll.daily_salary }));
+    }
+    return {
+      today: now, history_weeks: weeks, history_from: weeks ? addDays(current.start, -7 * weeks) : null, max_history_weeks: HISTORY_WEEKS,
+      weeks: planForecast({ today: now, weekStart: g.week_start, transactions, recurring, salary, history: { weeks, income: history.income, expense: history.expense } }),
+    };
   });
 
   // ---- Berichte

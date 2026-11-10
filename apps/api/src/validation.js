@@ -25,7 +25,7 @@ const LABELS = {
   status: 'Status', steps: 'Reproduktionsschritte', tag_ids: 'Tags', tags: 'Tags', target_amount: 'Zielbetrag', target_date: 'Zieldatum', team_id: 'Organisation', title: 'Titel',
   to: 'Bis', type: 'Typ', url: 'URL', vehicle_id: 'Fahrzeug', week_start: 'Wochenstart', weekly_work_hours: 'Wochen-Soll', work_date: 'Datum',
   // Akten, Lizenzen, Schulungen, Dokumentationen
-  case_file_id: 'Akte', closed_on: 'Abgeschlossen am', completed_on: 'Abgeschlossen am', end_time: 'Ende', entry_date: 'Datum', file_number: 'Aktenzeichen',
+  case_file_id: 'Akte', closed_on: 'Abgeschlossen am', completed_on: 'Abgeschlossen am', end_time: 'Ende', entry_date: 'Datum', items: 'Buchungen', today: 'Heute', file_number: 'Aktenzeichen',
   instructor: 'Ausbilder', issued_on: 'Ausgestellt am', issuer: 'Ausgestellt von', location: 'Ort', number: 'Nummer', opened_on: 'Eröffnet am',
   people: 'Personen', pinned: 'Angeheftet', q: 'Suche', result: 'Ergebnis', role: 'Rolle', session_date: 'Datum', session_id: 'Termin', sort: 'Reihenfolge',
   start_time: 'Beginn', state: 'Zustand', status_reason: 'Begründung', type_id: 'Art', user_id: 'Benutzer', valid_until: 'Gültig bis',

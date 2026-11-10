@@ -9,6 +9,8 @@ export function applyAppName(name) {
   document.querySelectorAll('[data-app-name]').forEach((n) => { n.textContent = state.appName; });
 }
 export const can = (p) => state.perms.has(p);
+// Schalter des Aktensystems aus Server-Management → Sicherheit & Einstellungen (files, wanted, codes, charges, templates, types)
+export const caseFeature = (key) => state.features?.casefiles?.[key] !== false;
 
 const store = {
   get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
@@ -262,6 +264,7 @@ export async function reloadMe() {
   state.me = r.user;
   state.perms = new Set(r.permissions);
   state.mfaSetup = r.mfa_setup_required;
+  state.features = r.features || {};
   setCurrency(r.user.currency);
   applyTheme(r.user.theme || 'system', r.user.accent || 'indigo');
   renderAvatars();

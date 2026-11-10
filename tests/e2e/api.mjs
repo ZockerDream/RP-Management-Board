@@ -1176,6 +1176,152 @@ check('Foto abrufen', photo.status === 200 && photo.buf.subarray(1, 4).toString(
 check('Liste kennt das Foto', (await carol.get(`/person-files?team_id=${team.id}`)).data.find((p) => p.id === orgPerson.id)?.has_photo === true);
 invalid('Person mit Fahndung und Akten lässt sich nicht löschen', await alice.del(`/people/${orgPerson.id}`));
 
+// ---------- Personenakte: Fahrzeuge und Schlüssel aus allen Bereichen (Fehler vom 2026-11-10: private fehlten in der
+// Akte der Organisation und umgekehrt)
+const pfCar = ok('Privates Fahrzeug mit Besitzer', await alice.post('/vehicles', { plate: 'E2E-PF', make_model: 'Bravado', owner_person_id: orgPerson.id }));
+const pfTeamCar = ok('Fahrzeug der Organisation mit Besitzer', await alice.post('/vehicles', { plate: 'E2E-PT', make_model: 'Vapid', owner_person_id: orgPerson.id, scope: 'team', team_id: team.id }));
+const pfKey = ok('Privater Schlüssel', await alice.post('/keys', { code: 'PFK', label: 'Garage', vehicle_id: pfCar.id }));
+ok('Privaten Schlüssel an die Person ausgeben', await alice.post(`/keys/${pfKey.id}/assign`, { person_id: orgPerson.id }));
+const pfOrgView = ok('Personenakte im Bereich der Organisation', await alice.get(`/person-files/${orgPerson.id}?team_id=${team.id}`));
+check('Privates Fahrzeug erscheint auch in der Akte der Organisation', pfOrgView.owned_vehicles?.some((v) => v.id === pfCar.id && v.team_name === null), JSON.stringify(pfOrgView.owned_vehicles));
+check('Fahrzeug der Organisation erscheint mit ihrem Namen', pfOrgView.owned_vehicles?.some((v) => v.id === pfTeamCar.id && v.team_name === 'E2E Team'), JSON.stringify(pfOrgView.owned_vehicles));
+check('Privater Schlüssel erscheint auch in der Akte der Organisation', pfOrgView.keys?.some((k) => k.key_id === pfKey.id && k.team_name === null), JSON.stringify(pfOrgView.keys));
+const pfPrivateView = ok('Personenakte privat', await alice.get(`/person-files/${orgPerson.id}`));
+check('Fahrzeug der Organisation erscheint auch privat', pfPrivateView.owned_vehicles?.some((v) => v.id === pfTeamCar.id), JSON.stringify(pfPrivateView.owned_vehicles));
+const pfCarol = ok('Leserin öffnet die Personenakte', await carol.get(`/person-files/${orgPerson.id}?team_id=${team.id}`));
+check('Leserin sieht fremde private Fahrzeuge und Schlüssel nicht', !pfCarol.owned_vehicles?.some((v) => v.id === pfCar.id) && !pfCarol.keys?.some((k) => k.key_id === pfKey.id), JSON.stringify(pfCarol.owned_vehicles));
+check('Fremder sieht weder private noch Organisations-Fahrzeuge', (await dave.get(`/person-files/${orgPerson.id}`)).data.owned_vehicles?.length === 0);
+
+// ---------- Einträge direkt in der Personenakte (ohne Fallakte), je Bereich
+denied('Leserin legt keinen Eintrag an', await carol.post(`/person-files/${orgPerson.id}/entries`, { team_id: team.id, body: 'x' }), [403]);
+invalid('Eintrag ohne Text', await bob.post(`/person-files/${orgPerson.id}/entries`, { team_id: team.id, body: '  ' }));
+invalid('Eintrag mit ungültigem Datum', await bob.post(`/person-files/${orgPerson.id}/entries`, { team_id: team.id, body: 'x', entry_date: '2026-02-31' }));
+denied('Fremder schreibt nicht in die Organisation', await dave.post(`/person-files/${orgPerson.id}/entries`, { team_id: team.id, body: 'x' }), [403, 404]);
+const pfEntry = ok('Eintrag in der Personenakte', await bob.post(`/person-files/${orgPerson.id}/entries`, { team_id: team.id, kind: 'Kontrolle', body: 'Am Hafen **kontrolliert**', entry_date: dayAt(-1) }));
+const pfPrivEntry = ok('Privater Eintrag', await alice.post(`/person-files/${orgPerson.id}/entries`, { body: 'Nur für mich' }));
+const pfWithEntry = ok('Leserin liest Einträge', await carol.get(`/person-files/${orgPerson.id}?team_id=${team.id}`));
+check('Eintrag mit Art, Datum und Verfasser', pfWithEntry.own_entries?.some((e) => e.id === pfEntry.id && e.kind === 'Kontrolle' && e.entry_date === dayAt(-1) && e.created_by_name), JSON.stringify(pfWithEntry.own_entries));
+check('Privater Eintrag bleibt privat', !pfWithEntry.own_entries.some((e) => e.id === pfPrivEntry.id) && (await alice.get(`/person-files/${orgPerson.id}`)).data.own_entries.some((e) => e.id === pfPrivEntry.id));
+check('Fremder sieht keine Einträge', (await dave.get(`/person-files/${orgPerson.id}`)).data.own_entries.length === 0);
+denied('Leserin ändert keinen Eintrag', await carol.patch(`/person-file-entries/${pfEntry.id}`, { body: 'y' }), [403]);
+denied('Fremder ändert keinen Eintrag', await dave.patch(`/person-file-entries/${pfEntry.id}`, { body: 'y' }), [404]);
+denied('Fremder löscht keinen Eintrag', await dave.del(`/person-file-entries/${pfEntry.id}`), [404]);
+denied('Bob ändert Alices privaten Eintrag nicht', await bob.patch(`/person-file-entries/${pfPrivEntry.id}`, { body: 'y' }), [404]);
+ok('Eintrag ändern', await bob.patch(`/person-file-entries/${pfEntry.id}`, { body: 'Am Hafen kontrolliert, ohne Befund' }));
+check('Änderung mit Bearbeiter', (await carol.get(`/person-files/${orgPerson.id}?team_id=${team.id}`)).data.own_entries.some((e) => e.id === pfEntry.id && e.body === 'Am Hafen kontrolliert, ohne Befund' && e.updated_by_name));
+const entryOnly = ok('Person nur mit Eintrag', await alice.post('/people', { name: 'Eva Eintrag', kind: 'external' }));
+ok('Eintrag ohne sonstige Personenakte', await bob.post(`/person-files/${entryOnly.id}/entries`, { team_id: team.id, body: 'Erster Kontakt' }));
+check('Filter „Mit Personenakte“ zählt Einträge', (await carol.get(`/person-files?team_id=${team.id}&only=records`)).data.some((p) => p.id === entryOnly.id));
+const entryOnlyDelete = await alice.del(`/people/${entryOnly.id}`);
+check('Person mit Einträgen lässt sich nicht löschen', entryOnlyDelete.status === 400 && /Personenakten/.test(entryOnlyDelete.data?.message), JSON.stringify(entryOnlyDelete));
+const entryOnlyFile = (await bob.get(`/person-files/${entryOnly.id}?team_id=${team.id}`)).data;
+for (const e of entryOnlyFile.own_entries) ok('Eintrag löschen', await bob.del(`/person-file-entries/${e.id}`));
+ok('Ohne Einträge lässt sie sich löschen', await alice.del(`/people/${entryOnly.id}`));
+check('Audit für Einträge', Number(psql("SELECT count(*) FROM audit_log WHERE action LIKE 'person_file.entry_%'")) >= 4);
+
+// ---------- Teile des Aktensystems ausschalten (systemweit, Server-Management → Sicherheit & Einstellungen)
+const switchCase = async (values) => ok('Schalter setzen', await admin.put('/admin/settings', values));
+denied('Nur Admins schalten', await alice.put('/admin/settings', { 'casefiles.files': false }), [403]);
+check('Alles an zu Beginn', Object.values((await bob.get('/me')).data.features?.casefiles || {}).every(Boolean), JSON.stringify((await bob.get('/me')).data.features));
+await switchCase({ 'casefiles.files': false });
+const meOff = (await bob.get('/me')).data.features.casefiles;
+check('Ohne Fallakten auch ohne Fahndung, Vorlagen, Arten und Anklagen; Strafkatalog bleibt', !meOff.files && !meOff.wanted && !meOff.templates && !meOff.types && !meOff.charges && meOff.codes, JSON.stringify(meOff));
+const offList = await bob.get('/case-files');
+check('Fallakten ausgeschaltet: 403 mit Hinweis', offList.status === 403 && offList.data?.error === 'disabled' && /Fallakten/.test(offList.data?.message), JSON.stringify(offList));
+denied('Akte öffnen ausgeschaltet', await bob.get(`/case-files/${hitFile.id}`), [403]);
+denied('Wartende Berichte ausgeschaltet', await alice.get('/case-file-reports/pending'), [403]);
+denied('Fahndungsliste ausgeschaltet', await bob.get('/warrants'), [403]);
+denied('Aktenarten ausgeschaltet', await alice.get('/case-file-types'), [403]);
+denied('Vorlagen ausgeschaltet', await alice.get('/report-templates'), [403]);
+denied('Ohne Anmeldung trotzdem 401', await anon.get('/case-files'), [401]);
+ok('Strafkatalog bleibt zum Nachschlagen', await bob.get(`/penal-codes?team_id=${team.id}`));
+const pfOff = ok('Personenakte ohne Fallakten', await carol.get(`/person-files/${orgPerson.id}?team_id=${team.id}`));
+check('Personenakte zeigt keine Akten-Teile', pfOff.case_files === null && pfOff.warrants === null && pfOff.charges === null && pfOff.reports === null && pfOff.evidence === null && pfOff.vehicles === null && pfOff.entries === null && Array.isArray(pfOff.own_entries), JSON.stringify(Object.keys(pfOff)));
+const pfOffList = ok('Personenliste ohne Fallakten', await carol.get(`/person-files?team_id=${team.id}`));
+check('Liste ohne Akten, Fahndungen und Vorstrafen', pfOffList.every((p) => p.files === null && p.wanted === null && p.convictions === null));
+check('Personenübersicht ohne Akten', (await carol.get(`/people/${orgPerson.id}/record`)).data.case_files === null);
+const offEntry = ok('Einträge gehen auch ohne Fallakten', await bob.post(`/person-files/${orgPerson.id}/entries`, { team_id: team.id, body: 'Ohne Fallakte' }));
+ok('Eintrag wieder löschen', await bob.del(`/person-file-entries/${offEntry.id}`));
+await switchCase({ 'casefiles.files': true, 'casefiles.penal_codes': false });
+ok('Fallakten wieder da', await bob.get(`/case-files/${hitFile.id}`));
+denied('Strafkatalog ausgeschaltet', await bob.get(`/penal-codes?team_id=${team.id}`), [403]);
+denied('Anklagepunkte ohne Strafkatalog', await bob.post(`/case-files/${hitFile.id}/charges`, { person_id: orgPerson.id, penal_code_id: '00000000-0000-4000-8000-000000000000' }), [403]);
+const pfNoCodes = ok('Personenakte ohne Strafkatalog', await carol.get(`/person-files/${orgPerson.id}?team_id=${team.id}`));
+check('Ohne Strafkatalog keine Vorstrafen, Akten bleiben', pfNoCodes.charges === null && Array.isArray(pfNoCodes.case_files) && pfNoCodes.case_files.length > 0);
+await switchCase({ 'casefiles.penal_codes': true, 'casefiles.types': false, 'casefiles.wanted': false, 'casefiles.report_templates': false });
+denied('Aktenarten einzeln aus', await alice.get('/case-file-types'), [403]);
+denied('Fahndung einzeln aus', await bob.get('/warrants'), [403]);
+denied('Vorlagen einzeln aus', await alice.get('/report-templates'), [403]);
+denied('Neue Akte mit Art ohne Aktenarten', await alice.post('/case-files', { title: 'Mit Art', team_id: team.id, type_id: '00000000-0000-4000-8000-000000000000' }), [403]);
+const noTypeFile = ok('Neue Akte ohne Art geht', await alice.post('/case-files', { title: 'Ohne Art', team_id: team.id }));
+ok('Wieder löschen', await alice.del(`/case-files/${noTypeFile.id}`));
+ok('Strafkatalog wieder da', await bob.get(`/penal-codes?team_id=${team.id}`));
+await switchCase({ 'casefiles.types': true, 'casefiles.wanted': true, 'casefiles.report_templates': true });
+check('Alles wieder an', Object.values((await bob.get('/me')).data.features.casefiles).every(Boolean));
+ok('Fahndungsliste wieder da', await bob.get('/warrants'));
+
+// ---------- Prognose dieser und nächster Woche (Geplantes + Erfahrungswert)
+denied('Prognose ohne Anmeldung', await anon.get('/stats/forecast'), [401]);
+invalid('Prognose mit ungültigem Datum', await alice.get('/stats/forecast?today=2026-02-31'));
+const forecastOf = async (scope = 'solo') => ok(`Prognose ${scope}`, await alice.get(`/stats/forecast?scope=${scope}&week_start=1&today=${dayAt(0)}`));
+const fc0 = await forecastOf();
+const [thisWeek, nextWeek] = fc0.weeks;
+const isMonday = (d) => new Date(`${d}T00:00:00Z`).getUTCDay() === 1;
+check('Zwei Wochen ab Montag', fc0.weeks.length === 2 && isMonday(thisWeek.start) && isMonday(nextWeek.start) && thisWeek.start <= dayAt(0) && dayAt(0) <= thisWeek.end, JSON.stringify(fc0.weeks.map((w) => [w.start, w.end])));
+const cents = (v) => Math.round(Number(v) * 100);
+const sumParts = (p) => cents(p.booked) + cents(p.planned) + cents(p.recurring) + cents(p.salary) + cents(p.estimate);
+check('Summen stimmen', fc0.weeks.every((w) => sumParts(w.income) === cents(w.income.total) && sumParts(w.expense) === cents(w.expense.total) && cents(w.income.total) - cents(w.expense.total) === cents(w.balance)), JSON.stringify(fc0.weeks));
+check('Nächste Woche: nichts gebucht, alle 7 Tage geschätzt', cents(nextWeek.income.booked) === 0 && nextWeek.estimate_days === 7);
+const fcShared0 = await forecastOf('shared');
+const fcTx = ok('Vorausdatierte Ausgabe nächste Woche', await alice.post('/transactions', { budget_id: solo.id, type: 'expense', amount: '12.34', booked_at: nextWeek.start, title: 'Prognose' }));
+const fcSaving = ok('Sparziel-Einzahlung zählt nicht', await alice.post('/transactions', { budget_id: solo.id, type: 'deposit', amount: '50', booked_at: nextWeek.start, title: 'Prognose Sparen' }));
+const fcRule = ok('Wöchentlicher Dauerauftrag ab nächster Woche', await alice.post('/recurring', { name: 'Prognose Abo', budget_id: solo.id, type: 'income', amount: '7.50', frequency: 'weekly', interval: 1, start_date: nextWeek.start }));
+const fc1 = await forecastOf();
+check('Vorausdatiert zählt als geplant', cents(fc1.weeks[1].expense.planned) - cents(nextWeek.expense.planned) === 1234, JSON.stringify(fc1.weeks[1].expense));
+check('Dauerauftrag zählt in seiner Woche', cents(fc1.weeks[1].income.recurring) - cents(nextWeek.income.recurring) === 750, JSON.stringify(fc1.weeks[1].income));
+check('Diese Woche unverändert', JSON.stringify(fc1.weeks[0]) === JSON.stringify(thisWeek));
+check('Persönliche Buchungen zählen nicht unter „Organisation“', JSON.stringify((await forecastOf('shared')).weeks) === JSON.stringify(fcShared0.weeks));
+ok('Prognose-Buchung löschen', await alice.del(`/transactions/${fcTx.id}`));
+ok('Prognose-Einzahlung löschen', await alice.del(`/transactions/${fcSaving.id}`));
+ok('Prognose-Dauerauftrag löschen', await alice.del(`/recurring/${fcRule.id}`));
+check('Wieder wie vorher', JSON.stringify((await forecastOf()).weeks) === JSON.stringify(fc0.weeks));
+ok('Prognose für Leserin', await carol.get(`/stats/forecast?week_start=0&today=${dayAt(0)}`));
+
+// ---------- Screenshot-Scanning: Bild lesen (Tesseract im Container), Vorschläge geprüft buchen
+const { deflateSync, crc32 } = await import('node:zlib');
+const pngChunk = (type, data) => {
+  const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+  const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(Buffer.concat([Buffer.from(type), data])));
+  return Buffer.concat([len, Buffer.from(type), data, crc]);
+};
+const blankPng = (w, h) => {
+  const header = Buffer.alloc(13); header.writeUInt32BE(w, 0); header.writeUInt32BE(h, 4); header[8] = 8; header[9] = 0;
+  const rows = Buffer.alloc((w + 1) * h, 255); for (let y = 0; y < h; y++) rows[y * (w + 1)] = 0;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), pngChunk('IHDR', header), pngChunk('IDAT', deflateSync(rows)), pngChunk('IEND', Buffer.alloc(0))]);
+};
+const blank = await upload(alice, `/transactions/scan?today=${dayAt(0)}`, blankPng(200, 80), 'leer.png', 'image/png');
+check('Leeres Bild: keine Vorschläge', blank.status === 200 && Array.isArray(blank.data?.items) && blank.data.items.length === 0, JSON.stringify(blank));
+invalid('Kaputtes PNG', await upload(alice, '/transactions/scan', png, 'kaputt.png', 'image/png'));
+invalid('PDF statt Bild', await upload(alice, '/transactions/scan', pdfBytes, 'x.pdf', 'application/pdf'));
+invalid('Falscher Inhalt zum Typ', await upload(alice, '/transactions/scan', pdfBytes, 'x.png', 'image/png'));
+denied('Scannen nur mit Buchungsrecht', await upload(anon, '/transactions/scan', blankPng(10, 10), 'x.png', 'image/png').catch(() => ({ status: 401 })), [401]);
+const soloCategory = (await alice.get('/budgets')).data.find((b) => b.id === solo.id).categories[0];
+const scanImported = ok('Vorschläge buchen', await alice.post('/transactions/import', { budget_id: solo.id, items: [
+  { type: 'expense', amount: '23,50', booked_at: dayAt(-1), title: 'Burger Shot', category_id: soloCategory?.id || null },
+  { type: 'income', amount: '1669', booked_at: dayAt(0), title: 'Gehalt LSPD' },
+] }));
+check('Zwei Buchungen angelegt', scanImported.created === 2);
+const importedRows = (await alice.get(`/transactions?budget_id=${solo.id}&q=Burger Shot`)).data.items;
+check('Gebucht mit Quelle Import', importedRows.some((t) => t.source === 'import' && t.amount === '23.50' && t.type === 'expense' && t.booked_at.slice(0, 10) === dayAt(-1)), JSON.stringify(importedRows));
+denied('Leserin bucht keine Vorschläge', await carol.post('/transactions/import', { budget_id: shared.id, items: [{ type: 'expense', amount: '1', booked_at: today }] }), [403, 404]);
+denied('Fremder bucht nicht auf fremdes Konto', await dave.post('/transactions/import', { budget_id: solo.id, items: [{ type: 'expense', amount: '1', booked_at: today }] }), [403, 404]);
+invalid('Kategorie eines anderen Kontos', await alice.post('/transactions/import', { budget_id: shared.id, items: [{ type: 'expense', amount: '1', booked_at: today, category_id: soloCategory?.id }] }));
+invalid('Keine leere Liste', await alice.post('/transactions/import', { budget_id: solo.id, items: [] }));
+invalid('Betrag 0', await alice.post('/transactions/import', { budget_id: solo.id, items: [{ type: 'expense', amount: '0', booked_at: today }] }));
+invalid('Nur Einnahmen und Ausgaben', await alice.post('/transactions/import', { budget_id: solo.id, items: [{ type: 'deposit', amount: '1', booked_at: today }] }));
+invalid('Höchstens 100 auf einmal', await alice.post('/transactions/import', { budget_id: solo.id, items: Array.from({ length: 101 }, () => ({ type: 'expense', amount: '1', booked_at: today })) }));
+for (const t of (await alice.get(`/transactions?budget_id=${solo.id}&limit=500`)).data.items.filter((x) => x.source === 'import')) ok('Import-Buchung löschen', await alice.del(`/transactions/${t.id}`));
+
 // ---------- Bilder zu Fahrzeugen und Akten (Bob Mitglied, Carol Leserin, Dave fremd)
 const uploadImage = async (who, path, content, name, type, caption) => {
   const form = new FormData();

@@ -1,8 +1,9 @@
 // Personenakten: Liste mit Suche und Filtern je Bereich, Detail mit Foto, Stammdaten, Warnhinweisen, medizinischen
-// Angaben, Fahndungen, Vorstrafen, Akten, Berichten, Beweismitteln, Fahrzeugen, Lizenzen und Schulungen.
+// Angaben, eigenen Einträgen, Fahndungen, Vorstrafen, Akten, Berichten, Beweismitteln, Fahrzeugen, Schlüsseln, Lizenzen
+// und Schulungen. Ausgeschaltete Teile des Aktensystems (caseFeature) erscheinen nicht.
 import { api } from '../api.js';
-import { $, esc, eur, fdate, fdatetime, tag, openForm, confirmBox, toast, empty, debounce, printArea } from '../ui.js';
-import { can } from '../app.js';
+import { $, esc, eur, fdate, fdatetime, tag, openForm, confirmBox, toast, empty, debounce, printArea, todayStr } from '../ui.js';
+import { can, caseFeature } from '../app.js';
 import { markdownBlock } from '../markdown.js';
 import * as P from './case-parts.js';
 const { CASE_STATUS } = P;
@@ -12,7 +13,9 @@ const BLOOD = ['', '0+', '0−', 'A+', 'A−', 'B+', 'B−', 'AB+', 'AB−'];
 const LICENSE_STATUS = { valid: 'Gültig', suspended: 'Gesperrt', revoked: 'Entzogen' };
 const TRAINING_RESULT = { registered: 'Angemeldet', passed: 'Bestanden', failed: 'Nicht bestanden', absent: 'Nicht erschienen' };
 const VEHICLE_STATUS = { available: 'Verfügbar', in_use: 'Im Einsatz', workshop: 'Werkstatt', retired: 'Ausgemustert' };
-const FILTERS = [['', 'Alle Personen'], ['records', 'Mit Akten oder Personenakte'], ['wanted', 'Gesucht'], ['warnings', 'Mit Warnhinweisen'], ['inactive', 'Inaktiv']];
+// „Gesucht“ gibt es nur mit Fahndungen (Schalter in Server-Management → Sicherheit & Einstellungen)
+const filters = () => [['', 'Alle Personen'], ['records', caseFeature('files') ? 'Mit Akten oder Personenakte' : 'Mit Personenakte'], ...(caseFeature('wanted') ? [['wanted', 'Gesucht']] : []), ['warnings', 'Mit Warnhinweisen'], ['inactive', 'Inaktiv']];
+const ENTRY_KINDS = ['Vermerk', 'Gespräch', 'Kontrolle', 'Verstoß', 'Behandlung', 'Auszeichnung', 'Telefonat', 'Hinweis'];
 const photos = new Map();
 
 const PKIND = { employee: 'Mitarbeiter', external: 'Extern', family: 'Familie' };
@@ -119,19 +122,24 @@ const areaSelect = (ctx) => (ctx.areas.length > 1
   ? `<select id="pf-area" aria-label="Bereich">${ctx.areas.map((a) => `<option value="${a.id}" ${a.id === ctx.area ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>` : '');
 const areaName = (ctx) => ctx.areas.find((a) => a.id === ctx.area)?.name || 'Privat';
 const areaQuery = (ctx) => (ctx.area ? `?team_id=${ctx.area}` : '');
+// Fahrzeuge und Schlüssel erscheinen aus allen Bereichen; der Bereich steht dabei
+const objectArea = (x) => tag('', x.team_name || 'Privat');
 
 export async function drawPeople(el, ctx, personId) {
   if (!can('person:read')) { el.innerHTML = '<div class="card"><p class="muted">Für Personenakten brauchst du zusätzlich das Recht „Personen lesen“.</p></div>'; return; }
   if (personId) return drawPerson(el, ctx, personId);
+  if (state.only && !filters().some(([v]) => v === state.only)) state.only = '';
   const list = await api.get(`/person-files?${new URLSearchParams({ ...(ctx.area ? { team_id: ctx.area } : {}), ...(state.q ? { q: state.q } : {}), ...(state.only ? { only: state.only } : {}) })}`);
+  const files = caseFeature('files');
+  const convictions = caseFeature('charges');
   el.innerHTML = `<div class="toolbar" style="gap:8px;flex-wrap:wrap">${areaSelect(ctx)}<input id="pf-q" type="search" class="search" placeholder="Name oder Alias…" aria-label="Personen suchen" value="${esc(state.q)}">
-      <select id="pf-only" aria-label="Filter">${FILTERS.map(([v, l]) => `<option value="${v}" ${state.only === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <select id="pf-only" aria-label="Filter">${filters().map(([v, l]) => `<option value="${v}" ${state.only === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     <div class="card"><div class="card-head"><h2>Personenakten · ${esc(areaName(ctx))}</h2><div class="row wrap">${can('person:export') ? '<button class="btn ghost sm" id="pf-csv">CSV-Export</button>' : ''}${can('person:create') ? '<button class="btn ghost sm" id="pf-import">CSV-Import</button><button class="btn ghost sm" id="pf-new">Neue Person</button>' : ''}</div></div>
-      <p class="muted">Jede Person gibt es einmal für das ganze System: Mitarbeiter, Externe und Familie, auch ohne Zugang. Stammdaten sehen alle mit Zugriff auf Personen; was ${ctx.area ? 'diese Organisation' : 'du privat'} über sie weiß – Warnhinweise, Vermerke, medizinische Angaben, Akten und Fahndungen – steht in ihrer Personenakte.</p>
-      ${list.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Art, Funktion</th><th>Geboren</th><th>Hinweise</th><th>Akten</th><th>Vorstrafen</th>${can('key:read') ? '<th>Schlüssel</th>' : ''}<th></th></tr></thead><tbody>
+      <p class="muted">Jede Person gibt es einmal für das ganze System: Mitarbeiter, Externe und Familie, auch ohne Zugang. Stammdaten sehen alle mit Zugriff auf Personen; was ${ctx.area ? 'diese Organisation' : 'du privat'} über sie weiß – Warnhinweise, Vermerke, Einträge, medizinische Angaben${files ? ', Akten' : ''}${caseFeature('wanted') ? ' und Fahndungen' : ''} – steht in ihrer Personenakte.</p>
+      ${list.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Art, Funktion</th><th>Geboren</th><th>Hinweise</th>${files ? '<th>Akten</th>' : ''}${convictions ? '<th>Vorstrafen</th>' : ''}${can('key:read') ? '<th>Schlüssel</th>' : ''}<th></th></tr></thead><tbody>
       ${list.map((p) => `<tr><td><b>${esc(p.name)}</b>${p.aliases ? `<br><small class="muted">„${esc(p.aliases)}“</small>` : ''}${p.active ? '' : ` ${tag('', 'inaktiv')}`}</td>
         <td>${esc(PKIND[p.kind] || '')}${p.function ? `<br><small class="muted">${esc(p.function)}</small>` : ''}</td><td>${p.birth_date ? `${fdate(p.birth_date)}<br><small class="muted">${age(p.birth_date)}</small>` : '–'}</td>
-        <td>${p.wanted ? tag('bad', 'Gesucht') : ''} ${warningTags(p.warnings)}</td><td>${p.files || '–'}</td><td>${p.convictions || '–'}</td>${can('key:read') ? `<td>${p.keys || '–'}</td>` : ''}
+        <td>${p.wanted ? tag('bad', 'Gesucht') : ''} ${warningTags(p.warnings)}</td>${files ? `<td>${p.files || '–'}</td>` : ''}${convictions ? `<td>${p.convictions || '–'}</td>` : ''}${can('key:read') ? `<td>${p.keys || '–'}</td>` : ''}
         <td><button class="btn ghost sm" data-pf-open="${p.id}">Öffnen</button></td></tr>`).join('')}</tbody></table></div>
         ${list.length >= 2000 ? '<p class="muted">Es werden die ersten 2.000 Personen gezeigt; grenze die Liste über Suche oder Filter ein.</p>' : ''}`
       : empty(state.q || state.only ? 'Keine passende Person.' : 'Noch keine Personen.')}</div>`;
@@ -175,16 +183,39 @@ const dossierForm = (ctx, person, file) => {
   });
 };
 
+// Eintrag direkt in der Personenakte, ohne Fallakte; gehört dem gewählten Bereich
+const entryForm = (ctx, person, entry) => openForm({
+  title: entry ? 'Eintrag bearbeiten' : `Neuer Eintrag · ${person.name}`,
+  wide: true,
+  fields: [
+    { name: 'entry_date', label: 'Datum', type: 'date', value: entry?.entry_date || todayStr(), required: true },
+    { name: 'kind', label: 'Art', value: entry?.kind, maxlength: 60, suggestions: ENTRY_KINDS, placeholder: ENTRY_KINDS.slice(0, 3).join(', ') },
+    { name: 'body', label: 'Text', type: 'textarea', rows: 10, value: entry?.body, maxlength: 20000, required: true, full: true, markdown: true },
+  ],
+  onSubmit: async (v) => {
+    const body = { entry_date: v.entry_date, kind: v.kind.trim(), body: v.body };
+    if (entry) await api.patch(`/person-file-entries/${entry.id}`, body);
+    else await api.post(`/person-files/${person.id}/entries`, { ...body, team_id: ctx.area || null });
+    toast('Eintrag gespeichert');
+  },
+});
+
 async function drawPerson(el, ctx, personId) {
   const r = await api.get(`/person-files/${personId}${areaQuery(ctx)}`);
   const p = r.person;
   const f = r.file;
   const write = r.level >= 3 && can('casefile:update');
-  const activeWarrants = r.warrants.filter((x) => x.status === 'active');
+  // Ausgeschaltete Teile des Aktensystems kommen als null und erscheinen nicht
+  const activeWarrants = (r.warrants || []).filter((x) => x.status === 'active');
   const fact = (label, value) => (value ? `<div><dt>${label}</dt><dd>${value}</dd></div>` : '');
   const section = (title, html, count) => `<div class="card"><div class="card-head"><h2>${title}</h2>${count !== undefined ? tag('', String(count)) : ''}</div>${html}</div>`;
+  const shown = (list, html) => (list ? html() : '');
   const fileLink = (id, number) => `<button class="link" data-open="${id}">${esc(number)}</button>`;
   const medical = f && (f.blood_type || f.allergies || f.conditions || f.medications || f.emergency_contact);
+  const entryHtml = (e) => `<div class="case-entry"><div class="row"><b>${fdate(e.entry_date)}</b>${e.kind ? tag('', e.kind) : ''}<span class="grow"></span>
+      ${write ? `<span class="no-print"><button class="btn ghost sm" data-pe-edit="${e.id}">Bearbeiten</button><button class="btn ghost sm" data-pe-del="${e.id}">Löschen</button></span>` : ''}</div>
+    ${markdownBlock(e.body)}
+    <small class="muted">${esc(e.created_by_name || '–')}, ${fdatetime(e.created_at)}${e.updated_by_name && e.updated_at !== e.created_at ? ` · geändert von ${esc(e.updated_by_name)}, ${fdatetime(e.updated_at)}` : ''}</small></div>`;
   el.innerHTML = `<div class="person-file">
     <div class="card person-head"><div class="person-photo" id="pf-photo">${p.has_photo ? '' : '<span>Kein Foto</span>'}</div>
       <div class="grow"><div class="card-head"><div><h2>${esc(p.name)}</h2>${p.aliases ? `<small class="muted">alias „${esc(p.aliases)}“</small>` : ''}</div>
@@ -201,21 +232,23 @@ async function drawPerson(el, ctx, personId) {
       ${section(`Vermerke · ${esc(areaName(ctx))}`, f?.notes ? markdownBlock(f.notes) : `<p class="muted">${f ? 'Keine Vermerke.' : 'Für diesen Bereich gibt es noch keine Personenakte.'}</p>${f?.updated_by_name ? `<small class="muted">Zuletzt ${esc(f.updated_by_name)}, ${fdatetime(f.updated_at)}</small>` : ''}`)}
       ${section('Medizinische Angaben', medical ? `<dl class="case-meta">${fact('Blutgruppe', esc(f.blood_type))}${fact('Notfallkontakt', esc(f.emergency_contact))}${fact('Allergien', esc(f.allergies))}${fact('Vorerkrankungen', esc(f.conditions))}${fact('Medikamente', esc(f.medications))}</dl>` : '<p class="muted">Keine Angaben.</p>')}
     </div>
-    ${section('Vorstrafen und Anklagepunkte', r.charges.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Akte</th><th>Tatbestand</th><th>Anzahl</th><th>Geldstrafe</th><th>Haft</th><th>Status</th></tr></thead><tbody>
+    <div class="card" id="pf-entries"><div class="card-head"><h2>Einträge · ${esc(areaName(ctx))}</h2><div class="row">${tag('', String(r.own_entries.length))}${write ? '<button class="btn ghost sm no-print" id="pf-entry-new">Neuer Eintrag</button>' : ''}</div></div>
+      ${r.own_entries.length ? r.own_entries.map(entryHtml).join('') : empty(`Noch keine Einträge${write ? '. Einträge brauchen keine Fallakte; sie gehören zu diesem Bereich.' : '.'}`)}</div>
+    ${shown(r.charges, () => section('Vorstrafen und Anklagepunkte', r.charges.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Akte</th><th>Tatbestand</th><th>Anzahl</th><th>Geldstrafe</th><th>Haft</th><th>Status</th></tr></thead><tbody>
       ${r.charges.map((c) => `<tr><td>${fileLink(c.case_file_id, c.file_number)}</td><td><b>${esc(c.code)}</b> ${esc(c.title)}</td><td>${c.count}×</td><td>${eur(Number(c.fine) * c.count)}</td><td>${P.jailText(c.jail * c.count)}</td><td>${P.st(P.CHARGE_STATUS, c.status)}${c.decided_at ? ` <small class="muted">${fdate(c.decided_at)}</small>` : ''}</td></tr>`).join('')}
-      </tbody></table></div><p class="case-sums"><b>Verurteilt: ${r.totals.convictions} · ${eur(r.totals.fine)} · ${P.jailText(r.totals.jail)}${r.totals.points ? ` · ${r.totals.points} Punkte` : ''}</b></p>` : empty('Keine Anklagepunkte.'), r.totals.convictions)}
-    ${section('Fallakten', r.case_files.length ? r.case_files.map((c) => `<div class="list-item"><div class="grow"><div class="row wrap">${fileLink(c.id, c.file_number)} ${esc(c.title)} ${tag(...CASE_STATUS[c.status])}${c.priority !== 'normal' ? P.st(P.PRIORITY, c.priority) : ''}</div>
-      <small>${esc(c.role || 'ohne Rolle')}${c.type_name ? ` · ${esc(c.type_name)}` : ''} · eröffnet ${fdate(c.opened_on)}</small></div></div>`).join('') : empty('An keiner Akte beteiligt.'), r.case_files.length)}
-    ${section('Fahndungen', r.warrants.length ? r.warrants.map((x) => P.warrantItem({ ...x, person_name: p.name }, { w: false, m: false, file: true })).join('') : empty('Keine Fahndungen.'), activeWarrants.length)}
+      </tbody></table></div><p class="case-sums"><b>Verurteilt: ${r.totals.convictions} · ${eur(r.totals.fine)} · ${P.jailText(r.totals.jail)}${r.totals.points ? ` · ${r.totals.points} Punkte` : ''}</b></p>` : empty('Keine Anklagepunkte.'), r.totals.convictions))}
+    ${shown(r.case_files, () => section('Fallakten', r.case_files.length ? r.case_files.map((c) => `<div class="list-item"><div class="grow"><div class="row wrap">${fileLink(c.id, c.file_number)} ${esc(c.title)} ${tag(...CASE_STATUS[c.status])}${c.priority !== 'normal' ? P.st(P.PRIORITY, c.priority) : ''}</div>
+      <small>${esc(c.role || 'ohne Rolle')}${c.type_name && caseFeature('types') ? ` · ${esc(c.type_name)}` : ''} · eröffnet ${fdate(c.opened_on)}</small></div></div>`).join('') : empty('An keiner Akte beteiligt.'), r.case_files.length))}
+    ${shown(r.warrants, () => section('Fahndungen', r.warrants.length ? r.warrants.map((x) => P.warrantItem({ ...x, person_name: p.name }, { w: false, m: false, file: true })).join('') : empty('Keine Fahndungen.'), activeWarrants.length))}
     <div class="grid cols-2">
-      ${section('Berichte', r.reports.length ? r.reports.map((x) => `<div class="list-item"><div class="grow">${fileLink(x.case_file_id, `${x.file_number} · B-${x.number}`)} ${esc(x.title)} ${P.st(P.REPORT_STATUS, x.status)}<small>${esc(x.kind || '')}${x.occurred_at ? ` · ${fdatetime(x.occurred_at)}` : ''}</small></div></div>`).join('') : empty('Keine Berichte über die Person.'), r.reports.length)}
-      ${section('Beweismittel', r.evidence.length ? r.evidence.map((x) => `<div class="list-item"><div class="grow">${fileLink(x.case_file_id, `${x.file_number} · A-${x.number}`)} ${esc(x.description)} ${P.st(P.EVIDENCE_STATUS, x.status)}</div></div>`).join('') : empty('Keine Beweismittel.'), r.evidence.length)}
-      ${r.owned_vehicles ? section('Fahrzeuge (Besitzer)', r.owned_vehicles.length ? r.owned_vehicles.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.plate)}</b> ${esc(x.make_model)}<small>${VEHICLE_STATUS[x.status] || ''} · aus der Fahrzeugverwaltung</small></div></div>`).join('') : empty('Keine Fahrzeuge in diesem Bereich.'), r.owned_vehicles.length) : ''}
-      ${r.keys ? section('Schlüssel', r.keys.length ? r.keys.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.label)}</b> ${esc(x.code)} · Kopie ${x.copy_no}<small>${esc(x.object_name || '–')} · ausgegeben ${fdate(x.issued_at)}${x.due_at ? ` · Rückgabe bis ${fdate(x.due_at)}` : ''}${x.receipt_signed ? ' · quittiert' : ''}</small></div>${x.lost_at ? tag('bad', 'Verloren') : x.due_at && String(x.due_at).slice(0, 10) < new Date().toLocaleDateString('sv-SE') ? tag('bad', 'Überfällig') : ''}</div>`).join('') : empty('Keine Schlüssel in diesem Bereich.'), r.keys.length) : ''}
-      ${section('Fahrzeuge in Akten (Halter)', r.vehicles.length ? r.vehicles.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.plate || '–')}</b> ${esc(x.description)}${x.role ? ` ${tag('', x.role)}` : ''}<small>${fileLink(x.case_file_id, x.file_number)}</small></div></div>`).join('') : empty('Keine Fahrzeuge in Akten.'), r.vehicles.length)}
-      ${section('Einträge zur Person', r.entries.length ? r.entries.map((x) => `<div class="list-item"><div class="grow"><b>${fdate(x.entry_date)}</b> ${esc(x.kind || 'Eintrag')} · ${fileLink(x.case_file_id, x.file_number)}<small>${esc(x.body.length > 160 ? `${x.body.slice(0, 160)}…` : x.body)}</small></div></div>`).join('') : empty('Keine Einträge.'), r.entries.length)}
-      ${r.licenses ? section('Lizenzen', r.licenses.length ? r.licenses.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.type_name)}</b>${x.number ? ` ${esc(x.number)}` : ''}<small>${LICENSE_STATUS[x.status]} · ${x.valid_until ? `gültig bis ${fdate(x.valid_until)}` : 'unbefristet'}${x.status_reason ? ` · ${esc(x.status_reason)}` : ''}</small></div></div>`).join('') : empty('Keine Lizenzen in diesem Bereich.')) : ''}
-      ${r.trainings ? section('Schulungen', r.trainings.length ? r.trainings.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.training_name)}</b><small>${TRAINING_RESULT[x.result]}${x.completed_on ? ` am ${fdate(x.completed_on)}` : ''}${x.valid_until ? ` · gültig bis ${fdate(x.valid_until)}` : ''}</small></div></div>`).join('') : empty('Keine Schulungen in diesem Bereich.')) : ''}
+      ${shown(r.reports, () => section('Berichte', r.reports.length ? r.reports.map((x) => `<div class="list-item"><div class="grow">${fileLink(x.case_file_id, `${x.file_number} · B-${x.number}`)} ${esc(x.title)} ${P.st(P.REPORT_STATUS, x.status)}<small>${esc(x.kind || '')}${x.occurred_at ? ` · ${fdatetime(x.occurred_at)}` : ''}</small></div></div>`).join('') : empty('Keine Berichte über die Person.'), r.reports.length))}
+      ${shown(r.evidence, () => section('Beweismittel', r.evidence.length ? r.evidence.map((x) => `<div class="list-item"><div class="grow">${fileLink(x.case_file_id, `${x.file_number} · A-${x.number}`)} ${esc(x.description)} ${P.st(P.EVIDENCE_STATUS, x.status)}</div></div>`).join('') : empty('Keine Beweismittel.'), r.evidence.length))}
+      ${shown(r.owned_vehicles, () => section('Fahrzeuge (Besitzer)', r.owned_vehicles.length ? r.owned_vehicles.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.plate)}</b> ${esc(x.make_model)}<small>${VEHICLE_STATUS[x.status] || ''} · aus der Fahrzeugverwaltung</small></div>${objectArea(x)}</div>`).join('') : empty('Keine Fahrzeuge.'), r.owned_vehicles.length))}
+      ${shown(r.keys, () => section('Schlüssel', r.keys.length ? r.keys.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.label)}</b> ${esc(x.code)} · Kopie ${x.copy_no}<small>${esc(x.object_name || '–')} · ausgegeben ${fdate(x.issued_at)}${x.due_at ? ` · Rückgabe bis ${fdate(x.due_at)}` : ''}${x.receipt_signed ? ' · quittiert' : ''}</small></div>${objectArea(x)}${x.lost_at ? tag('bad', 'Verloren') : x.due_at && String(x.due_at).slice(0, 10) < new Date().toLocaleDateString('sv-SE') ? tag('bad', 'Überfällig') : ''}</div>`).join('') : empty('Keine ausgegebenen Schlüssel.'), r.keys.length))}
+      ${shown(r.vehicles, () => section('Fahrzeuge in Akten (Halter)', r.vehicles.length ? r.vehicles.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.plate || '–')}</b> ${esc(x.description)}${x.role ? ` ${tag('', x.role)}` : ''}<small>${fileLink(x.case_file_id, x.file_number)}</small></div></div>`).join('') : empty('Keine Fahrzeuge in Akten.'), r.vehicles.length))}
+      ${shown(r.entries, () => section('Einträge in Fallakten', r.entries.length ? r.entries.map((x) => `<div class="list-item"><div class="grow"><b>${fdate(x.entry_date)}</b> ${esc(x.kind || 'Eintrag')} · ${fileLink(x.case_file_id, x.file_number)}<small>${esc(x.body.length > 160 ? `${x.body.slice(0, 160)}…` : x.body)}</small></div></div>`).join('') : empty('Keine Einträge in Fallakten.'), r.entries.length))}
+      ${shown(r.licenses, () => section('Lizenzen', r.licenses.length ? r.licenses.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.type_name)}</b>${x.number ? ` ${esc(x.number)}` : ''}<small>${LICENSE_STATUS[x.status]} · ${x.valid_until ? `gültig bis ${fdate(x.valid_until)}` : 'unbefristet'}${x.status_reason ? ` · ${esc(x.status_reason)}` : ''}</small></div></div>`).join('') : empty('Keine Lizenzen in diesem Bereich.')))}
+      ${shown(r.trainings, () => section('Schulungen', r.trainings.length ? r.trainings.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.training_name)}</b><small>${TRAINING_RESULT[x.result]}${x.completed_on ? ` am ${fdate(x.completed_on)}` : ''}${x.valid_until ? ` · gültig bis ${fdate(x.valid_until)}` : ''}</small></div></div>`).join('') : empty('Keine Schulungen in diesem Bereich.')))}
     </div></div>`;
   if (p.has_photo) photoSrc(p.id).then((src) => { const box = $('#pf-photo', el); if (box) box.innerHTML = `<img src="${src}" alt="Foto von ${esc(p.name)}">`; }).catch(() => {});
   $('#pf-area', el)?.addEventListener('change', (e) => { ctx.area = e.target.value; ctx.url(`#/casefiles?person=${p.id}&area=${ctx.area}`); drawPerson(el, ctx, p.id); });
@@ -227,10 +260,13 @@ async function drawPerson(el, ctx, personId) {
       if (b.id === 'pf-back') { ctx.url('#/casefiles?tab=people'); await drawPeople(el, ctx); return; }
       if (b.id === 'pf-print') { printArea($('.person-file', el)); return; }
       if (b.id === 'pf-edit') changed = await dossierForm(ctx, p, f);
+      else if (b.id === 'pf-entry-new') changed = await entryForm(ctx, p);
+      else if (b.dataset.peEdit) changed = await entryForm(ctx, p, r.own_entries.find((e) => e.id === b.dataset.peEdit));
+      else if (b.dataset.peDel && await confirmBox('Eintrag löschen', 'Der Eintrag wird endgültig gelöscht.')) { await api.del(`/person-file-entries/${b.dataset.peDel}`); changed = true; }
       else if (b.id === 'pf-person') changed = await formPerson(p);
       else if (b.id === 'pf-photo-set') changed = await photoForm(p);
       else if (b.id === 'pf-photo-del' && await confirmBox('Foto entfernen', 'Das Foto wird für alle Bereiche gelöscht.', 'Entfernen')) { await api.del(`/people/${p.id}/photo`); changed = true; }
-      else if (b.id === 'pf-delete' && await confirmBox('Person löschen', `${p.name} wird für das ganze System gelöscht, mit Foto und Stammdaten. Hat die Person noch Schlüssel, Akten, Lizenzen, Schulungsnachweise oder Fahrzeuge, geht das nicht; setze sie dann über „Stammdaten“ auf inaktiv.`)) {
+      else if (b.id === 'pf-delete' && await confirmBox('Person löschen', `${p.name} wird für das ganze System gelöscht, mit Foto und Stammdaten. Hat die Person noch Schlüssel, Akten, Einträge, Lizenzen, Schulungsnachweise oder Fahrzeuge, geht das nicht; setze sie dann über „Stammdaten“ auf inaktiv.`)) {
         await api.del(`/people/${p.id}`);
         photos.delete(p.id);
         toast('Person gelöscht');

@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { $, esc, eur, fdate, empty, budgetTag, opts, debounce, confirmBox, toast } from '../ui.js';
 import { txForm, loadBudgets } from './common.js';
 import { can } from '../app.js';
+import { scanForm } from './transaction-scan.js';
 
 export async function render(view) {
   const budgets = await loadBudgets();
@@ -10,7 +11,7 @@ export async function render(view) {
   const cats = [...new Map(budgets.flatMap((b) => b.categories).map((c) => [c.name, c])).values()];
 
   view.innerHTML = `<div class="page-head"><div><h1>Transaktionen</h1><p>Alle Buchungen deiner Konten</p></div>
-    <div class="actions">${can('transaction:export') ? '<button class="btn ghost" id="t-csv">CSV-Export</button>' : ''}${can('transaction:create') ? '<button class="btn" id="t-new">Neue Buchung</button>' : ''}</div></div>
+    <div class="actions">${can('transaction:export') ? '<button class="btn ghost" id="t-csv">CSV-Export</button>' : ''}${can('transaction:create') ? '<button class="btn ghost" id="t-scan">Screenshot scannen</button><button class="btn" id="t-new">Neue Buchung</button>' : ''}</div></div>
     <div class="card"><div class="toolbar" style="flex-wrap:wrap;gap:8px">
       <div class="seg" id="t-scope"><button data-s="all" class="on">Alle</button><button data-s="solo">Solo</button><button data-s="shared">Organisation</button></div>
       <input id="t-q" placeholder="Suchen…" style="width:180px">
@@ -28,7 +29,7 @@ export async function render(view) {
       <td>${fdate(t.booked_at)}</td>      <td><b>${esc(t.title || '–')}</b>${t.income_kind === 'salary' ? ' <span class="tag">Gehalt</span>' : ''}${t.attachments ? ' 📎' : ''}${t.tags?.length ? `<br><small class="muted">${t.tags.map((g) => '#' + esc(g)).join(' ')}</small>` : ''}</td>
       <td>${esc(t.category_name || '–')}</td><td>${budgetTag(t.budget_type, t.budget_name)}</td><td>${esc(t.created_by_name || '–')}</td>
       <td style="text-align:right" class="${t.type === 'expense' ? 'down' : 'up'}"><b>${t.type === 'expense' ? '−' : '+'}${eur(t.amount)}</b></td>
-      <td style="white-space:nowrap">${t.source === 'manual' || !t.source ? '' : `<span class="tag">${t.source === 'interest' ? 'Zinsen' : 'auto'}</span> `}${can('transaction:update') && !['payroll', 'interest'].includes(t.source) ? `<button class="btn ghost sm" data-edit="${t.id}">Bearbeiten</button>` : ''}${can('transaction:delete') && t.source !== 'payroll' ? ` <button class="btn ghost sm" data-del="${t.id}">Löschen</button>` : ''}</td></tr>`).join('')}</tbody></table>` : empty('Keine Buchungen gefunden.');
+      <td style="white-space:nowrap">${t.source === 'manual' || !t.source ? '' : `<span class="tag">${{ interest: 'Zinsen', import: 'Import' }[t.source] || 'auto'}</span> `}${can('transaction:update') && !['payroll', 'interest'].includes(t.source) ? `<button class="btn ghost sm" data-edit="${t.id}">Bearbeiten</button>` : ''}${can('transaction:delete') && t.source !== 'payroll' ? ` <button class="btn ghost sm" data-del="${t.id}">Löschen</button>` : ''}</td></tr>`).join('')}</tbody></table>` : empty('Keine Buchungen gefunden.');
     $('#t-pager').innerHTML = `<button class="btn ghost sm" id="t-prev" ${f.offset ? '' : 'disabled'}>Zurück</button><span class="muted">${r.total ? f.offset + 1 : 0}–${Math.min(f.offset + LIMIT, r.total)} von ${r.total}</span><button class="btn ghost sm" id="t-next" ${f.offset + LIMIT < r.total ? '' : 'disabled'}>Weiter</button>`;
     view._items = r.items;
   }
@@ -37,6 +38,7 @@ export async function render(view) {
     const s = e.target.closest('#t-scope [data-s]');
     if (s) { f.scope = s.dataset.s; document.querySelectorAll('#t-scope button').forEach((b) => b.classList.toggle('on', b === s)); reset(); }
     if (e.target.closest('#t-new') && (await txForm())) load();
+    if (e.target.closest('#t-scan') && (await scanForm())) load();
     if (e.target.closest('#t-prev')) { f.offset = Math.max(0, f.offset - LIMIT); load(); }
     if (e.target.closest('#t-next')) { f.offset += LIMIT; load(); }
     if (e.target.closest('#t-csv')) api.download(`/transactions/export.csv?${qs()}`, 'transaktionen.csv').catch((x) => toast(x.message, true));
