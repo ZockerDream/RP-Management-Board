@@ -29,7 +29,7 @@ Webanwendung zur Verwaltung persönlicher und geteilter Konten, kombiniert mit Z
 | | Lizenzen | Lizenzarten und Lizenzen von Personen mit Gültigkeit, Sperre und Entzug |
 | | Dokumentationen | Nachschlagewerke wie Gesetze und Funktionen in selbst angelegten Kategorien |
 | Administration | User-Management | Benutzer, Rollen & Rechte, Gruppen, Organisationen (nur Admins) |
-| | Server-Management | Übersicht, Sicherheit & Einstellungen, System & Backups, Integrationen, Audit-Log (nur Admins) |
+| | Server-Management | Übersicht, Sicherheit & Einstellungen, System & Backups, Integrationen, Notiz-Tags, Audit-Log (nur Admins) |
 | | Tickets | Gemeldete Fehler (nur Admins) |
 | | Hilfe, Fehler melden | Für alle Benutzer |
 | | Changelog | Alle Versionen seit 0.0.0, neueste oben als „Installiert“, mit Suche und Filter nach Art (Neu, Geändert, Behoben, Technik); für alle Benutzer. Vor 1.0.0 gab es keine Versionsnummern, die Stände 0.x sind nachträglich nummeriert (Wunsch des Auftraggebers vom 2026-11-10) |
@@ -50,6 +50,7 @@ Webanwendung zur Verwaltung persönlicher und geteilter Konten, kombiniert mit Z
 | | Sicherheit & Einstellungen | Passwortlänge, Sperren, Sitzungsdauer, 2FA-Pflicht, Admin-IP-Allowlist, App-Name, Wartungsmodus, Registrierung, Standardwährung und -sprache, Aufbewahrungsfristen; SMTP-Test |
 | | System & Backups | Geplante Jobs mit Status, manuelle Backups, Download, Löschen, Umgebungswerte (schreibgeschützt) |
 | | Integrationen | Webhooks, API-Schlüssel aller Benutzer |
+| | Notiz-Tags | Tags für den Notizblock anlegen, umbenennen, einfärben (Grau, Blau, Grün, Gelb, Rot), sortieren und löschen; zeigt, wie viele Notizen jeden Tag tragen. Löschen entfernt den Tag von allen Notizen, die Notizen bleiben |
 | | Audit-Log | Filterbares Protokoll, CSV-Export |
 | Tickets | – | Gemeldete Fehler, optional mit GitHub-Issue-Abgleich; kommentieren und löschen. Auch Melder kommentieren und löschen ihre eigenen Tickets unter „Fehler melden“. Kommentare bleiben intern, ein GitHub-Issue bleibt beim Löschen bestehen |
 
@@ -144,7 +145,9 @@ Ansichten Monat, Woche, Tag und Agenda, Navigation vor/zurück/heute.
 
 Beide gehören entweder einer Person (Solo) oder einer Organisation. Mit Lesen & Schreiben darf man ändern, mit Lesen nur lesen; die Oberfläche blendet die Aktionen dann aus. Die Sichtbarkeit lässt sich beim Bearbeiten ändern.
 
-- **Notizblock:** Titel und/oder Text, anheften, Suche über Titel und Text. Jede Notiz zeigt, wer sie zuletzt wann bearbeitet hat; Anheften zählt nicht als Bearbeitung.
+- **Notizblock:** Titel und/oder Text, anheften, archivieren, Suche über Titel, Text und Tags. Jede Notiz zeigt, wer sie zuletzt wann bearbeitet hat; Anheften, Archivieren und Tags zählen nicht als Bearbeitung.
+- **Archiv (Wunsch des Auftraggebers vom 2026-11-10):** Knopf „Archivieren“ bzw. „Wiederherstellen“ für alle, die die Notiz bearbeiten dürfen; Umschalter „Offen | Archiv | Alle“ neben „Alle | Solo | Organisation“, Vorgabe „Offen“. Archivieren gilt für alle, die die Notiz sehen, zeigt Zeitpunkt und Namen, löst das Anheften und zählt nicht als Bearbeitung; archivierte Notizen lassen sich bearbeiten, aber nicht anheften.
+- **Notiz-Tags (Wunsch des Auftraggebers vom 2026-11-10):** Tags gelten systemweit und werden nur im Server-Management verwaltet; vorgegeben sind BLOCKED, INVALID, DONE und WIP. Eine Notiz trägt beliebig viele davon; setzen darf sie, wer die Notiz bearbeiten darf. Tags sind reine Markierung: farbiges Abzeichen auf der Karte und Filter „Alle Tags / Ohne Tag / <Tag>“, ausgeblendet oder umsortiert wird nichts.
 - **ToDos:** Aufgabe, Notiz, optionale Deadline, abhaken mit Name und Zeitpunkt. Die Liste gruppiert nach Überfällig, Heute, Demnächst, Ohne Deadline und Erledigt. Offene ToDos mit Deadline erscheinen automatisch als ganztägiger Termin „ToDo: …“ im Kalender und im iCal-Abo, für alle, die das ToDo sehen; erledigte verschwinden dort.
 - **Benachrichtigungen:** Zu offenen ToDos mit Deadline erscheint einen Tag vorher, am Fälligkeitstag und einmal bei Überfälligkeit eine Meldung in der Glocke. ToDos einer Organisation erreichen alle Mitglieder, die sie lesen dürfen. Art `todo_due`, in den Einstellungen abschaltbar und optional per E-Mail.
 

@@ -1,6 +1,6 @@
 # RP-Management-Board – Technische Sicht
 
-Ergänzt [CONCEPT.md](CONCEPT.md) und beschreibt den implementierten Stand (Migration 022).
+Ergänzt [CONCEPT.md](CONCEPT.md) und beschreibt den implementierten Stand (Migration 023).
 
 Die Oberfläche verwendet den Begriff „Konto“. API-Routen und Tabellen heißen aus Kompatibilitätsgründen weiterhin `/budgets`, `budgets` und `budget_id`. Das Ausgabenlimit „Budget“ der Oberfläche heißt technisch `spending_budgets`.
 
@@ -131,10 +131,13 @@ Automatische Termine werden beim Abruf aus den Quelltabellen abgeleitet, nicht d
 
 ### 4.7 Notizen, ToDos, Ticket-Kommentare
 ```
-notes(id, owner_user_id, team_id, title, body, pinned, created_by, updated_by, created_at, updated_at)
+notes(id, owner_user_id, team_id, title, body, pinned, created_by, updated_by, created_at, updated_at, archived_at, archived_by)   -- Archiv seit Migration 023
 todos(id, owner_user_id, team_id, title, note, due_date, done_at, done_by, last_reminder, created_by, created_at, updated_at)
 bug_report_comments(id, report_id, user_id, body, created_at)
+note_tags(id, name, color[neutral|primary|ok|warn|bad], position, created_at)   -- systemweit, Name eindeutig ohne Groß-/Kleinschreibung (Migration 023, vorgegeben BLOCKED, INVALID, DONE, WIP)
+note_tag_links(note_id, tag_id)                                                  -- beide ON DELETE CASCADE
 ```
+Archiv: `PATCH /notes/:id` mit `archived: true|false` setzt bzw. leert `archived_at`/`archived_by`; erneutes Archivieren behält Zeitpunkt und Namen. Archivieren setzt `pinned` auf `false`, `pinned: true` auf einer archivierten Notiz ergibt 400; wie Anheften ändert es weder `updated_at` noch `updated_by`. `GET /notes` liefert `archived_at` und `archived_by_name`, offene Notizen zuerst (Grenze 1000), gefiltert wird im Browser (`#n-state`). Notiz-Tags: `GET /note-tags` liefert allen angemeldeten Benutzern die Liste (nach `position`), `GET /notes` je Notiz `tag_ids` in derselben Reihenfolge. `POST /notes` und `PATCH /notes/:id` nehmen `tag_ids` (höchstens 50, Doppelte fallen weg) und ersetzen damit alle Tags der Notiz; ohne das Feld bleiben sie unverändert. Unbekannte IDs ergeben 400; eingefügt wird per `SELECT … FROM note_tags`, ein gleichzeitig gelöschter Tag fällt also weg. Wie Anheften ändern Tags weder `updated_at` noch `updated_by`. Verwaltung in `admin.js` unter `/admin/note-tags` (`settings:read` lesen samt Zahl der Notizen, `settings:update` für `POST`, `PATCH`, `DELETE` und `POST …/:id/move` mit `direction: up|down`, das die Reihenfolge lückenlos neu nummeriert und mit dem Nachbarn tauscht); doppelte Namen ergeben 400, Audit `note_tag.created|updated|deleted`. Frontend: `pages/notes.js` (Abzeichen, Knopf „Tags“, Feld im Formular, Filter `#n-tag`), Tab „Notiz-Tags“ in `pages/admin.js`, Farben in `NOTE_TAG_COLORS`/`noteTagHtml` (`pages/common.js`).
 ### 4.8 Akten, Lizenzen, Schulungen, Dokumentationen (Migration 017, Aktenarten und Beschränkung 018, Aktensystem 020, Test im Tool 021)
 ```
 case_files(id, owner_user_id, team_id, type_id, restricted, file_number, title, description, status[open|dormant|closed], opened_on, closed_on, …)   -- Aktenzeichen eindeutig je Bereich
@@ -191,7 +194,7 @@ In JS: `levelSql(alias, modul, n, scope)` und `visibleSql(…)` für Listen (Ali
 | Auswertung | `/stats/overview`, `/stats/by-category`, `/stats/timeline?granularity=day\|week\|month&periods=&week_start=&to=`, `/reports/costs`, `/reports/saved`. Standard `month` liefert `month`, sonst `bucket` (Tag bzw. Wochenbeginn) |
 | Zeiterfassung | `/work-projects`, `/work-hours`, `/work-hours/timer/*`, `DELETE /work-hours/timer` (verwerfen), `/work-hours/monthly`, `/work-hours/monthly.pdf`, `/work-hours/export.csv`, `/work-hours/team/*` |
 | Sport | `GET/POST /sport/routes`, `PATCH/DELETE /sport/routes/:id`, `POST /sport/routes/:id/scores`, `DELETE /sport/scores/:id` |
-| Notizblock, ToDos | `GET/POST /notes`, `PATCH/DELETE /notes/:id`, `GET/POST /todos`, `PATCH/DELETE /todos/:id` (mit `done`) |
+| Notizblock, ToDos | `GET/POST /notes` (mit `tag_ids`), `PATCH/DELETE /notes/:id` (mit `archived`), `GET /note-tags`, `GET/POST /admin/note-tags`, `PATCH/DELETE /admin/note-tags/:id`, `POST /admin/note-tags/:id/move`, `GET/POST /todos`, `PATCH/DELETE /todos/:id` (mit `done`) |
 | Tickets | `GET/POST /bug-reports`, `DELETE /bug-reports/:id`, `POST /bug-reports/:id/comments`, `DELETE /bug-reports/:id/comments/:commentId`; dieselben unter `/admin/bug-reports` für alle Tickets. Getrennte Pfade, damit die Admin-IP-Allowlist greift |
 | Akten | `GET/POST /case-files` (`?status=&type_id=&q=`), `GET/POST /case-file-types`, `PATCH/DELETE /case-file-types/:id`, `GET /case-files/:id/access-options`, `PUT /case-files/:id/access`, `GET/PATCH/DELETE /case-files/:id`, `POST /case-files/:id/people`, `DELETE /case-files/:id/people/:personId`, `POST /case-files/:id/entries`, `PATCH/DELETE /case-file-entries/:id`, `POST /case-files/:id/attachments` (`?images=1` nur Bilder, Feld `caption`), `GET/PATCH/DELETE /case-file-attachments/:id`, `GET /people/:id/record` (Personenübersicht) |
 | Aktensystem | `POST /case-files/:id/vehicles`, `PATCH/DELETE /case-file-vehicles/:id`, `POST /case-files/:id/links`, `DELETE /case-files/:id/links/:linkedId`, `POST /case-files/:id/evidence`, `PATCH/DELETE /case-file-evidence/:id`, `POST /case-file-evidence/:id/log`, `GET/POST /penal-codes` (`?team_id=&private=1`), `PATCH/DELETE /penal-codes/:id`, `POST /penal-codes/import`, `POST /case-files/:id/charges`, `PATCH/DELETE /case-file-charges/:id`, `POST /case-file-charges/:id/decision`, `POST /case-files/:id/warrants`, `GET /warrants` (`?status=&q=&team_id=`), `POST /warrants/:id/close`, `DELETE /warrants/:id`, `GET/POST /report-templates`, `POST /report-templates/defaults`, `PATCH/DELETE /report-templates/:id`, `POST /case-files/:id/reports`, `PATCH/DELETE /case-file-reports/:id`, `POST /case-file-reports/:id/submit`, `POST /case-file-reports/:id/review`, `GET /case-file-reports/pending`, `GET /person-files` (`?team_id=&q=&only=records|wanted|warnings|inactive`, bis 2000 Zeilen, mit `kind`, `function`, `keys`), `GET/PUT /person-files/:personId`, `POST/GET/DELETE /people/:id/photo` |

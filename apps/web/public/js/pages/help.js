@@ -35,7 +35,7 @@ const sections = [
   },
   {
     title: 'Notizblock',
-    text: 'Unter „Notizblock“ schreibst du Notizen nur für dich (Solo) oder für eine Organisation. Notizen einer Organisation bearbeitet, wer dort beim Notizblock „Lesen & Schreiben“ hat; mit „Lesen“ siehst du sie nur. Der Text unterstützt Markdown mit Werkzeugleiste und Vorschau (siehe „Text formatieren“). Mit „Anheften“ bleibt eine Notiz oben. Über das Suchfeld findest du Notizen nach Titel und Text.',
+    text: 'Unter „Notizblock“ schreibst du Notizen nur für dich (Solo) oder für eine Organisation. Notizen einer Organisation bearbeitet, wer dort beim Notizblock „Lesen & Schreiben“ hat; mit „Lesen“ siehst du sie nur. Der Text unterstützt Markdown mit Werkzeugleiste und Vorschau (siehe „Text formatieren“). Mit „Anheften“ bleibt eine Notiz oben. „Archivieren“ räumt eine Notiz weg, ohne sie zu löschen: Sie verschwindet aus der Ansicht „Offen“ und steht unter „Archiv“ (oben rechts umschalten, „Alle“ zeigt beides) mit Zeitpunkt und Namen; „Wiederherstellen“ holt sie zurück. Bei Notizen einer Organisation gilt das für alle Mitglieder, angeheftet bleibt eine archivierte Notiz nicht. Über „Tags“ markierst du eine Notiz mit beliebig vielen Tags wie WIP, BLOCKED oder DONE; die Auswahl „Alle Tags“ neben dem Suchfeld zeigt nur Notizen mit einem bestimmten Tag oder ohne Tag. Tags ändern nichts daran, wer die Notiz sieht, und blenden sie nicht aus. Welche Tags es gibt, legen Administratoren im Server-Management fest. Über das Suchfeld findest du Notizen nach Titel, Text und Tag.',
   },
   {
     title: 'ToDos und Deadlines',
@@ -115,7 +115,7 @@ const sections = [
   },
   {
     title: 'Administration',
-    text: 'Administratoren finden unter „User-Management“ Benutzer, Rollen, Gruppen und Organisationen, unter „Server-Management“ Übersicht, Sicherheit und Einstellungen, System und Backups, Integrationen und das Audit-Log, unter „Tickets“ gemeldete Fehler. Dort lässt sich auch der App-Name ändern, der dann überall angezeigt wird.',
+    text: 'Administratoren finden unter „User-Management“ Benutzer, Rollen, Gruppen und Organisationen, unter „Server-Management“ Übersicht, Sicherheit und Einstellungen, System und Backups, Integrationen, die Tags für Notizen und das Audit-Log, unter „Tickets“ gemeldete Fehler. Dort lässt sich auch der App-Name ändern, der dann überall angezeigt wird.',
   },
   {
     title: 'Fehler melden',

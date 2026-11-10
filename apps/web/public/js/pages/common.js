@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { openForm, todayStr, toast, parseAmount, eur, esc, budgetTag } from '../ui.js';
+import { openForm, todayStr, toast, parseAmount, eur, esc, budgetTag, tag } from '../ui.js';
 import { can } from '../app.js';
 
 export const loadBudgets = () => api.get('/budgets');
@@ -75,6 +75,9 @@ export function visibilityField(teams, item) {
   if (item?.team_id && !teams.some((team) => team.id === item.team_id)) options.push({ v: item.team_id, l: `Organisation: ${item.team_name}` });
   return { name: 'team_id', label: 'Sichtbarkeit', type: 'select', options, value: item?.team_id || '' };
 }
+// Notiz-Tags: Farbe aus dem Server-Management, Klasse für .tag
+export const NOTE_TAG_COLORS = { neutral: ['', 'Grau'], primary: ['primary', 'Blau'], ok: ['ok', 'Grün'], warn: ['warn', 'Gelb'], bad: ['bad', 'Rot'] };
+export const noteTagHtml = (noteTag) => tag(NOTE_TAG_COLORS[noteTag.color]?.[0] ?? '', noteTag.name);
 export const scopeTag = (item) => budgetTag(item.team_id ? 'shared' : 'solo', item.team_name || 'Solo');
 
 export const money = eur;
