@@ -5,11 +5,15 @@
 // Beim Release: die Einträge aus UNRELEASED als neue Version oben in CHANGELOG eintragen und UNRELEASED leeren.
 // Arten: new = Neu, changed = Geändert, fixed = Behoben, tech = Technik und Betrieb
 
-export const UNRELEASED = [
-  ['new', 'Seite „Changelog“ unter Administration mit allen Versionen seit 0.0.0, durchsuchbar.'],
-];
+export const UNRELEASED = [];
 
 export const CHANGELOG = [
+  {
+    version: '1.2.2', date: '2026-11-10', migrations: '', title: 'Changelog',
+    changes: [
+      ['new', 'Seite „Changelog“ unter Administration mit allen Versionen seit 0.0.0, durchsuchbar und nach Art filterbar.'],
+    ],
+  },
   {
     version: '1.2.1', date: '2026-11-10', migrations: '022', title: 'Zinsen, Bilder und Fahrzeugbesitzer',
     changes: [
