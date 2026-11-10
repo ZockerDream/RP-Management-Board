@@ -4,6 +4,8 @@ const BASE = process.env.BASE || 'http://localhost:18088';
 const phase = process.argv[2] || 'after';
 const OUT = process.argv[3] || '/work/upgrade-shots';
 const PROFILE = process.argv[4] || '/work/upgrade-profile';
+// Teile, die nur der neue Code hat (je Release anpassen): Seite und Selektor
+const MARKERS = [['notes', '#n-state [data-state=archived]'], ['admin-server', '#view .tabs [data-tab=notetags]']];
 const ROUTES = { teams: 'Organisationen', notes: 'Notizblock', todos: 'ToDos', spending: 'Budgets', 'sport-run': 'Laufen', 'sport-swim': 'Schwimmen', 'sport-bike': 'Biken', 'assets-vehicles': 'Fahrzeuge', 'assets-properties': 'Häuser', 'assets-keys': 'Schlüssel', 'assets-manage': 'Verwaltung', casefiles: 'Akten', trainings: 'Schulungen', licenses: 'Lizenzen', docs: 'Dokumentationen', 'admin-users': 'User-Management', 'admin-server': 'Server-Management', 'admin-tickets': 'Tickets', changelog: 'Changelog', datenschutz: 'Datenschutzerklärung', impressum: 'Impressum' };
 
 const ctx = await chromium.launchPersistentContext(PROFILE, { viewport: { width: 1400, height: 900 }, serviceWorkers: 'block' });
@@ -26,7 +28,7 @@ const go = async (hash) => { await page.evaluate((h) => { location.hash = h; }, 
 
 if (phase === 'before') {
   // Normale Nutzung auf der alten Version, damit alles im Browser-Cache liegt
-  for (const r of ['dashboard', 'transactions', 'work', 'budgets', 'recurring', 'goals', 'reports', 'teams', 'calendar', 'assets', 'help', 'settings', 'admin', 'impressum']) await go(`#/${r}`);
+  for (const r of ['dashboard', 'transactions', 'work', 'budgets', 'recurring', 'goals', 'reports', 'teams', 'calendar', 'assets', 'notes', 'help', 'settings', 'admin', 'admin-server', 'changelog', 'impressum']) await go(`#/${r}`);
   console.log('Alte Version besucht');
 } else {
   // Das tut ein Nutzer nach dem Update: normal neu laden, nichts löschen
@@ -37,13 +39,17 @@ if (phase === 'before') {
     const hash = await page.evaluate(() => location.hash), h1 = await page.evaluate(() => document.querySelector('#view h1')?.textContent || '');
     if (!hash.startsWith(`#/${route}`) || h1 !== title) fails.push(`${route}: Adresse ${hash}, Titel "${h1}"`);
   }
+  for (const [route, selector] of MARKERS) {
+    await go(`#/${route}`);
+    if (!(await page.$(selector))) fails.push(`${route}: ${selector} fehlt, läuft noch alter Code?`);
+  }
   await go('#/impressum');
   if (!(await page.$('#view .legal'))) fails.push('Impressum zeigt nicht das aktuelle Layout');
   await page.screenshot({ path: `${OUT}/impressum.png` }).catch(() => {});
   await go('#/sport-run');
   await page.screenshot({ path: `${OUT}/sport.png` }).catch(() => {});
   for (const p of new Set(problems)) fails.push(p);
-  console.log(fails.length ? `Upgrade fehlgeschlagen:\n${fails.map((f) => ` - ${f}`).join('\n')}` : `Upgrade in Ordnung: ${Object.keys(ROUTES).length} Seiten aktuell, ohne Cache-Löschen`);
+  console.log(fails.length ? `Upgrade fehlgeschlagen:\n${fails.map((f) => ` - ${f}`).join('\n')}` : `Upgrade in Ordnung: ${Object.keys(ROUTES).length} Seiten aktuell, ${MARKERS.length} neue Teile da, ohne Cache-Löschen`);
 }
 await ctx.close();
 process.exit(fails.length ? 1 : 0);
