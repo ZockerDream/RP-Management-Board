@@ -68,6 +68,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      # Bauen im Netz des Hosts: Auf manchen Servern (z. B. Rocky Linux mit firewalld, kleinere MTU) kommen Build-Container
+      # über Dockers Bridge nicht ins Internet, npm ci hing dann ohne Meldung. Die Container selbst laufen weiter im eigenen Netz.
+      network: host
     # Update: git pull, dann docker compose up -d. pull_policy: build baut bei jedem „up“ den ausgecheckten Stand
     # (dank Cache in Sekunden), die API spielt beim Start die Migrationen ein, der Worker wartet auf sie.
     # Der Tag ist die Code-Version (beim Release mit package.json hochzählen); alte Versionen bleiben als Image erhalten.
