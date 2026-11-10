@@ -27,20 +27,24 @@ export default async function routes(app) {
 
   app.get('/person-files', authz('casefile:read'), async (req) => {
     needPeople(req);
-    const f = z.object({ team_id: uuid.optional(), q: z.string().trim().max(100).optional(), only: z.enum(['records', 'wanted', 'warnings']).optional() }).parse(req.query);
+    const f = z.object({ team_id: uuid.optional(), q: z.string().trim().max(100).optional(), only: z.enum(['records', 'wanted', 'warnings', 'inactive']).optional() }).parse(req.query);
     const owner = await area(req, f.team_id);
     const areaId = owner.team_id || owner.owner_user_id;
-    const filter = { records: 'x.files > 0 OR x.has_file', wanted: 'x.wanted > 0', warnings: 'cardinality(x.warnings) > 0' }[f.only] || 'true';
+    const filter = { records: 'x.files > 0 OR x.has_file', wanted: 'x.wanted > 0', warnings: 'cardinality(x.warnings) > 0', inactive: 'NOT x.active' }[f.only] || 'true';
+    // Seit die Seite „Personen“ ausgeblendet ist, laufen alle Personen hierüber: deshalb bis zu 2000 Zeilen und die Zahl
+    // ausgegebener Schlüssel (alle sichtbaren, wie früher auf der Personen-Seite)
     return many(
       `SELECT * FROM (
-         SELECT pe.id, pe.name, pe.aliases, pe.birth_date, pe.kind, pe.active, pe.function, (pe.photo_key IS NOT NULL) has_photo,
+         SELECT pe.id, pe.name, pe.aliases, pe.birth_date, pe.kind, pe.active, pe.function, pe.phone, pe.email, (pe.photo_key IS NOT NULL) has_photo,
+           ${can(req, 'key:read') ? `(SELECT count(*)::int FROM key_assignments a JOIN keys k ON k.id=a.key_id
+             WHERE a.person_id=pe.id AND ${visibleSql('k', 'key')} AND a.returned_at IS NULL AND a.lost_at IS NULL)` : 'NULL::int'} keys,
            COALESCE(pf.warnings, '{}') warnings, (pf.id IS NOT NULL) has_file,
            (SELECT count(*)::int FROM case_file_people cp JOIN case_files c ON c.id=cp.case_file_id WHERE cp.person_id=pe.id AND ${inArea(owner)}) files,
            (SELECT count(*)::int FROM warrants w JOIN case_files c ON c.id=w.case_file_id WHERE w.person_id=pe.id AND w.status='active' AND ${inArea(owner)}) wanted,
            (SELECT count(*)::int FROM case_file_charges ch JOIN case_files c ON c.id=ch.case_file_id WHERE ch.person_id=pe.id AND ch.status='convicted' AND ${inArea(owner)}) convictions
          FROM people pe LEFT JOIN person_files pf ON pf.person_id=pe.id AND pf.${owner.team_id ? 'team_id' : 'owner_user_id'}=$2
          WHERE ($3::text IS NULL OR pe.name ILIKE $3 OR pe.aliases ILIKE $3)
-       ) x WHERE ${filter} ORDER BY x.wanted > 0 DESC, x.active DESC, x.name LIMIT 300`,
+       ) x WHERE ${filter} ORDER BY x.wanted > 0 DESC, x.active DESC, x.name LIMIT 2000`,
       [req.user.id, areaId, f.q ? `%${f.q}%` : null],
     );
   });
@@ -55,7 +59,7 @@ export default async function routes(app) {
     const level = owner.team_id ? await teamLevel(req.user.id, owner.team_id, 'casefile') : LEVEL.MANAGE;
     const p = [req.user.id, owner.team_id || owner.owner_user_id, personId];
     const typeArea = (alias) => `${alias}.${owner.team_id ? 'team_id' : 'owner_user_id'}=$2`;
-    const [file, caseFiles, warrants, charges, reports, evidence, vehicles, entries, licenses, trainings, ownedVehicles] = await Promise.all([
+    const [file, caseFiles, warrants, charges, reports, evidence, vehicles, entries, licenses, trainings, ownedVehicles, keys] = await Promise.all([
       one(`SELECT pf.*, u.name updated_by_name FROM person_files pf LEFT JOIN users u ON u.id=pf.updated_by
         WHERE pf.person_id=$2 AND pf.${owner.team_id ? 'team_id' : 'owner_user_id'}=$1`, [p[1], personId]),
       many(`SELECT c.id, c.file_number, c.title, c.status, c.priority, c.opened_on, c.closed_on, cp.role, ct.name type_name
@@ -82,6 +86,11 @@ export default async function routes(app) {
       // Fahrzeuge aus der Objektverwaltung mit der Person als Besitzer, im selben Bereich und soweit sichtbar
       can(req, 'vehicle:read') ? many(`SELECT v.id, v.plate, v.make_model, v.status FROM vehicles v
         WHERE v.owner_person_id=$3 AND ${typeArea('v')} AND ${visibleSql('v', 'vehicle')} ORDER BY v.status = 'retired', v.plate`, p) : null,
+      // Schlüssel, die die Person gerade hat oder verloren hat (Ausgabe noch offen), im selben Bereich und soweit sichtbar
+      can(req, 'key:read') ? many(`SELECT a.id, k.id key_id, k.code, k.label, k.kind, a.copy_no, a.issued_at, a.due_at, a.lost_at, a.receipt_signed,
+          COALESCE(pr.name, ve.make_model || ' (' || ve.plate || ')') object_name
+        FROM key_assignments a JOIN keys k ON k.id=a.key_id LEFT JOIN properties pr ON pr.id=k.property_id LEFT JOIN vehicles ve ON ve.id=k.vehicle_id
+        WHERE a.person_id=$3 AND a.returned_at IS NULL AND ${typeArea('k')} AND ${visibleSql('k', 'key')} ORDER BY a.issued_at DESC`, p) : null,
     ]);
     // Vorstrafen: Summe der verurteilten Anklagepunkte (Strafe je Punkt mal Anzahl)
     const convicted = charges.filter((c) => c.status === 'convicted');
@@ -91,7 +100,7 @@ export default async function routes(app) {
       jail: convicted.reduce((sum, c) => sum + c.jail * c.count, 0),
       points: convicted.reduce((sum, c) => sum + c.points * c.count, 0),
     };
-    return { person, area: owner, level, file, case_files: caseFiles, warrants, charges, totals, reports, evidence, vehicles, entries, licenses, trainings, owned_vehicles: ownedVehicles };
+    return { person, area: owner, level, file, case_files: caseFiles, warrants, charges, totals, reports, evidence, vehicles, entries, licenses, trainings, owned_vehicles: ownedVehicles, keys };
   });
 
   app.put('/person-files/:personId', authz('casefile:update'), async (req) => {

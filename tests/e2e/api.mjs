@@ -568,6 +568,16 @@ check('Fahrzeug automatisch in der Personenakte', ownerFile.owned_vehicles?.some
 check('Fremder Bereich zeigt das Fahrzeug nicht', (await dave.get(`/person-files/${ownerPerson.id}`)).data.owned_vehicles?.length === 0);
 const ownerDelete = await alice.del(`/people/${ownerPerson.id}`);
 check('Person mit Fahrzeug lässt sich nicht löschen', ownerDelete.status === 400 && /Fahrzeuge/.test(ownerDelete.data?.message), JSON.stringify(ownerDelete));
+// Personen laufen über die Personenakten (Seite „Personen“ ausgeblendet): Liste mit Schlüsselzahl und Filter „Inaktiv“, Akte mit Schlüsseln
+const hansRow = (await alice.get('/person-files?q=Hans')).data.find((p) => p.id === person.id);
+check('Personenliste mit Art, Funktion und Schlüsselzahl', hansRow && typeof hansRow.keys === 'number' && 'kind' in hansRow && 'function' in hansRow, JSON.stringify(hansRow));
+const hansFile = ok('Personenakte mit Schlüsseln', await alice.get(`/person-files/${person.id}`));
+check('Verlorener Schlüssel steht in der Personenakte', hansFile.keys?.some((k) => k.label === 'Haustür' && k.lost_at && k.object_name === 'Haus A'), JSON.stringify(hansFile.keys));
+check('Fremder Bereich zeigt keine Schlüssel', (await dave.get(`/person-files/${person.id}`)).data.keys?.length === 0);
+ok('Besitzerin inaktiv setzen', await alice.patch(`/people/${ownerPerson.id}`, { active: false }));
+const inactiveRows = (await alice.get('/person-files?only=inactive')).data;
+check('Filter „Inaktiv“', inactiveRows.some((p) => p.id === ownerPerson.id) && inactiveRows.every((p) => !p.active), inactiveRows.map((p) => p.name).join());
+invalid('Unbekannter Filter', await alice.get('/person-files?only=alle'));
 check('Stufe bei Schlüsseln', (await roleOf(carol, '/keys', teamKey.id)) === 2);
 const teamIssue = ok('Team-Schlüssel ausgeben', await alice.post(`/keys/${teamKey.id}/assign`, { person_id: teamPerson.id }));
 denied('Viewer gibt nicht aus', await carol.post(`/keys/${teamKey.id}/assign`, { person_id: teamPerson.id }));

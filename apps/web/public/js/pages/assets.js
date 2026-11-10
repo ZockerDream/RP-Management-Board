@@ -7,34 +7,9 @@ import { openGalleryModal } from '../gallery.js';
 const STATUS = { available: ['ok', 'Verfügbar'], out: ['warn', 'Ausgegeben'], overdue: ['bad', 'Überfällig'], lost: ['bad', 'Verloren'] };
 const VSTATUS = { available: 'Verfügbar', in_use: 'Im Einsatz', workshop: 'Werkstatt', retired: 'Ausgemustert' };
 const PTYPE = { home: 'Wohnung/Haus', office: 'Büro', storage: 'Lager', holiday: 'Ferienobjekt' };
-const PKIND = { employee: 'Mitarbeiter', external: 'Extern', family: 'Familie' };
 const INTERVAL = { once: 'Einmalig', daily: 'Täglich', weekly: 'Wöchentlich', monthly: 'Monatlich', yearly: 'Jährlich', custom: 'Benutzerdefiniert (Tage)' };
 const INTERVAL_UNITS = { daily: 'Tage', weekly: 'Wochen', monthly: 'Monate', yearly: 'Jahre', custom: 'Tage' };
 const EVENT = { issued: 'Ausgegeben', returned: 'Zurückgegeben', lost: 'Als verloren gemeldet' };
-const CASE_STATUS = { open: 'Offen', dormant: 'Ruhend', closed: 'Abgeschlossen' };
-const LICENSE_STATUS = { valid: 'Gültig', suspended: 'Gesperrt', revoked: 'Entzogen' };
-const TRAINING_RESULT = { registered: 'Angemeldet', passed: 'Bestanden', failed: 'Nicht bestanden', absent: 'Nicht erschienen' };
-
-// Personenübersicht: Akten, Einträge, Lizenzen und Schulungen zu einer Person, soweit die eigenen Rechte reichen
-async function showPersonRecord(personId) {
-  const r = await api.get(`/people/${personId}/record`);
-  const section = (title, list, row, none) => (list === null ? '' : `<h3>${title}</h3>${list.length ? list.map(row).join('') : `<p class="muted">${none}</p>`}`);
-  const item = (main, sub, href) => `<div class="list-item"><div class="grow">${href ? `<a href="${href}">${main}</a>` : main}<small>${sub}</small></div></div>`;
-  const expired = (date) => date && date < todayStr();
-  const html = [
-    `<p class="muted">${esc([PKIND[r.person.kind], r.person.function, r.person.active ? '' : 'inaktiv'].filter(Boolean).join(' · '))}</p>`,
-    section('Fahrzeuge (Besitzer)', r.vehicles, (v) => item(`<b>${esc(v.plate)}</b> ${esc(v.make_model)}`, `${VSTATUS[v.status]}${v.team_name ? ` · ${esc(v.team_name)}` : ' · privat'}`, '#/assets-vehicles'), 'Keine Fahrzeuge.'),
-    section('Akten', r.case_files, (c) => item(`<b>${esc(c.file_number)}</b> ${esc(c.title)}`, `${CASE_STATUS[c.status]}${c.role ? ` · ${esc(c.role)}` : ''} · eröffnet ${fdate(c.opened_on)}`, `#/casefiles?id=${c.id}`), 'An keiner Akte beteiligt.'),
-    section('Einträge zur Person', r.entries, (e) => item(`<b>${fdate(e.entry_date)}</b> ${esc(e.kind || 'Eintrag')}`, `${esc(e.file_number)} · ${esc(e.body.length > 140 ? `${e.body.slice(0, 140)}…` : e.body)}`, `#/casefiles?id=${e.case_file_id}`), 'Keine Einträge.'),
-    section('Lizenzen', r.licenses, (l) => item(`<b>${esc(l.type_name)}</b>${l.number ? ` ${esc(l.number)}` : ''}`, `${LICENSE_STATUS[l.status]}${l.status === 'valid' && expired(l.valid_until) ? ' · abgelaufen' : ''} · ${l.valid_until ? `gültig bis ${fdate(l.valid_until)}` : 'unbefristet'}${l.status_reason ? ` · ${esc(l.status_reason)}` : ''}`, '#/licenses'), 'Keine Lizenzen.'),
-    section('Schulungen', r.trainings, (t) => item(`<b>${esc(t.training_name)}</b>`, `${TRAINING_RESULT[t.result]}${t.completed_on ? ` am ${fdate(t.completed_on)}` : t.session_date ? ` für ${fdate(t.session_date)}` : ''}${t.result === 'passed' ? ` · ${t.valid_until ? `${expired(t.valid_until) ? 'abgelaufen' : 'gültig bis'} ${fdate(t.valid_until)}` : 'unbefristet'}` : ''}`, null), 'Keine Schulungen.'),
-  ].join('');
-  const done = openForm({ title: r.person.name, wide: true, submit: 'Schließen', fields: [{ type: 'html', html: `<div class="person-record">${html}</div>` }], onSubmit: async () => true });
-  // Ein Link führt auf eine andere Seite: das Fenster schließt sich dabei
-  const modal = $('#modals .modal:last-child');
-  modal?.addEventListener('click', (event) => { if (event.target.closest('a[href^="#/"]')) $('[data-x]', modal).click(); });
-  await done;
-}
 const ASSET_TYPE = { house: 'Haus', vehicle: 'Fahrzeug', key: 'Schlüssel' };
 
 const costFields = (o, budgets) => [
@@ -166,101 +141,19 @@ async function formKey(o, props, vehicles) {
     onSubmit: (v) => save('keys', o, { code: v.code.trim(), label: v.label.trim(), kind: v.kind, copies: Number(v.copies) || 1, property_id: v.property_id || null, vehicle_id: v.vehicle_id || null, note: v.note, ...ownershipBody(v), ...costBody(v) }),
   });
 }
-// Personen sind global: keine Sichtbarkeit, alle mit „Personen lesen“ sehen und nutzen sie
-// Stammdaten: global wie die Person; auch die Personenakte (Akten) bearbeitet sie mit diesem Formular
-export const GENDERS = ['weiblich', 'männlich', 'divers'];
-export function formPerson(o) {
-  return openForm({
-  title: o ? 'Person bearbeiten' : 'Neue Person', wide: true, fields: [
-    { name: 'name', label: 'Name', value: o?.name, required: true, maxlength: 100 },
-    { name: 'aliases', label: 'Alias, Spitzname', value: o?.aliases, maxlength: 300 },
-    { name: 'kind', label: 'Art', type: 'select', options: Object.entries(PKIND).map(([v, l]) => ({ v, l })), value: o?.kind || 'employee' },
-    { name: 'function', label: 'Funktion, Beruf', value: o?.function, maxlength: 100 },
-    { name: 'birth_date', label: 'Geburtsdatum', type: 'date', value: o?.birth_date || '' },
-    { name: 'gender', label: 'Geschlecht', value: o?.gender, maxlength: 30, suggestions: GENDERS },
-    { name: 'height_cm', label: 'Größe in cm', type: 'number', min: 30, max: 260, value: o?.height_cm ?? '' },
-    { name: 'nationality', label: 'Staatsangehörigkeit', value: o?.nationality, maxlength: 60 },
-    { name: 'address', label: 'Adresse', value: o?.address, maxlength: 300, full: true },
-    { name: 'phone', label: 'Telefon', value: o?.phone, maxlength: 40 },
-    { name: 'email', label: 'E-Mail', type: 'email', value: o?.email },
-    { name: 'features', label: 'Besondere Merkmale', type: 'textarea', rows: 2, value: o?.features, maxlength: 1000, full: true, placeholder: 'z. B. Tattoo am Hals, Narbe linke Wange' },
-    { name: 'active', label: 'Aktiv', type: 'checkbox', value: o ? o.active : true },
-    { name: 'note', label: 'Notiz', type: 'textarea', value: o?.note, full: true, help: 'Stammdaten und Notiz sehen alle Benutzer mit Zugriff auf Personen. Was nur eine Organisation wissen soll, gehört in deren Personenakte.' },
-  ],
-  onSubmit: (v) => save('people', o, {
-    name: v.name.trim(), aliases: v.aliases.trim(), kind: v.kind, function: v.function.trim(), birth_date: v.birth_date || null, gender: v.gender.trim(),
-    height_cm: v.height_cm ? Number(v.height_cm) : null, nationality: v.nationality.trim(), address: v.address.trim(), phone: v.phone.trim(), email: v.email.trim(),
-    features: v.features.trim(), active: v.active, note: v.note,
-  }),
-  });
-}
-
-// Excel speichert CSV oft als Windows-1252 statt UTF-8; ohne diesen Rückfall würden Umlaute kaputtgehen
-async function readCsvFile(file) {
-  const bytes = await file.arrayBuffer();
-  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { return new TextDecoder('windows-1252').decode(bytes); }
-}
-const count = (n, one, many) => `${n.toLocaleString('de-DE')} ${n === 1 ? one : many}`;
-function importResultHtml(r) {
-  // In der Vorschau „wird/werden angelegt“, danach nur „angelegt“
-  const will = (n, word) => (r.preview ? `${n === 1 ? 'wird' : 'werden'} ${word}` : word);
-  const parts = [[r.created, 'neue Person', 'neue Personen', (n) => will(n, 'angelegt')], [r.updated, 'Person', 'Personen', (n) => will(n, 'geändert')],
-    [r.unchanged, 'Person', 'Personen', () => 'unverändert'], [r.skipped, 'Zeile', 'Zeilen', () => 'übersprungen'], [r.errors, 'Zeile', 'Zeilen', () => 'fehlerhaft']]
-    .filter(([n]) => n > 0).map(([n, one, many, verb]) => `${count(n, one, many)} ${verb(n)}`);
-  const nothing = !r.created && !r.updated;
-  const head = `<div class="note ${nothing ? 'warn' : 'info'}"><b>${r.preview ? 'Prüfung' : 'Import'}:</b> ${parts.join(' · ') || 'keine Personen gefunden'}${nothing && r.preview ? '. Nichts zu importieren.' : r.preview ? '. Fehlerhafte und übersprungene Zeilen werden nicht importiert.' : ''}</div>`;
-  const ignored = r.ignored_columns.length ? `<p class="muted">Nicht erkannte Spalten werden ignoriert: ${esc(r.ignored_columns.join(', '))}</p>` : '';
-  const problems = r.problems.length ? `<div class="person-record" style="max-height:220px;overflow:auto">${r.problems.map((p) => `<div class="list-item"><div class="grow"><b>Zeile ${p.line}</b>${p.name ? ` ${esc(p.name)}` : ''}<small>${p.kind === 'error' ? 'Fehler' : 'Übersprungen'}: ${esc(p.message)}</small></div></div>`).join('')}
-    ${r.problems.length < r.errors + r.skipped ? `<p class="muted">… und ${r.errors + r.skipped - r.problems.length} weitere</p>` : ''}</div>` : '';
-  return head + ignored + problems;
-}
-// CSV-Import in zwei Schritten: „Prüfen“ zeigt, was passieren würde, „Importieren“ schreibt genau diese Datei
-async function importPeople() {
-  let checked = null;
-  const done = openForm({
-    title: 'Personen importieren', wide: true, submit: 'Prüfen',
-    fields: [
-      { type: 'html', html: `<p class="muted">CSV-Datei mit Kopfzeile, getrennt durch Semikolon, Komma oder Tab. Spalten wie beim CSV-Export: <b>Name</b> (Pflicht), Art (Mitarbeiter, Extern oder Familie), Funktion, Telefon, E-Mail, Aktiv (ja oder nein), Notiz. Zeilen <b>mit ID</b> ändern die vorhandene Person, Zeilen ohne ID legen eine neue an; gibt es den Namen schon, wird die Zeile übersprungen. Fehlende Spalten bleiben unverändert. Am einfachsten exportierst du die Liste, bearbeitest sie und liest sie wieder ein.</p>` },
-      { name: 'file', label: 'CSV-Datei', type: 'file', accept: '.csv,.txt,text/csv', required: true, full: true },
-      { type: 'html', html: '<div id="p-import-result"></div>' },
-    ],
-    onSubmit: async (_values, modal) => {
-      const file = $('#f-file', modal).files[0];
-      if (!file) throw new Error('Wähle eine CSV-Datei aus');
-      const csv = await readCsvFile(file);
-      const submit = $('button[type=submit]', modal);
-      if (csv !== checked) {
-        const r = await api.post('/people/import', { csv, preview: true });
-        $('#p-import-result', modal).innerHTML = importResultHtml(r);
-        checked = r.created || r.updated ? csv : null;
-        submit.textContent = checked ? 'Importieren' : 'Prüfen';
-        return false;
-      }
-      const r = await api.post('/people/import', { csv });
-      toast(`Import: ${count(r.created, 'Person', 'Personen')} angelegt, ${r.updated} geändert${r.errors + r.skipped ? `, ${r.errors + r.skipped} Zeilen nicht übernommen` : ''}`);
-      return true;
-    },
-  });
-  // Neue Datei gewählt: erst wieder prüfen
-  const modal = $('#modals .modal:last-child');
-  $('#f-file', modal)?.addEventListener('change', () => { checked = null; $('button[type=submit]', modal).textContent = 'Prüfen'; $('#p-import-result', modal).innerHTML = ''; });
-  return done;
-}
 
 // Stufe in der Organisation: ändern ab „Lesen & Schreiben“, löschen mit „Verwalten“; dazu die allgemeinen Rechte der Rolle.
-// Personen sind global und haben keine Stufe: Für sie zählen allein die Rechte der Rolle.
+// Personen werden seit 2026-11-10 nur noch unter „Akten → Personenakten“ gepflegt (person-files.js).
 const writable = (item) => item.level >= 3;
 const actions = (item, perm) => {
-  const global = perm === 'person';
-  const edit = can(`${perm}:update`) && (global || writable(item));
-  const del = can(`${perm}:delete`) && (global || item.level >= 4);
+  const edit = can(`${perm}:update`) && writable(item);
+  const del = can(`${perm}:delete`) && item.level >= 4;
   return `${edit ? `<button class="btn ghost sm" data-edit="${item.id}">Bearbeiten</button>` : ''}${del ? ` <button class="btn ghost sm" data-del="${item.id}">Löschen</button>` : ''}`;
 };
 
 const SECTIONS = {
   vehicles: { title: 'Fahrzeuge', desc: 'Fuhrpark, Service und Kosten', tabs: [['vehicles', 'Fahrzeuge']] },
   properties: { title: 'Häuser', desc: 'Häuser, Wohnungen und Wartung', tabs: [['properties', 'Häuser']] },
-  people: { title: 'Personen', desc: 'Gemeinsame Personenliste für alle: Mitarbeiter, Familie und Externe', tabs: [['people', 'Personen']] },
   keys: { title: 'Schlüssel', desc: 'Schlüsselbestand und Ausgabe', tabs: [['keys', 'Schlüssel']] },
   manage: { title: 'Verwaltung', desc: 'Übersicht, Kosten, Protokoll und Auditlog', tabs: [['overview', 'Übersicht'], ['costs', 'Kosten'], ['log', 'Protokoll'], ['audit', 'Auditlog']] },
 };
@@ -273,16 +166,18 @@ export async function render(view, params, section) {
   let scannerActive = false;
   let cameraStream = null;
   const legacy = params?.get('tab');
+  // Die Seite „Personen“ ist ausgeblendet (Wunsch des Auftraggebers vom 2026-11-10): alte Links führen zu den Personenakten
+  if (section === 'people' || (!section && legacy === 'people')) { location.replace('#/casefiles?tab=people'); return; }
   if (!SECTIONS[section]) section = SECTIONS[legacy] ? legacy : LEGACY_TAB[legacy] || 'vehicles';
   const meta = SECTIONS[section];
-  const perms = { keys: 'key:read', properties: 'property:read', vehicles: 'vehicle:read', people: 'person:read', audit: 'audit:read' };
+  const perms = { keys: 'key:read', properties: 'property:read', vehicles: 'vehicle:read', audit: 'audit:read' };
   const tabs = meta.tabs.filter(([k]) => can(perms[k] || 'key:read') || k === 'overview');
   const initial = tabs.some(([k]) => k === legacy) ? legacy : tabs[0]?.[0];
   view.innerHTML = `<div class="page-head"><div><h1>${meta.title}</h1><p>${meta.desc}</p></div><div class="actions" id="a-actions"></div></div>
     <div><div class="tabs" ${tabs.length < 2 ? 'hidden' : ''}>${tabs.map(([k, l]) => `<button data-tab="${k}" class="${k === initial ? 'on' : ''}">${l}</button>`).join('')}</div>${tabs.map(([k]) => `<div class="tab-panel ${k === initial ? 'on' : ''}" data-panel="${k}"></div>`).join('')}</div>`;
   if (!tabs.length) { view.innerHTML += `<div class="card"><p class="muted">Keine Berechtigung.</p></div>`; return; }
 
-  const ADD = { keys: ['key:create', 'Neuer Schlüssel'], properties: ['property:create', 'Neues Haus'], vehicles: ['vehicle:create', 'Neues Fahrzeug'], people: ['person:create', 'Neue Person'] };
+  const ADD = { keys: ['key:create', 'Neuer Schlüssel'], properties: ['property:create', 'Neues Haus'], vehicles: ['vehicle:create', 'Neues Fahrzeug'] };
   const cur = () => $('.tabs .on', view).dataset.tab;
   const fetchAll = async () => {
     const [props, vehicles, people, keys] = await Promise.all([api.get('/properties').catch(() => []), api.get('/vehicles').catch(() => []), api.get('/people').catch(() => []), api.get('/keys').catch(() => [])]);
@@ -334,11 +229,6 @@ export async function render(view, params, section) {
         return can('casefile:read') && can('person:read') ? `<a href="#/casefiles?person=${v.owner_person_id}">${esc(v.owner_person_name)}</a>` : esc(v.owner_person_name || '–');
       };
       el.innerHTML = `<div class="card">${D.vehicles.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Kennzeichen</th><th>Modell</th><th>Besitzer</th><th>Status</th><th>Service</th><th>Verbandskasten</th><th>Schlüssel-Inventur</th><th>Kosten</th><th></th></tr></thead><tbody>${D.vehicles.map((v) => `<tr${v.status === 'retired' ? ' class="muted"' : ''}><td><b>${esc(v.plate)}</b></td><td>${esc(v.make_model)}</td><td>${owner(v)}</td><td>${v.status === 'retired' ? `<span class="tag">${VSTATUS[v.status]}</span>` : VSTATUS[v.status]}</td><td>${fdate(v.service_due)}${v.service_due_km != null ? `<br><small class="muted">bei ${Number(v.service_due_km).toLocaleString('de-DE')} km</small>` : ''}</td><td>${fdate(v.first_aid_kit_expires_on)}</td><td>${keyInventory('vehicle_id', v.id, 'vehicle')}</td><td>${v.cost_amount ? `${eur(v.cost_amount)} ${costIntervalText(v.cost_interval, v.cost_interval_count)}` : '–'}</td><td style="white-space:nowrap"><button class="btn ghost sm" data-images="${v.id}">Bilder${v.images ? ` (${v.images})` : ''}</button> ${actions(v, 'vehicle')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Fahrzeuge.')}</div>`;
-    },
-    async people(el) {
-      await fetchAll();
-      const tools = `${can('person:export') ? '<button class="btn ghost sm" id="p-csv">CSV-Export</button>' : ''}${can('person:create') ? '<button class="btn ghost sm" id="p-import">CSV-Import</button>' : ''}`;
-      el.innerHTML = `<div class="card">${tools ? `<div class="toolbar">${tools}</div>` : ''}${D.people.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Art</th><th>Funktion</th><th>Kontakt</th><th>Schlüssel</th><th>Status</th><th></th></tr></thead><tbody>${D.people.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td>${PKIND[p.kind]}</td><td>${esc(p.function)}</td><td>${esc(p.email || p.phone || '–')}</td><td>${p.keys}</td><td><span class="tag ${p.active ? 'ok' : 'warn'}">${p.active ? 'Aktiv' : 'Inaktiv'}</span></td><td style="white-space:nowrap">${can('casefile:read') ? `<a class="btn ghost sm" href="#/casefiles?person=${p.id}">Personenakte</a>` : `<button class="btn ghost sm" data-record="${p.id}">Übersicht</button>`} ${actions(p, 'person')}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Personen.')}</div>`;
     },
     async costs(el) {
       const c = await api.get('/assets/costs');
@@ -463,11 +353,11 @@ export async function render(view, params, section) {
       if (g('#a-new') || g('[data-edit]')) {
         await fetchAll();
         const rid = g('[data-edit]')?.dataset.edit;
-        const list = { keys: D.keys, properties: D.props, vehicles: D.vehicles, people: D.people }[k];
+        const list = { keys: D.keys, properties: D.props, vehicles: D.vehicles }[k];
         const o = rid ? list.find((x) => x.id === rid) : null;
-        changed = await ({ keys: () => formKey(o, D.props, D.vehicles), properties: () => formProperty(o, D.people), vehicles: () => formVehicle(o, D.people), people: () => formPerson(o) }[k]());
+        changed = await ({ keys: () => formKey(o, D.props, D.vehicles), properties: () => formProperty(o, D.people), vehicles: () => formVehicle(o, D.people) }[k]());
       } else if (g('[data-del]')) {
-        if (await confirmBox('Löschen', 'Eintrag wirklich löschen? Verknüpfte Kosten-Daueraufträge werden ebenfalls entfernt.')) { await api.del(`/${{ keys: 'keys', properties: 'properties', vehicles: 'vehicles', people: 'people' }[k]}/${id.del}`); changed = true; }
+        if (await confirmBox('Löschen', 'Eintrag wirklich löschen? Verknüpfte Kosten-Daueraufträge werden ebenfalls entfernt.')) { await api.del(`/${{ keys: 'keys', properties: 'properties', vehicles: 'vehicles' }[k]}/${id.del}`); changed = true; }
       } else if (g('[data-assign]')) changed = await assign(D.keys.find((x) => x.id === id.assign));
       else if (g('[data-ret]')) { await api.post(`/assignments/${g('[data-ret]').dataset.ret}/return`); changed = true; }
       else if (g('[data-lost]') && (await confirmBox('Schlüssel verloren', 'Als verloren melden? Die Kopie bleibt bis zur Klärung blockiert.', 'Melden'))) { await api.post(`/assignments/${g('[data-lost]').dataset.lost}/lost`); changed = true; }
@@ -480,7 +370,6 @@ export async function render(view, params, section) {
       else if (g('[data-reveal-pin]')) await pinAccess(g('[data-reveal-pin]').dataset.revealPin, true);
       else if (g('[data-set-pin]')) { await pinAccess(g('[data-set-pin]').dataset.setPin, false); show('properties'); }
       else if (g('[data-qr]')) await showKeyQr(g('[data-qr]').dataset.qr);
-      else if (g('[data-record]')) await showPersonRecord(g('[data-record]').dataset.record);
       else if (g('[data-images]')) {
         const vehicle = D.vehicles.find((v) => v.id === g('[data-images]').dataset.images);
         changed = await openGalleryModal({
@@ -491,8 +380,6 @@ export async function render(view, params, section) {
       }
       else if (g('#scan-keys')) await scanKeyQr();
       else if (g('#a-csv')) await api.download('/admin/audit/export.csv', 'audit.csv');
-      else if (g('#p-csv')) await api.download('/people/export.csv', 'personen.csv');
-      else if (g('#p-import')) changed = await importPeople();
       if (changed) show();
     } catch (x) { toast(x.message, true); }
   });
