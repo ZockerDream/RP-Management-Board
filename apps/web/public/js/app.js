@@ -45,6 +45,7 @@ const PAGES = {
   'assets-manage': { perm: 'key:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'manage') })) },
   assets: { perm: 'key:read', load: () => import('./pages/assets.js') },
   help: { perm: null, load: () => import('./pages/help.js') },
+  changelog: { perm: null, load: () => import('./pages/changelog.js') },
   'admin-users': { perm: 'admin:access', load: () => import('./pages/admin.js').then((m) => ({ render: (view, params) => m.render(view, params, 'users') })) },
   'admin-server': { perm: 'admin:access', load: () => import('./pages/admin.js').then((m) => ({ render: (view, params) => m.render(view, params, 'server') })) },
   'admin-tickets': { perm: 'admin:access', load: () => import('./pages/admin.js').then((m) => ({ render: (view, params) => m.render(view, params, 'tickets') })) },

@@ -249,7 +249,8 @@ Der Server liefert für `[from, to]` die Vereinigung aus eigenen Terminen und ab
 
 ## 8. Frontend
 
-- Routen in `PAGES` (`app.js`), jeweils mit optionalem Recht. Seiten: `dashboard`, `transactions`, `work`, `budgets`, `spending`, `recurring`, `goals`, `reports`, `teams`, `calendar`, `notes`, `todos`, `sport-run|swim|bike`, `assets-vehicles|properties|people|keys|manage`, `casefiles`, `trainings`, `licenses`, `docs` (Direktlinks `?id=` bzw. `?page=`), `admin-users|server|tickets`, `help`, `bug-report`, `settings`, `impressum`, `datenschutz`. Alias: `assets`, `admin`.
+- Routen in `PAGES` (`app.js`), jeweils mit optionalem Recht. Seiten: `dashboard`, `transactions`, `work`, `budgets`, `spending`, `recurring`, `goals`, `reports`, `teams`, `calendar`, `notes`, `todos`, `sport-run|swim|bike`, `assets-vehicles|properties|people|keys|manage`, `casefiles`, `trainings`, `licenses`, `docs` (Direktlinks `?id=` bzw. `?page=`), `admin-users|server|tickets`, `help`, `changelog`, `bug-report`, `settings`, `impressum`, `datenschutz`. Alias: `assets`, `admin`.
+- Changelog: Die Daten stehen in `js/changelog.js` (`CHANGELOG` neueste zuerst mit `version`, `date`, `migrations`, `title`, `changes: [[art, text]]`, dazu `UNRELEASED`), ohne DOM, damit `test/changelog.test.js` sie prüft: oberste Version = `package.json`, absteigende Versionen und Daten bis `0.0.0`, nur bekannte Arten, kein HTML. Die Seite `pages/changelog.js` filtert im Browser; die oberste Version gilt als installiert, weil Seite und Code aus demselben Build kommen.
 - Bei jedem Seitenwechsel wird `#view` ersetzt; Listener an `view` stapeln sich daher nicht.
 - Navigation wird anhand der Rechte aus `/me` ausgeblendet, Abschnittsüberschriften ohne sichtbaren Eintrag ebenso; das Backend prüft unabhängig davon.
 - Theme: `data-theme` und `data-accent` auf `<html>` steuern CSS-Variablen.
