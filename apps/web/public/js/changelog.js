@@ -5,14 +5,18 @@
 // Beim Release: die Einträge aus UNRELEASED als neue Version oben in CHANGELOG eintragen und UNRELEASED leeren.
 // Arten: new = Neu, changed = Geändert, fixed = Behoben, tech = Technik und Betrieb
 
-export const UNRELEASED = [
-  ['new', 'Tags für Notizen: Eine Notiz kann beliebig viele Tags tragen (vorgegeben BLOCKED, INVALID, DONE und WIP), gesetzt über den Knopf „Tags“ oder im Formular. Der Notizblock filtert nach Tag, die Suche findet Tag-Namen.'],
-  ['new', 'Notizen archivieren: Der Knopf „Archivieren“ nimmt eine Notiz aus der Ansicht „Offen“, „Wiederherstellen“ holt sie zurück. Oben rechts wechselst du zwischen Offen, Archiv und Alle. Das Archiv gilt für alle, die die Notiz sehen.'],
-  ['new', 'Server-Management → Notiz-Tags: Tags anlegen, umbenennen, einfärben, sortieren und löschen (die Notizen bleiben).'],
-  ['fixed', 'Das Update hing auf manchen Servern ohne Meldung beim Bauen („npm ci“), weil der Build-Container über Dockers Netz nicht ins Internet kam. Gebaut wird jetzt im Netz des Hosts; die laufenden Container bleiben in ihrem eigenen Netz.'],
-];
+export const UNRELEASED = [];
 
 export const CHANGELOG = [
+  {
+    version: '1.2.4', date: '2026-11-10', migrations: '023', title: 'Notiz-Tags und Archiv',
+    changes: [
+      ['new', 'Tags für Notizen: Eine Notiz kann beliebig viele Tags tragen (vorgegeben BLOCKED, INVALID, DONE und WIP), gesetzt über den Knopf „Tags“ oder im Formular. Der Notizblock filtert nach Tag, die Suche findet Tag-Namen.'],
+      ['new', 'Notizen archivieren: Der Knopf „Archivieren“ nimmt eine Notiz aus der Ansicht „Offen“, „Wiederherstellen“ holt sie zurück. Oben rechts wechselst du zwischen Offen, Archiv und Alle. Das Archiv gilt für alle, die die Notiz sehen.'],
+      ['new', 'Server-Management → Notiz-Tags: Tags anlegen, umbenennen, einfärben, sortieren und löschen (die Notizen bleiben).'],
+      ['fixed', 'Das Update hing auf manchen Servern ohne Meldung beim Bauen („npm ci“), weil der Build-Container über Dockers Netz nicht ins Internet kam. Gebaut wird jetzt im Netz des Hosts; die laufenden Container bleiben in ihrem eigenen Netz.'],
+    ],
+  },
   {
     version: '1.2.3', date: '2026-11-10', migrations: '', title: 'Personen über die Personenakten',
     changes: [
