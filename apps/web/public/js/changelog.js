@@ -5,7 +5,9 @@
 // Beim Release: die Einträge aus UNRELEASED als neue Version oben in CHANGELOG eintragen und UNRELEASED leeren.
 // Arten: new = Neu, changed = Geändert, fixed = Behoben, tech = Technik und Betrieb
 
-export const UNRELEASED = [];
+export const UNRELEASED = [
+  ['fixed', 'Das Update hing auf manchen Servern ohne Meldung beim Bauen („npm ci“), weil der Build-Container über Dockers Netz nicht ins Internet kam. Gebaut wird jetzt im Netz des Hosts; die laufenden Container bleiben in ihrem eigenen Netz.'],
+];
 
 export const CHANGELOG = [
   {
