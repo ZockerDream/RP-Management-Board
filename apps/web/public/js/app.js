@@ -40,7 +40,8 @@ const PAGES = {
   docs: { perm: 'doc:read', load: () => import('./pages/docs.js') },
   'assets-vehicles': { perm: 'vehicle:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'vehicles') })) },
   'assets-properties': { perm: 'property:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'properties') })) },
-  'assets-people': { perm: 'person:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'people') })) },
+  // Ausgeblendet seit 2026-11-10: Personen laufen über „Akten → Personenakten“; alte Links leitet assets.js dorthin um
+  'assets-people': { perm: null, load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'people') })) },
   'assets-keys': { perm: 'key:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'keys') })) },
   'assets-manage': { perm: 'key:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'manage') })) },
   assets: { perm: 'key:read', load: () => import('./pages/assets.js') },

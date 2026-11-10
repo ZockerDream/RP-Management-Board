@@ -5,7 +5,11 @@
 // Beim Release: die Einträge aus UNRELEASED als neue Version oben in CHANGELOG eintragen und UNRELEASED leeren.
 // Arten: new = Neu, changed = Geändert, fixed = Behoben, tech = Technik und Betrieb
 
-export const UNRELEASED = [];
+export const UNRELEASED = [
+  ['changed', 'Personen werden nur noch unter „Akten → Personenakten“ gepflegt; die Seite „Personen“ unter Object Management ist ausgeblendet, alte Links führen zu den Personenakten.'],
+  ['new', 'Personenakten mit CSV-Export und -Import, „Person löschen“, Art und Funktion, Zahl der ausgegebenen Schlüssel und Filter „Inaktiv“.'],
+  ['new', 'Abschnitt „Schlüssel“ in der Personenakte: ausgegebene und verlorene Schlüssel mit Objekt und Rückgabefrist.'],
+];
 
 export const CHANGELOG = [
   {

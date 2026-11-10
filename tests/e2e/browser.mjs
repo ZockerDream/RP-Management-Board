@@ -66,7 +66,14 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await login(page, 'alice@e2e.test', 'alice-Sehr-Sicher-9931!');
   const navs = await page.$$eval('.sidebar a.nav', (ns) => ns.filter((n) => n.offsetParent !== null).map((n) => n.getAttribute('href')));
   check('User sieht keine Admin-Links', !navs.some((h) => h.includes('admin')), navs.join());
-  for (const want of ['#/changelog', '#/notes', '#/todos', '#/spending', '#/sport-run', '#/sport-swim', '#/sport-bike', '#/assets-vehicles', '#/assets-properties', '#/assets-people', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/datenschutz', '#/impressum']) check(`Nav ${want}`, navs.includes(want));
+  // Personen laufen seit 2026-11-10 über die Personenakten; alte Links führen dorthin
+  check('Keine eigene Seite „Personen“ mehr', !navs.includes('#/assets-people'), navs.join());
+  for (const old of ['#/assets-people', '#/assets?tab=people']) {
+    await page.evaluate((h) => { location.hash = h; }, old);
+    await until(page, () => location.hash === '#/casefiles?tab=people' && !!document.querySelector('#pf-q')).catch(() => {});
+    check(`Alter Link ${old} führt zu den Personenakten`, (await page.evaluate(() => location.hash)) === '#/casefiles?tab=people' && !!(await page.$('#pf-q')), await page.evaluate(() => location.hash));
+  }
+  for (const want of ['#/changelog', '#/notes', '#/todos', '#/spending', '#/sport-run', '#/sport-swim', '#/sport-bike', '#/assets-vehicles', '#/assets-properties', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/datenschutz', '#/impressum']) check(`Nav ${want}`, navs.includes(want));
   for (const h of navs) {
     at(`alice ${h}`);
     await go(page, h);
@@ -530,10 +537,12 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.keyboard.press('Escape');
   await page.evaluate(() => document.querySelectorAll('#modals .modal').forEach((m) => m.remove()));
   at('alice personen csv');
-  await go(page, '#/assets-people');
-  const [peopleDownload] = await Promise.all([page.waitForEvent('download'), page.click('#p-csv')]);
+  await go(page, '#/casefiles?tab=people');
+  await page.waitForSelector('#pf-csv');
+  const [peopleDownload] = await Promise.all([page.waitForEvent('download'), page.click('#pf-csv')]);
   check('Personen-Export lädt personen.csv', peopleDownload.suggestedFilename() === 'personen.csv');
-  await page.click('#p-import');
+  check('Personenliste mit Art, Funktion und Schlüsseln', /Art, Funktion/.test(await page.textContent('#view thead')) && /Schlüssel/.test(await page.textContent('#view thead')));
+  await page.click('#pf-import');
   await page.waitForSelector('.modal.open #f-file');
   // Wie aus Excel: Windows-1252 statt UTF-8; „Hans“ gibt es schon
   await page.setInputFiles('.modal.open #f-file', { name: 'personen.csv', mimeType: 'text/csv', buffer: Buffer.from('Name;Art;Notiz\r\nJürgen Ümlaut;Extern;aus Excel\r\nHans;;\r\n', 'latin1') });
@@ -546,7 +555,34 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.click('.modal.open button[type=submit]');
   await until(page, () => !document.querySelector('.modal.open'));
   await settle(page);
+  await until(page, () => /Jürgen Ümlaut/.test(document.querySelector('#view')?.textContent || '')).catch(() => {});
   check('Importierte Person mit Umlauten in der Liste', /Jürgen Ümlaut/.test(await page.textContent('#view')));
+  // Schlüssel und Löschen in der Personenakte (früher auf der Seite „Personen“); Hans' Schlüssel liegt in Alices privatem Bereich
+  await page.selectOption('#pf-area', '');
+  await page.waitForTimeout(400);
+  await page.fill('#pf-q', 'Hans');
+  // Erst klicken, wenn genau diese Person dasteht: vorher zeigt die Liste noch die alte Suche
+  await until(page, (n) => { const rows = document.querySelectorAll('#view [data-pf-open]'); return rows.length === 1 && rows[0].closest('tr').textContent.includes(n); }, 'Hans').catch(() => {});
+  await page.click('#view [data-pf-open]');
+  await page.waitForSelector('#view .person-head');
+  const hansText = await page.textContent('#view .person-file');
+  check('Personenakte zeigt Schlüssel samt Verlust', /Schlüssel/.test(hansText) && /Haustür/.test(hansText) && /Verloren/.test(hansText), hansText.slice(0, 200));
+  check('Personenakte bietet „Person löschen“', await page.locator('#pf-delete').count() === 1);
+  await page.click('#pf-back');
+  await page.waitForSelector('#pf-q');
+  await page.fill('#pf-q', 'Jürgen');
+  // Erst klicken, wenn genau diese Person dasteht: vorher zeigt die Liste noch die alte Suche
+  await until(page, (n) => { const rows = document.querySelectorAll('#view [data-pf-open]'); return rows.length === 1 && rows[0].closest('tr').textContent.includes(n); }, 'Jürgen').catch(() => {});
+  await page.click('#view [data-pf-open]');
+  await page.waitForSelector('#pf-delete');
+  await page.click('#pf-delete');
+  await submit(page);
+  await page.waitForSelector('#pf-q');
+  await page.fill('#pf-q', 'Jürgen');
+  await page.waitForTimeout(600);
+  check('Person über die Personenakte gelöscht', !/Jürgen Ümlaut/.test(await page.textContent('#view')) && (await page.evaluate(() => location.hash)) === '#/casefiles?tab=people');
+  await page.fill('#pf-q', '');
+  await page.waitForTimeout(500);
   // Aktensystem: Fallakte anlegen, Person beteiligen, Bericht aus Vorlage bis zur Freigabe, Anklage, Beweismittel, Fahndung, Personenakte
   at('alice aktensystem');
   // Nach jeder Aktion lädt die Akte neu: auf den erwarteten Text warten statt auf eine feste Zeit
@@ -923,9 +959,10 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   check('Viewer sieht Team-Schlüssel', /Team-Tor/.test(await page.textContent('#view')));
   check('Viewer ohne Schlüssel-Aktionen', await page.locator('#view [data-edit], #view [data-del], #view [data-assign], #view [data-ret], #view [data-lost]').count() === 0);
   check('Viewer kann QR-Code weiter öffnen', await page.locator('#view [data-qr]').count() > 0);
-  await go(page, '#/assets-people');
+  await go(page, '#/casefiles?tab=people');
+  await page.waitForSelector('#pf-q');
   // Personen sind global: Für sie zählen nur die Rollenrechte, nicht die Stufe in der Organisation
-  check('Viewer sieht Personen und darf sie mit der Rolle User bearbeiten', /Teamer/.test(await page.textContent('#view')) && await page.locator('#view [data-edit]').count() > 0);
+  check('Viewer sieht Personen und darf sie mit der Rolle User anlegen', /Teamer/.test(await page.textContent('#view')) && await page.locator('#pf-new').count() === 1);
   at('carol notizen');
   await go(page, '#/notes');
   const teamNote = page.locator('#n-list .memo', { hasText: 'Team-Notiz' });
@@ -1017,7 +1054,7 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   const { page, at, ctx } = await session({ width: 390, height: 800 });
   at('mobil-login');
   await login(page, 'alice@e2e.test', 'alice-Sehr-Sicher-9931!');
-  for (const h of ['#/dashboard', '#/transactions', '#/work', '#/budgets', '#/spending', '#/recurring', '#/goals', '#/reports', '#/teams', '#/calendar', '#/notes', '#/todos', '#/sport-run', '#/assets-vehicles', '#/assets-properties', '#/assets-people', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/settings', '#/impressum', '#/datenschutz']) {
+  for (const h of ['#/dashboard', '#/transactions', '#/work', '#/budgets', '#/spending', '#/recurring', '#/goals', '#/reports', '#/teams', '#/calendar', '#/notes', '#/todos', '#/sport-run', '#/assets-vehicles', '#/assets-properties', '#/casefiles?tab=people', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/settings', '#/impressum', '#/datenschutz']) {
     at(`mobil ${h}`);
     await go(page, h);
     const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

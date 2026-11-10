@@ -5,7 +5,6 @@ import { $, esc, eur, fdate, fdatetime, tag, openForm, confirmBox, toast, empty,
 import { can } from '../app.js';
 import { markdownBlock } from '../markdown.js';
 import * as P from './case-parts.js';
-import { formPerson } from './assets.js';
 const { CASE_STATUS } = P;
 
 const WARNINGS = ['Bewaffnet', 'Gewaltbereit', 'Fluchtgefahr', 'Suizidgefahr', 'Betäubungsmittel', 'Gang-Mitglied', 'Infektiös', 'Allergie', 'Diabetes', 'Epilepsie', 'Psychisch auffällig'];
@@ -13,8 +12,92 @@ const BLOOD = ['', '0+', '0−', 'A+', 'A−', 'B+', 'B−', 'AB+', 'AB−'];
 const LICENSE_STATUS = { valid: 'Gültig', suspended: 'Gesperrt', revoked: 'Entzogen' };
 const TRAINING_RESULT = { registered: 'Angemeldet', passed: 'Bestanden', failed: 'Nicht bestanden', absent: 'Nicht erschienen' };
 const VEHICLE_STATUS = { available: 'Verfügbar', in_use: 'Im Einsatz', workshop: 'Werkstatt', retired: 'Ausgemustert' };
-const FILTERS = [['', 'Alle Personen'], ['records', 'Mit Akten oder Personenakte'], ['wanted', 'Gesucht'], ['warnings', 'Mit Warnhinweisen']];
+const FILTERS = [['', 'Alle Personen'], ['records', 'Mit Akten oder Personenakte'], ['wanted', 'Gesucht'], ['warnings', 'Mit Warnhinweisen'], ['inactive', 'Inaktiv']];
 const photos = new Map();
+
+const PKIND = { employee: 'Mitarbeiter', external: 'Extern', family: 'Familie' };
+// Personen sind global: keine Sichtbarkeit, alle mit „Personen lesen“ sehen und nutzen sie
+// Stammdaten: global wie die Person; auch die Personenakte (Akten) bearbeitet sie mit diesem Formular
+export const GENDERS = ['weiblich', 'männlich', 'divers'];
+export function formPerson(o) {
+  return openForm({
+  title: o ? 'Person bearbeiten' : 'Neue Person', wide: true, fields: [
+    { name: 'name', label: 'Name', value: o?.name, required: true, maxlength: 100 },
+    { name: 'aliases', label: 'Alias, Spitzname', value: o?.aliases, maxlength: 300 },
+    { name: 'kind', label: 'Art', type: 'select', options: Object.entries(PKIND).map(([v, l]) => ({ v, l })), value: o?.kind || 'employee' },
+    { name: 'function', label: 'Funktion, Beruf', value: o?.function, maxlength: 100 },
+    { name: 'birth_date', label: 'Geburtsdatum', type: 'date', value: o?.birth_date || '' },
+    { name: 'gender', label: 'Geschlecht', value: o?.gender, maxlength: 30, suggestions: GENDERS },
+    { name: 'height_cm', label: 'Größe in cm', type: 'number', min: 30, max: 260, value: o?.height_cm ?? '' },
+    { name: 'nationality', label: 'Staatsangehörigkeit', value: o?.nationality, maxlength: 60 },
+    { name: 'address', label: 'Adresse', value: o?.address, maxlength: 300, full: true },
+    { name: 'phone', label: 'Telefon', value: o?.phone, maxlength: 40 },
+    { name: 'email', label: 'E-Mail', type: 'email', value: o?.email },
+    { name: 'features', label: 'Besondere Merkmale', type: 'textarea', rows: 2, value: o?.features, maxlength: 1000, full: true, placeholder: 'z. B. Tattoo am Hals, Narbe linke Wange' },
+    { name: 'active', label: 'Aktiv', type: 'checkbox', value: o ? o.active : true },
+    { name: 'note', label: 'Notiz', type: 'textarea', value: o?.note, full: true, help: 'Stammdaten und Notiz sehen alle Benutzer mit Zugriff auf Personen. Was nur eine Organisation wissen soll, gehört in deren Personenakte.' },
+  ],
+  onSubmit: (v) => (o ? api.patch(`/people/${o.id}`, personBody(v)) : api.post('/people', personBody(v))),
+  });
+}
+const personBody = (v) => ({
+    name: v.name.trim(), aliases: v.aliases.trim(), kind: v.kind, function: v.function.trim(), birth_date: v.birth_date || null, gender: v.gender.trim(),
+    height_cm: v.height_cm ? Number(v.height_cm) : null, nationality: v.nationality.trim(), address: v.address.trim(), phone: v.phone.trim(), email: v.email.trim(),
+    features: v.features.trim(), active: v.active, note: v.note,
+});
+
+// Excel speichert CSV oft als Windows-1252 statt UTF-8; ohne diesen Rückfall würden Umlaute kaputtgehen
+async function readCsvFile(file) {
+  const bytes = await file.arrayBuffer();
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { return new TextDecoder('windows-1252').decode(bytes); }
+}
+const count = (n, one, many) => `${n.toLocaleString('de-DE')} ${n === 1 ? one : many}`;
+function importResultHtml(r) {
+  // In der Vorschau „wird/werden angelegt“, danach nur „angelegt“
+  const will = (n, word) => (r.preview ? `${n === 1 ? 'wird' : 'werden'} ${word}` : word);
+  const parts = [[r.created, 'neue Person', 'neue Personen', (n) => will(n, 'angelegt')], [r.updated, 'Person', 'Personen', (n) => will(n, 'geändert')],
+    [r.unchanged, 'Person', 'Personen', () => 'unverändert'], [r.skipped, 'Zeile', 'Zeilen', () => 'übersprungen'], [r.errors, 'Zeile', 'Zeilen', () => 'fehlerhaft']]
+    .filter(([n]) => n > 0).map(([n, one, many, verb]) => `${count(n, one, many)} ${verb(n)}`);
+  const nothing = !r.created && !r.updated;
+  const head = `<div class="note ${nothing ? 'warn' : 'info'}"><b>${r.preview ? 'Prüfung' : 'Import'}:</b> ${parts.join(' · ') || 'keine Personen gefunden'}${nothing && r.preview ? '. Nichts zu importieren.' : r.preview ? '. Fehlerhafte und übersprungene Zeilen werden nicht importiert.' : ''}</div>`;
+  const ignored = r.ignored_columns.length ? `<p class="muted">Nicht erkannte Spalten werden ignoriert: ${esc(r.ignored_columns.join(', '))}</p>` : '';
+  const problems = r.problems.length ? `<div class="person-record" style="max-height:220px;overflow:auto">${r.problems.map((p) => `<div class="list-item"><div class="grow"><b>Zeile ${p.line}</b>${p.name ? ` ${esc(p.name)}` : ''}<small>${p.kind === 'error' ? 'Fehler' : 'Übersprungen'}: ${esc(p.message)}</small></div></div>`).join('')}
+    ${r.problems.length < r.errors + r.skipped ? `<p class="muted">… und ${r.errors + r.skipped - r.problems.length} weitere</p>` : ''}</div>` : '';
+  return head + ignored + problems;
+}
+// CSV-Import in zwei Schritten: „Prüfen“ zeigt, was passieren würde, „Importieren“ schreibt genau diese Datei
+export async function importPeople() {
+  let checked = null;
+  const done = openForm({
+    title: 'Personen importieren', wide: true, submit: 'Prüfen',
+    fields: [
+      { type: 'html', html: `<p class="muted">CSV-Datei mit Kopfzeile, getrennt durch Semikolon, Komma oder Tab. Spalten wie beim CSV-Export: <b>Name</b> (Pflicht), Art (Mitarbeiter, Extern oder Familie), Funktion, Telefon, E-Mail, Aktiv (ja oder nein), Notiz. Zeilen <b>mit ID</b> ändern die vorhandene Person, Zeilen ohne ID legen eine neue an; gibt es den Namen schon, wird die Zeile übersprungen. Fehlende Spalten bleiben unverändert. Am einfachsten exportierst du die Liste, bearbeitest sie und liest sie wieder ein.</p>` },
+      { name: 'file', label: 'CSV-Datei', type: 'file', accept: '.csv,.txt,text/csv', required: true, full: true },
+      { type: 'html', html: '<div id="p-import-result"></div>' },
+    ],
+    onSubmit: async (_values, modal) => {
+      const file = $('#f-file', modal).files[0];
+      if (!file) throw new Error('Wähle eine CSV-Datei aus');
+      const csv = await readCsvFile(file);
+      const submit = $('button[type=submit]', modal);
+      if (csv !== checked) {
+        const r = await api.post('/people/import', { csv, preview: true });
+        $('#p-import-result', modal).innerHTML = importResultHtml(r);
+        checked = r.created || r.updated ? csv : null;
+        submit.textContent = checked ? 'Importieren' : 'Prüfen';
+        return false;
+      }
+      const r = await api.post('/people/import', { csv });
+      toast(`Import: ${count(r.created, 'Person', 'Personen')} angelegt, ${r.updated} geändert${r.errors + r.skipped ? `, ${r.errors + r.skipped} Zeilen nicht übernommen` : ''}`);
+      return true;
+    },
+  });
+  // Neue Datei gewählt: erst wieder prüfen
+  const modal = $('#modals .modal:last-child');
+  $('#f-file', modal)?.addEventListener('change', () => { checked = null; $('button[type=submit]', modal).textContent = 'Prüfen'; $('#p-import-result', modal).innerHTML = ''; });
+  return done;
+}
+
 const state = { q: '', only: '' };
 
 const age = (birth) => {
@@ -43,12 +126,14 @@ export async function drawPeople(el, ctx, personId) {
   const list = await api.get(`/person-files?${new URLSearchParams({ ...(ctx.area ? { team_id: ctx.area } : {}), ...(state.q ? { q: state.q } : {}), ...(state.only ? { only: state.only } : {}) })}`);
   el.innerHTML = `<div class="toolbar" style="gap:8px;flex-wrap:wrap">${areaSelect(ctx)}<input id="pf-q" type="search" class="search" placeholder="Name oder Alias…" aria-label="Personen suchen" value="${esc(state.q)}">
       <select id="pf-only" aria-label="Filter">${FILTERS.map(([v, l]) => `<option value="${v}" ${state.only === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-    <div class="card"><div class="card-head"><h2>Personenakten · ${esc(areaName(ctx))}</h2>${can('person:create') ? '<button class="btn ghost sm" id="pf-new">Neue Person</button>' : ''}</div>
-      <p class="muted">Jede Person gibt es einmal für das ganze System. Was ${ctx.area ? 'diese Organisation' : 'du privat'} über sie weiß – Warnhinweise, Vermerke, medizinische Angaben, Akten und Fahndungen – steht in ihrer Personenakte.</p>
-      ${list.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Geboren</th><th>Hinweise</th><th>Akten</th><th>Vorstrafen</th><th></th></tr></thead><tbody>
-      ${list.map((p) => `<tr><td><b>${esc(p.name)}</b>${p.aliases ? `<br><small class="muted">„${esc(p.aliases)}“</small>` : ''}${p.active ? '' : ` ${tag('', 'inaktiv')}`}</td><td>${p.birth_date ? `${fdate(p.birth_date)}<br><small class="muted">${age(p.birth_date)}</small>` : '–'}</td>
-        <td>${p.wanted ? tag('bad', 'Gesucht') : ''} ${warningTags(p.warnings)}</td><td>${p.files || '–'}</td><td>${p.convictions || '–'}</td>
-        <td><button class="btn ghost sm" data-pf-open="${p.id}">Öffnen</button></td></tr>`).join('')}</tbody></table></div>`
+    <div class="card"><div class="card-head"><h2>Personenakten · ${esc(areaName(ctx))}</h2><div class="row wrap">${can('person:export') ? '<button class="btn ghost sm" id="pf-csv">CSV-Export</button>' : ''}${can('person:create') ? '<button class="btn ghost sm" id="pf-import">CSV-Import</button><button class="btn ghost sm" id="pf-new">Neue Person</button>' : ''}</div></div>
+      <p class="muted">Jede Person gibt es einmal für das ganze System: Mitarbeiter, Externe und Familie, auch ohne Zugang. Stammdaten sehen alle mit Zugriff auf Personen; was ${ctx.area ? 'diese Organisation' : 'du privat'} über sie weiß – Warnhinweise, Vermerke, medizinische Angaben, Akten und Fahndungen – steht in ihrer Personenakte.</p>
+      ${list.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Name</th><th>Art, Funktion</th><th>Geboren</th><th>Hinweise</th><th>Akten</th><th>Vorstrafen</th>${can('key:read') ? '<th>Schlüssel</th>' : ''}<th></th></tr></thead><tbody>
+      ${list.map((p) => `<tr><td><b>${esc(p.name)}</b>${p.aliases ? `<br><small class="muted">„${esc(p.aliases)}“</small>` : ''}${p.active ? '' : ` ${tag('', 'inaktiv')}`}</td>
+        <td>${esc(PKIND[p.kind] || '')}${p.function ? `<br><small class="muted">${esc(p.function)}</small>` : ''}</td><td>${p.birth_date ? `${fdate(p.birth_date)}<br><small class="muted">${age(p.birth_date)}</small>` : '–'}</td>
+        <td>${p.wanted ? tag('bad', 'Gesucht') : ''} ${warningTags(p.warnings)}</td><td>${p.files || '–'}</td><td>${p.convictions || '–'}</td>${can('key:read') ? `<td>${p.keys || '–'}</td>` : ''}
+        <td><button class="btn ghost sm" data-pf-open="${p.id}">Öffnen</button></td></tr>`).join('')}</tbody></table></div>
+        ${list.length >= 2000 ? '<p class="muted">Es werden die ersten 2.000 Personen gezeigt; grenze die Liste über Suche oder Filter ein.</p>' : ''}`
       : empty(state.q || state.only ? 'Keine passende Person.' : 'Noch keine Personen.')}</div>`;
   $('#pf-area', el)?.addEventListener('change', (e) => { ctx.area = e.target.value; drawPeople(el, ctx); });
   $('#pf-q', el).addEventListener('input', debounce(async (e) => { state.q = e.target.value.trim(); await drawPeople(el, ctx); const q = $('#pf-q', el); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }));
@@ -59,6 +144,8 @@ export async function drawPeople(el, ctx, personId) {
     try {
       if (b.dataset.pfOpen) { ctx.url(`#/casefiles?person=${b.dataset.pfOpen}&area=${ctx.area}`); await drawPerson(el, ctx, b.dataset.pfOpen); }
       else if (b.id === 'pf-new' && await formPerson(null)) await drawPeople(el, ctx);
+      else if (b.id === 'pf-csv') await api.download('/people/export.csv', 'personen.csv');
+      else if (b.id === 'pf-import' && await importPeople()) await drawPeople(el, ctx);
     } catch (error) { toast(error.message, true); }
   };
 }
@@ -103,10 +190,11 @@ async function drawPerson(el, ctx, personId) {
       <div class="grow"><div class="card-head"><div><h2>${esc(p.name)}</h2>${p.aliases ? `<small class="muted">alias „${esc(p.aliases)}“</small>` : ''}</div>
         <div class="row wrap no-print">${areaSelect(ctx)}<button class="btn ghost sm" id="pf-back">Zurück</button><button class="btn ghost sm" id="pf-print">Drucken</button>
           ${can('person:update') ? `<button class="btn ghost sm" id="pf-person">Stammdaten</button><button class="btn ghost sm" id="pf-photo-set">Foto</button>${p.has_photo ? '<button class="btn ghost sm" id="pf-photo-del">Foto entfernen</button>' : ''}` : ''}
+          ${can('person:delete') ? '<button class="btn ghost sm" id="pf-delete">Person löschen</button>' : ''}
           ${write ? '<button class="btn sm" id="pf-edit">Personenakte bearbeiten</button>' : ''}</div></div>
         <div class="row wrap">${activeWarrants.length ? tag('bad', `Gesucht: ${activeWarrants.map((x) => P.WARRANT_KIND[x.kind]).join(', ')}`) : ''} ${warningTags(f?.warnings)}${p.active ? '' : ` ${tag('', 'inaktiv')}`}</div>
         <dl class="case-meta">${fact('Geboren', p.birth_date && `${fdate(p.birth_date)} (${age(p.birth_date)})`)}${fact('Geschlecht', esc(p.gender))}${fact('Größe', p.height_cm && `${p.height_cm} cm`)}
-          ${fact('Staatsangehörigkeit', esc(p.nationality))}${fact('Adresse', esc(p.address))}${fact('Telefon', esc(p.phone))}${fact('E-Mail', esc(p.email))}${fact('Funktion', esc(p.function))}</dl>
+          ${fact('Staatsangehörigkeit', esc(p.nationality))}${fact('Adresse', esc(p.address))}${fact('Telefon', esc(p.phone))}${fact('E-Mail', esc(p.email))}${fact('Art', esc(PKIND[p.kind] || ''))}${fact('Funktion', esc(p.function))}</dl>
         ${p.features ? `<p><b>Merkmale:</b> ${esc(p.features)}</p>` : ''}${p.note ? `<p class="muted">${esc(p.note)}</p>` : ''}</div></div>
     ${activeWarrants.length ? `<div class="note bad-note">${activeWarrants.map((x) => `<b>${P.WARRANT_KIND[x.kind]}</b> (${esc(x.file_number)}): ${esc(x.reason)}`).join('<br>')}</div>` : ''}
     <div class="grid cols-2">
@@ -123,6 +211,7 @@ async function drawPerson(el, ctx, personId) {
       ${section('Berichte', r.reports.length ? r.reports.map((x) => `<div class="list-item"><div class="grow">${fileLink(x.case_file_id, `${x.file_number} · B-${x.number}`)} ${esc(x.title)} ${P.st(P.REPORT_STATUS, x.status)}<small>${esc(x.kind || '')}${x.occurred_at ? ` · ${fdatetime(x.occurred_at)}` : ''}</small></div></div>`).join('') : empty('Keine Berichte über die Person.'), r.reports.length)}
       ${section('Beweismittel', r.evidence.length ? r.evidence.map((x) => `<div class="list-item"><div class="grow">${fileLink(x.case_file_id, `${x.file_number} · A-${x.number}`)} ${esc(x.description)} ${P.st(P.EVIDENCE_STATUS, x.status)}</div></div>`).join('') : empty('Keine Beweismittel.'), r.evidence.length)}
       ${r.owned_vehicles ? section('Fahrzeuge (Besitzer)', r.owned_vehicles.length ? r.owned_vehicles.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.plate)}</b> ${esc(x.make_model)}<small>${VEHICLE_STATUS[x.status] || ''} · aus der Fahrzeugverwaltung</small></div></div>`).join('') : empty('Keine Fahrzeuge in diesem Bereich.'), r.owned_vehicles.length) : ''}
+      ${r.keys ? section('Schlüssel', r.keys.length ? r.keys.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.label)}</b> ${esc(x.code)} · Kopie ${x.copy_no}<small>${esc(x.object_name || '–')} · ausgegeben ${fdate(x.issued_at)}${x.due_at ? ` · Rückgabe bis ${fdate(x.due_at)}` : ''}${x.receipt_signed ? ' · quittiert' : ''}</small></div>${x.lost_at ? tag('bad', 'Verloren') : x.due_at && String(x.due_at).slice(0, 10) < new Date().toLocaleDateString('sv-SE') ? tag('bad', 'Überfällig') : ''}</div>`).join('') : empty('Keine Schlüssel in diesem Bereich.'), r.keys.length) : ''}
       ${section('Fahrzeuge in Akten (Halter)', r.vehicles.length ? r.vehicles.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.plate || '–')}</b> ${esc(x.description)}${x.role ? ` ${tag('', x.role)}` : ''}<small>${fileLink(x.case_file_id, x.file_number)}</small></div></div>`).join('') : empty('Keine Fahrzeuge in Akten.'), r.vehicles.length)}
       ${section('Einträge zur Person', r.entries.length ? r.entries.map((x) => `<div class="list-item"><div class="grow"><b>${fdate(x.entry_date)}</b> ${esc(x.kind || 'Eintrag')} · ${fileLink(x.case_file_id, x.file_number)}<small>${esc(x.body.length > 160 ? `${x.body.slice(0, 160)}…` : x.body)}</small></div></div>`).join('') : empty('Keine Einträge.'), r.entries.length)}
       ${r.licenses ? section('Lizenzen', r.licenses.length ? r.licenses.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.type_name)}</b>${x.number ? ` ${esc(x.number)}` : ''}<small>${LICENSE_STATUS[x.status]} · ${x.valid_until ? `gültig bis ${fdate(x.valid_until)}` : 'unbefristet'}${x.status_reason ? ` · ${esc(x.status_reason)}` : ''}</small></div></div>`).join('') : empty('Keine Lizenzen in diesem Bereich.')) : ''}
@@ -141,6 +230,14 @@ async function drawPerson(el, ctx, personId) {
       else if (b.id === 'pf-person') changed = await formPerson(p);
       else if (b.id === 'pf-photo-set') changed = await photoForm(p);
       else if (b.id === 'pf-photo-del' && await confirmBox('Foto entfernen', 'Das Foto wird für alle Bereiche gelöscht.', 'Entfernen')) { await api.del(`/people/${p.id}/photo`); changed = true; }
+      else if (b.id === 'pf-delete' && await confirmBox('Person löschen', `${p.name} wird für das ganze System gelöscht, mit Foto und Stammdaten. Hat die Person noch Schlüssel, Akten, Lizenzen, Schulungsnachweise oder Fahrzeuge, geht das nicht; setze sie dann über „Stammdaten“ auf inaktiv.`)) {
+        await api.del(`/people/${p.id}`);
+        photos.delete(p.id);
+        toast('Person gelöscht');
+        ctx.url('#/casefiles?tab=people');
+        await drawPeople(el, ctx);
+        return;
+      }
       if (changed) { photos.delete(p.id); await drawPerson(el, ctx, p.id); }
     } catch (error) { toast(error.message, true); }
   };
