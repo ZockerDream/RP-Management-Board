@@ -14,6 +14,7 @@ import { seed } from './seed.js';
 import { HttpError } from './authz.js';
 import { assetVersion, versionIndexHtml } from './static-assets.js';
 import { validationMessage } from './validation.js';
+import { guardRoutes } from './feature-guard.js';
 
 const app = Fastify({
   logger: { level: config.logLevel, redact: ['req.headers.authorization', 'req.headers.cookie'] },
@@ -117,6 +118,7 @@ await seed(app.log);
 const modules = ['auth', 'me', 'finance', 'teams', 'objects', 'vehicle-images', 'calendar', 'admin', 'attachments', 'work', 'integrations', 'spending', 'sport', 'notes', 'todos', 'casefiles', 'case-records', 'case-reports', 'person-files', 'licenses', 'trainings', 'training-exams', 'docs', 'public'];
 await app.register(
   async (api) => {
+    guardRoutes(api);
     for (const m of modules) await api.register((await import(`./routes/${m}.js`)).default);
   },
   { prefix: '/api' },

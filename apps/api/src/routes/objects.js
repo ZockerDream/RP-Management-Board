@@ -169,7 +169,7 @@ async function personRecords(personId) {
     `SELECT EXISTS (SELECT 1 FROM case_file_people WHERE person_id=$1) OR EXISTS (SELECT 1 FROM case_file_entries WHERE person_id=$1)
               OR EXISTS (SELECT 1 FROM case_file_report_people WHERE person_id=$1) OR EXISTS (SELECT 1 FROM case_file_charges WHERE person_id=$1)
               OR EXISTS (SELECT 1 FROM case_file_evidence WHERE person_id=$1) OR EXISTS (SELECT 1 FROM case_file_vehicles WHERE owner_person_id=$1) files,
-            EXISTS (SELECT 1 FROM warrants WHERE person_id=$1) warrants, EXISTS (SELECT 1 FROM person_files WHERE person_id=$1) person_files,
+            EXISTS (SELECT 1 FROM warrants WHERE person_id=$1) warrants, EXISTS (SELECT 1 FROM person_files WHERE person_id=$1) OR EXISTS (SELECT 1 FROM person_file_entries WHERE person_id=$1) person_files,
             EXISTS (SELECT 1 FROM licenses WHERE person_id=$1) licenses, EXISTS (SELECT 1 FROM training_records WHERE person_id=$1) trainings,
             EXISTS (SELECT 1 FROM vehicles WHERE owner_person_id=$1) vehicles`,
     [personId],

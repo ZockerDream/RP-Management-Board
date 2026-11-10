@@ -2,7 +2,7 @@
 // Jede Funktion *Html zeichnet einen Abschnitt, jede *Form öffnet einen Dialog und liefert true, wenn gespeichert wurde.
 import { api } from '../api.js';
 import { $, esc, eur, fdate, fdatetime, tag, openForm, toast, todayStr, empty } from '../ui.js';
-import { can } from '../app.js';
+import { can, caseFeature } from '../app.js';
 import { markdownBlock } from '../markdown.js';
 
 export const CASE_STATUS = { open: ['ok', 'Offen'], dormant: ['warn', 'Ruhend'], closed: ['', 'Abgeschlossen'] };
@@ -62,7 +62,8 @@ export function reportsHtml(f, { w, m, me, owner }) {
 }
 
 export async function reportForm(f, report, amends) {
-  const templates = report ? [] : (await api.get('/report-templates')).filter((t) => (f.team_id ? t.team_id === f.team_id : !t.team_id));
+  // Ohne Berichtsvorlagen (ausgeschaltet) bleibt der Bericht frei
+  const templates = report || !caseFeature('templates') ? [] : (await api.get('/report-templates')).filter((t) => (f.team_id ? t.team_id === f.team_id : !t.team_id));
   const people = involved(f);
   const done = openForm({
     title: report ? `Bericht B-${report.number} bearbeiten` : amends ? `Nachtrag zu B-${amends.number}` : 'Neuer Bericht',

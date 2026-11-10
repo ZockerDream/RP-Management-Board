@@ -48,6 +48,28 @@ function periodOptions(mode, weekStart) {
   }).join('');
 }
 
+// Prognose dieser und nächster Woche (Wunsch des Auftraggebers vom 2026-11-10): Geplantes plus Erfahrungswert, Regeln in
+// apps/api/src/forecast.js. Zeilen ohne Betrag fallen weg, damit die Tabelle kurz bleibt.
+const FORECAST_ROWS = [['booked', 'Gebucht'], ['planned', 'Vorausdatiert'], ['recurring', 'Daueraufträge'], ['salary', 'Festgehalt'], ['estimate', 'Schätzung']];
+function forecastHtml(f) {
+  const short = (date) => fdate(date).slice(0, 6);
+  const right = 'style="text-align:right"';
+  const week = (w, label) => {
+    const rows = FORECAST_ROWS.filter(([key]) => Number(w.income[key]) || Number(w.expense[key]));
+    return `<div class="forecast-week"><div class="row between"><h3>${label}</h3><small class="muted">${short(w.start)} – ${short(w.end)}</small></div>
+      <table class="table"><thead><tr><th></th><th ${right}>Einnahmen</th><th ${right}>Ausgaben</th></tr></thead><tbody>
+      ${rows.map(([key, text]) => `<tr><td>${text}${key === 'estimate' ? ` <small class="muted">${w.estimate_days} ${w.estimate_days === 1 ? 'Tag' : 'Tage'}</small>` : ''}</td><td ${right}>${eur(w.income[key])}</td><td ${right}>${eur(w.expense[key])}</td></tr>`).join('')}
+      <tr><td><b>Erwartet</b></td><td ${right} class="up"><b>${eur(w.income.total)}</b></td><td ${right} class="down"><b>${eur(w.expense.total)}</b></td></tr></tbody></table>
+      <div class="row between forecast-balance"><span>Überschuss</span><b class="${Number(w.balance) >= 0 ? 'up' : 'down'}">${eur(w.balance)}</b></div></div>`;
+  };
+  const basis = f.history_weeks
+    ? `Schätzung: Schnitt pro Tag aus ${f.history_weeks === 1 ? 'der letzten Woche' : `den letzten ${f.history_weeks} Wochen`} ohne Daueraufträge und Festgehalt, für die restlichen Tage.`
+    : 'Für eine Schätzung fehlt noch eine abgeschlossene Woche mit Buchungen; gezeigt wird nur Geplantes.';
+  return `<div class="card"><div class="card-head"><h2>Prognose</h2><small class="muted">Gebucht, vorausdatiert, Daueraufträge und Festgehalt plus Erfahrungswert</small></div>
+    <div class="grid cols-2" style="margin:0">${week(f.weeks[0], 'Diese Woche')}${week(f.weeks[1], 'Nächste Woche')}</div>
+    <p class="muted" style="margin:8px 0 0">${basis} Sparziel-Einzahlungen zählen nicht. Bonus für Stunden über dem Wochen-Soll steckt nur im Erfahrungswert.</p></div>`;
+}
+
 export async function render(view) {
   view.classList.add('dashboard-view');
   let scope = 'all';
@@ -74,10 +96,10 @@ export async function render(view) {
     const span = period(mode, range, weekStart);
     const from = span.from, to = span.to > now ? now : span.to;
     const q = `scope=${scope}&from=${from}&to=${to}`;
-    const [ov, cats, tl, spending, txs, vehicles, events] = await Promise.all([
+    const [ov, cats, tl, spending, txs, vehicles, events, forecast] = await Promise.all([
       api.get(`/stats/overview?${q}`), api.get(`/stats/by-category?${q}`), api.get(`/stats/timeline?scope=${scope}&${VIEWS[mode].query}&week_start=${weekStart}&to=${now}`),
       api.get('/spending-budgets'), api.get(`/transactions?scope=${scope}&limit=6&to=${now}`).catch(() => ({ items: [] })),
-      vehiclesRequest, eventsRequest,
+      vehiclesRequest, eventsRequest, api.get(`/stats/forecast?scope=${scope}&week_start=${weekStart}&today=${now}`).catch(() => null),
     ]);
     // Ein schneller Wechsel der Ansicht darf nicht von einer älteren Antwort überschrieben werden
     if (current !== latest || !view.isConnected) return;
@@ -108,6 +130,7 @@ export async function render(view) {
         <div class="card kpi"><span class="label">Ausgaben</span><span class="value">${eur(exp)}</span><span class="delta muted">${VIEWS[mode].caption}</span></div>
         <div class="card kpi"><span class="label">Sparquote</span><span class="value">${rate} %</span><span class="delta ${rate >= 0 ? 'up' : 'down'}">${eur(inc - exp)} Überschuss</span></div>
       </div>
+      ${forecast ? forecastHtml(forecast) : ''}
       <div class="grid cols-21">
         <div class="card"><div class="card-head"><h2>Cashflow · ${VIEWS[mode].chart}</h2><div class="legend"><span style="--c:var(--c1)">Einnahmen</span><span style="--c:var(--c2)">Ausgaben</span></div></div><div class="chart" id="d-cash"></div></div>
         <div class="card"><div class="card-head"><h2>Ausgaben nach Kategorie</h2></div>${cats.length ? '<div class="chart" id="d-donut"></div>' : empty('Keine Ausgaben in diesem Zeitraum.')}</div>

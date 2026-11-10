@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { $, esc, eur, fdate, fdatetime, empty, openForm, confirmBox, toast, showSecret, debounce, tag } from '../ui.js';
 import { areaChart } from '../charts.js';
-import { can, applyAppName } from '../app.js';
+import { can, applyAppName, reloadMe } from '../app.js';
 import { ticketHtml, bindTickets } from './ticket-view.js';
 import { NOTE_TAG_COLORS, noteTagHtml } from './common.js';
 
@@ -174,6 +174,11 @@ export async function render(view, params, section) {
         <div class="form"><label class="field">App-Name<input name="general.app_name" value="${esc(v['general.app_name'])}"></label><label class="field">Standard-Währung<input name="general.default_currency" maxlength="3" value="${esc(v['general.default_currency'])}"></label>
         <label class="field full">Wartungsmeldung<input name="general.maintenance_message" value="${esc(v['general.maintenance_message'])}"></label></div>
         ${sw('general.registration', 'Selbstregistrierung erlauben')}${sw('general.maintenance', 'Wartungsmodus', 'Nur Administratoren können sich anmelden')}${sw('mail.enabled', 'E-Mail-Versand aktiv')}
+        <div class="card-head" style="margin-top:20px"><h2>Akten</h2></div>
+        <p class="muted">Personenakten sind immer an. Ausgeschaltete Teile verschwinden für alle Benutzer aus Akten und Personenakten; ihre Daten bleiben erhalten und sind nach dem Einschalten wieder da.</p>
+        ${sw('casefiles.files', 'Fallakten', 'Akten mit Verlauf, Berichten, Beweismitteln, Fahrzeugen und Anhängen')}
+        <div id="s-case-parts">${sw('casefiles.wanted', 'Fahndung', 'Fahndungen und Fahndungsliste; nur mit Fallakten')}${sw('casefiles.report_templates', 'Berichtsvorlagen', 'Nur mit Fallakten; ohne Vorlagen bleiben Berichte möglich')}${sw('casefiles.types', 'Aktenarten', 'Nur mit Fallakten; vorhandene Akten behalten ihre Art und deren Rechte')}</div>
+        ${sw('casefiles.penal_codes', 'Strafkatalog', 'Auch ohne Fallakten zum Nachschlagen; Anklagepunkte und Vorstrafen gibt es nur mit beidem')}
         <div class="card-head" style="margin-top:20px"><h2>Aufbewahrung (Tage)</h2></div><div class="form">${num('retention.audit_days', 'Audit-Log', 1)}${num('retention.notifications_days', 'Benachrichtigungen', 1)}${num('retention.sessions_days', 'Abgelaufene Sitzungen', 1)}${num('retention.trash_days', 'Papierkorb', 1)}</div>
         ${ro ? '' : '<div class="modal-foot"><button class="btn ghost" type="button" id="s-mail">SMTP testen</button><button class="btn">Speichern</button></div>'}</fieldset></form>
         <div class="card"><div class="card-head"><h2>Umgebung (.env, schreibgeschützt)</h2></div><div class="stack">
@@ -186,8 +191,13 @@ export async function render(view, params, section) {
         e.preventDefault();
         const body = {};
         for (const i of e.target.querySelectorAll('input[name]')) body[i.name] = i.type === 'checkbox' ? i.checked : i.type === 'number' ? Number(i.value) : i.value;
-        try { await api.put('/admin/settings', body); if (body['general.app_name'] !== undefined) applyAppName(body['general.app_name']); toast('Einstellungen gespeichert'); } catch (x) { toast(x.message, true); }
+        try { await api.put('/admin/settings', body); if (body['general.app_name'] !== undefined) applyAppName(body['general.app_name']); await reloadMe(); toast('Einstellungen gespeichert'); } catch (x) { toast(x.message, true); }
       });
+      // Fahndung, Vorlagen und Aktenarten gibt es nur mit Fallakten
+      const files = $('input[name="casefiles.files"]', el);
+      const parts = () => $('#s-case-parts', el).classList.toggle('muted-block', !files.checked);
+      files.addEventListener('change', parts);
+      parts();
       $('#s-mail', el)?.addEventListener('click', async () => { try { await api.post('/admin/settings/test-mail'); toast('SMTP-Verbindung erfolgreich'); } catch (x) { toast(x.message, true); } });
     },
     async system(el) {

@@ -6,8 +6,11 @@ import { one, many, q } from '../db.js';
 import { authz, bad, forbidden, notFound, can } from '../authz.js';
 import { LEVEL, teamLevel, visibleSql } from '../org.js';
 import { audit } from '../audit.js';
-import { uuid } from '../records.js';
-import { area } from '../casefile-access.js';
+import { uuid, isoDate } from '../records.js';
+import { area, areaRecord } from '../casefile-access.js';
+import { currentCaseFeatures } from '../feature-guard.js';
+import { patchSchema } from '../validation.js';
+import { today } from '../lib.js';
 import { receiveUpload, sendUpload, removeUpload } from '../uploads.js';
 
 const str = (n) => z.string().trim().max(n).default('');
@@ -30,7 +33,9 @@ export default async function routes(app) {
     const f = z.object({ team_id: uuid.optional(), q: z.string().trim().max(100).optional(), only: z.enum(['records', 'wanted', 'warnings', 'inactive']).optional() }).parse(req.query);
     const owner = await area(req, f.team_id);
     const areaId = owner.team_id || owner.owner_user_id;
+    const on = await currentCaseFeatures();
     const filter = { records: 'x.files > 0 OR x.has_file', wanted: 'x.wanted > 0', warnings: 'cardinality(x.warnings) > 0', inactive: 'NOT x.active' }[f.only] || 'true';
+    const column = owner.team_id ? 'team_id' : 'owner_user_id';
     // Seit die Seite „Personen“ ausgeblendet ist, laufen alle Personen hierüber: deshalb bis zu 2000 Zeilen und die Zahl
     // ausgegebener Schlüssel (alle sichtbaren, wie früher auf der Personen-Seite)
     return many(
@@ -38,13 +43,14 @@ export default async function routes(app) {
          SELECT pe.id, pe.name, pe.aliases, pe.birth_date, pe.kind, pe.active, pe.function, pe.phone, pe.email, (pe.photo_key IS NOT NULL) has_photo,
            ${can(req, 'key:read') ? `(SELECT count(*)::int FROM key_assignments a JOIN keys k ON k.id=a.key_id
              WHERE a.person_id=pe.id AND ${visibleSql('k', 'key')} AND a.returned_at IS NULL AND a.lost_at IS NULL)` : 'NULL::int'} keys,
-           COALESCE(pf.warnings, '{}') warnings, (pf.id IS NOT NULL) has_file,
-           (SELECT count(*)::int FROM case_file_people cp JOIN case_files c ON c.id=cp.case_file_id WHERE cp.person_id=pe.id AND ${inArea(owner)}) files,
-           (SELECT count(*)::int FROM warrants w JOIN case_files c ON c.id=w.case_file_id WHERE w.person_id=pe.id AND w.status='active' AND ${inArea(owner)}) wanted,
-           (SELECT count(*)::int FROM case_file_charges ch JOIN case_files c ON c.id=ch.case_file_id WHERE ch.person_id=pe.id AND ch.status='convicted' AND ${inArea(owner)}) convictions
-         FROM people pe LEFT JOIN person_files pf ON pf.person_id=pe.id AND pf.${owner.team_id ? 'team_id' : 'owner_user_id'}=$2
+           COALESCE(pf.warnings, '{}') warnings,
+           (pf.id IS NOT NULL OR EXISTS (SELECT 1 FROM person_file_entries pe2 WHERE pe2.person_id=pe.id AND pe2.${column}=$2)) has_file,
+           ${on.files ? `(SELECT count(*)::int FROM case_file_people cp JOIN case_files c ON c.id=cp.case_file_id WHERE cp.person_id=pe.id AND ${inArea(owner)})` : 'NULL::int'} files,
+           ${on.wanted ? `(SELECT count(*)::int FROM warrants w JOIN case_files c ON c.id=w.case_file_id WHERE w.person_id=pe.id AND w.status='active' AND ${inArea(owner)})` : 'NULL::int'} wanted,
+           ${on.charges ? `(SELECT count(*)::int FROM case_file_charges ch JOIN case_files c ON c.id=ch.case_file_id WHERE ch.person_id=pe.id AND ch.status='convicted' AND ${inArea(owner)})` : 'NULL::int'} convictions
+         FROM people pe LEFT JOIN person_files pf ON pf.person_id=pe.id AND pf.${column}=$2
          WHERE ($3::text IS NULL OR pe.name ILIKE $3 OR pe.aliases ILIKE $3)
-       ) x WHERE ${filter} ORDER BY x.wanted > 0 DESC, x.active DESC, x.name LIMIT 2000`,
+       ) x WHERE ${filter} ORDER BY COALESCE(x.wanted, 0) > 0 DESC, x.active DESC, x.name LIMIT 2000`,
       [req.user.id, areaId, f.q ? `%${f.q}%` : null],
     );
   });
@@ -58,49 +64,62 @@ export default async function routes(app) {
     if (!person) throw notFound('Person nicht gefunden');
     const level = owner.team_id ? await teamLevel(req.user.id, owner.team_id, 'casefile') : LEVEL.MANAGE;
     const p = [req.user.id, owner.team_id || owner.owner_user_id, personId];
-    const typeArea = (alias) => `${alias}.${owner.team_id ? 'team_id' : 'owner_user_id'}=$2`;
-    const [file, caseFiles, warrants, charges, reports, evidence, vehicles, entries, licenses, trainings, ownedVehicles, keys] = await Promise.all([
+    const column = owner.team_id ? 'team_id' : 'owner_user_id';
+    const typeArea = (alias) => `${alias}.${column}=$2`;
+    // Ausgeschaltete Teile des Aktensystems (features.js) kommen als null und erscheinen nicht
+    const on = await currentCaseFeatures();
+    const when = (enabled, query) => (enabled ? query : null);
+    const [file, ownEntries, caseFiles, warrants, charges, reports, evidence, vehicles, entries, licenses, trainings, ownedVehicles, keys] = await Promise.all([
       one(`SELECT pf.*, u.name updated_by_name FROM person_files pf LEFT JOIN users u ON u.id=pf.updated_by
-        WHERE pf.person_id=$2 AND pf.${owner.team_id ? 'team_id' : 'owner_user_id'}=$1`, [p[1], personId]),
-      many(`SELECT c.id, c.file_number, c.title, c.status, c.priority, c.opened_on, c.closed_on, cp.role, ct.name type_name
+        WHERE pf.person_id=$2 AND pf.${column}=$1`, [p[1], personId]),
+      // Einträge direkt in der Personenakte, ohne Fallakte (Migration 024)
+      many(`SELECT e.id, e.entry_date, e.kind, e.body, e.created_at, e.updated_at, cu.name created_by_name, uu.name updated_by_name
+        FROM person_file_entries e LEFT JOIN users cu ON cu.id=e.created_by LEFT JOIN users uu ON uu.id=e.updated_by
+        WHERE e.person_id=$2 AND e.${column}=$1 ORDER BY e.entry_date DESC, e.created_at DESC LIMIT 500`, [p[1], personId]),
+      when(on.files, many(`SELECT c.id, c.file_number, c.title, c.status, c.priority, c.opened_on, c.closed_on, cp.role, ct.name type_name
         FROM case_file_people cp JOIN case_files c ON c.id=cp.case_file_id LEFT JOIN case_file_types ct ON ct.id=c.type_id
-        WHERE cp.person_id=$3 AND ${inArea(owner)} ORDER BY c.opened_on DESC, c.file_number DESC`, p),
-      many(`SELECT w.*, c.file_number, (w.status='active' AND w.valid_until IS NOT NULL AND w.valid_until < CURRENT_DATE) expired
-        FROM warrants w JOIN case_files c ON c.id=w.case_file_id WHERE w.person_id=$3 AND ${inArea(owner)} ORDER BY w.status='active' DESC, w.issued_on DESC`, p),
-      many(`SELECT ch.*, c.file_number FROM case_file_charges ch JOIN case_files c ON c.id=ch.case_file_id
-        WHERE ch.person_id=$3 AND ${inArea(owner)} ORDER BY ch.created_at DESC`, p),
-      many(`SELECT r.id, r.number, r.title, r.kind, r.status, r.occurred_at, r.created_at, c.id case_file_id, c.file_number
+        WHERE cp.person_id=$3 AND ${inArea(owner)} ORDER BY c.opened_on DESC, c.file_number DESC`, p)),
+      when(on.wanted, many(`SELECT w.*, c.file_number, (w.status='active' AND w.valid_until IS NOT NULL AND w.valid_until < CURRENT_DATE) expired
+        FROM warrants w JOIN case_files c ON c.id=w.case_file_id WHERE w.person_id=$3 AND ${inArea(owner)} ORDER BY w.status='active' DESC, w.issued_on DESC`, p)),
+      when(on.charges, many(`SELECT ch.*, c.file_number FROM case_file_charges ch JOIN case_files c ON c.id=ch.case_file_id
+        WHERE ch.person_id=$3 AND ${inArea(owner)} ORDER BY ch.created_at DESC`, p)),
+      when(on.files, many(`SELECT r.id, r.number, r.title, r.kind, r.status, r.occurred_at, r.created_at, c.id case_file_id, c.file_number
         FROM case_file_report_people rp JOIN case_file_reports r ON r.id=rp.report_id JOIN case_files c ON c.id=r.case_file_id
-        WHERE rp.person_id=$3 AND ${inArea(owner)} AND (r.status <> 'draft' OR r.author_id=$1) ORDER BY COALESCE(r.occurred_at, r.created_at) DESC`, p),
-      many(`SELECT ev.id, ev.number, ev.description, ev.kind, ev.status, c.id case_file_id, c.file_number FROM case_file_evidence ev JOIN case_files c ON c.id=ev.case_file_id
-        WHERE ev.person_id=$3 AND ${inArea(owner)} ORDER BY ev.created_at DESC`, p),
-      many(`SELECT v.id, v.plate, v.description, v.role, c.id case_file_id, c.file_number FROM case_file_vehicles v JOIN case_files c ON c.id=v.case_file_id
-        WHERE v.owner_person_id=$3 AND ${inArea(owner)} ORDER BY v.created_at DESC`, p),
-      many(`SELECT e.id, e.entry_date, e.kind, e.body, c.id case_file_id, c.file_number FROM case_file_entries e JOIN case_files c ON c.id=e.case_file_id
-        WHERE e.person_id=$3 AND ${inArea(owner)} ORDER BY e.entry_date DESC, e.created_at DESC LIMIT 100`, p),
+        WHERE rp.person_id=$3 AND ${inArea(owner)} AND (r.status <> 'draft' OR r.author_id=$1) ORDER BY COALESCE(r.occurred_at, r.created_at) DESC`, p)),
+      when(on.files, many(`SELECT ev.id, ev.number, ev.description, ev.kind, ev.status, c.id case_file_id, c.file_number FROM case_file_evidence ev JOIN case_files c ON c.id=ev.case_file_id
+        WHERE ev.person_id=$3 AND ${inArea(owner)} ORDER BY ev.created_at DESC`, p)),
+      when(on.files, many(`SELECT v.id, v.plate, v.description, v.role, c.id case_file_id, c.file_number FROM case_file_vehicles v JOIN case_files c ON c.id=v.case_file_id
+        WHERE v.owner_person_id=$3 AND ${inArea(owner)} ORDER BY v.created_at DESC`, p)),
+      when(on.files, many(`SELECT e.id, e.entry_date, e.kind, e.body, c.id case_file_id, c.file_number FROM case_file_entries e JOIN case_files c ON c.id=e.case_file_id
+        WHERE e.person_id=$3 AND ${inArea(owner)} ORDER BY e.entry_date DESC, e.created_at DESC LIMIT 100`, p)),
       can(req, 'license:read') ? many(`SELECT l.id, lt.name type_name, l.number, l.issued_on, l.valid_until, l.status, l.status_reason FROM licenses l
         JOIN license_types lt ON lt.id=l.type_id WHERE l.person_id=$3 AND ${typeArea('lt')} AND ${visibleSql('lt', 'license')} ORDER BY lt.name, l.issued_on DESC`, p) : null,
       can(req, 'training:read') ? many(`SELECT r.id, tr.name training_name, r.result, r.completed_on, r.valid_until FROM training_records r
         JOIN trainings tr ON tr.id=r.training_id WHERE r.person_id=$3 AND ${typeArea('tr')} AND ${visibleSql('tr', 'training')}
         ORDER BY r.completed_on DESC NULLS LAST`, p) : null,
-      // Fahrzeuge aus der Objektverwaltung mit der Person als Besitzer, im selben Bereich und soweit sichtbar
-      can(req, 'vehicle:read') ? many(`SELECT v.id, v.plate, v.make_model, v.status FROM vehicles v
-        WHERE v.owner_person_id=$3 AND ${typeArea('v')} AND ${visibleSql('v', 'vehicle')} ORDER BY v.status = 'retired', v.plate`, p) : null,
-      // Schlüssel, die die Person gerade hat oder verloren hat (Ausgabe noch offen), im selben Bereich und soweit sichtbar
+      // Fahrzeuge und Schlüssel gehören der Objektverwaltung, nicht dem Aktenbereich: alle, die man sehen darf, mit ihrem
+      // Bereich. Früher nur die des gewählten Bereichs; private Fahrzeuge fehlten so in der Personenakte einer Organisation.
+      can(req, 'vehicle:read') ? many(`SELECT v.id, v.plate, v.make_model, v.status, v.team_id, t.name team_name FROM vehicles v LEFT JOIN teams t ON t.id=v.team_id
+        WHERE v.owner_person_id=$2 AND ${visibleSql('v', 'vehicle')} ORDER BY v.status = 'retired', v.plate`, [req.user.id, personId]) : null,
+      // Schlüssel, die die Person gerade hat oder verloren hat (Ausgabe noch offen), soweit sichtbar
       can(req, 'key:read') ? many(`SELECT a.id, k.id key_id, k.code, k.label, k.kind, a.copy_no, a.issued_at, a.due_at, a.lost_at, a.receipt_signed,
-          COALESCE(pr.name, ve.make_model || ' (' || ve.plate || ')') object_name
+          COALESCE(pr.name, ve.make_model || ' (' || ve.plate || ')') object_name, k.team_id, t.name team_name
         FROM key_assignments a JOIN keys k ON k.id=a.key_id LEFT JOIN properties pr ON pr.id=k.property_id LEFT JOIN vehicles ve ON ve.id=k.vehicle_id
-        WHERE a.person_id=$3 AND a.returned_at IS NULL AND ${typeArea('k')} AND ${visibleSql('k', 'key')} ORDER BY a.issued_at DESC`, p) : null,
+          LEFT JOIN teams t ON t.id=k.team_id
+        WHERE a.person_id=$2 AND a.returned_at IS NULL AND ${visibleSql('k', 'key')} ORDER BY a.issued_at DESC`, [req.user.id, personId]) : null,
     ]);
     // Vorstrafen: Summe der verurteilten Anklagepunkte (Strafe je Punkt mal Anzahl)
-    const convicted = charges.filter((c) => c.status === 'convicted');
+    const convicted = (charges || []).filter((c) => c.status === 'convicted');
     const totals = {
       convictions: convicted.length,
       fine: convicted.reduce((sum, c) => sum + Number(c.fine) * c.count, 0).toFixed(2),
       jail: convicted.reduce((sum, c) => sum + c.jail * c.count, 0),
       points: convicted.reduce((sum, c) => sum + c.points * c.count, 0),
     };
-    return { person, area: owner, level, file, case_files: caseFiles, warrants, charges, totals, reports, evidence, vehicles, entries, licenses, trainings, owned_vehicles: ownedVehicles, keys };
+    return {
+      person, area: owner, level, file, own_entries: ownEntries, case_files: caseFiles, warrants, charges, totals, reports, evidence, vehicles, entries, licenses, trainings,
+      owned_vehicles: ownedVehicles, keys,
+    };
   });
 
   app.put('/person-files/:personId', authz('casefile:update'), async (req) => {
@@ -120,6 +139,45 @@ export default async function routes(app) {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, values);
     await audit(req, 'person_file.updated', 'person_file', row.id, { person: personId, team: owner.team_id, warnings });
     return row;
+  });
+
+  // ---------- Einträge direkt in der Personenakte (Wunsch des Auftraggebers vom 2026-11-10): chronologisch wie der
+  // Verlauf einer Akte, aber ohne Fallakte; sie gehören dem Bereich und folgen dessen Recht für Akten
+  const entryFields = z.object({ entry_date: isoDate.optional(), kind: z.string().trim().max(60).default(''), body: z.string().trim().min(1).max(20000) });
+  async function loadEntry(req) {
+    const entry = await one('SELECT * FROM person_file_entries WHERE id=$1', [uuid.parse(req.params.id)]);
+    await areaRecord(req, entry, LEVEL.WRITE);
+    return entry;
+  }
+  app.post('/person-files/:personId/entries', authz('casefile:update'), async (req) => {
+    needPeople(req);
+    const personId = uuid.parse(req.params.personId);
+    const b = entryFields.extend({ team_id: uuid.nullish() }).parse(req.body);
+    const owner = await area(req, b.team_id, LEVEL.WRITE);
+    if (!(await one('SELECT 1 FROM people WHERE id=$1', [personId]))) throw notFound('Person nicht gefunden');
+    const row = await one(
+      `INSERT INTO person_file_entries(person_id, owner_user_id, team_id, entry_date, kind, body, created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$7) RETURNING id`,
+      [personId, owner.owner_user_id, owner.team_id, b.entry_date || today(), b.kind, b.body, req.user.id],
+    );
+    await audit(req, 'person_file.entry_added', 'person_file_entry', row.id, { person: personId, team: owner.team_id });
+    return row;
+  });
+  app.patch('/person-file-entries/:id', authz('casefile:update'), async (req) => {
+    needPeople(req);
+    const entry = await loadEntry(req);
+    const b = patchSchema(entryFields).parse(req.body);
+    await q('UPDATE person_file_entries SET entry_date=$2, kind=$3, body=$4, updated_by=$5, updated_at=now() WHERE id=$1',
+      [entry.id, b.entry_date ?? entry.entry_date, b.kind ?? entry.kind, b.body ?? entry.body, req.user.id]);
+    await audit(req, 'person_file.entry_updated', 'person_file_entry', entry.id, { person: entry.person_id });
+    return { ok: true };
+  });
+  app.delete('/person-file-entries/:id', authz('casefile:update'), async (req) => {
+    needPeople(req);
+    const entry = await loadEntry(req);
+    await q('DELETE FROM person_file_entries WHERE id=$1', [entry.id]);
+    await audit(req, 'person_file.entry_deleted', 'person_file_entry', entry.id, { person: entry.person_id });
+    return { ok: true };
   });
 
   // ---------- Foto der Person (global wie die Stammdaten)

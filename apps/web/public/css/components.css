@@ -156,6 +156,7 @@ label.field > :is(input, select) { margin-top: 6px; color: var(--text); font-siz
 .setting:first-of-type { padding-top: 0; }
 .setting:last-child { border-bottom: 0; padding-bottom: 0; }
 .setting small { color: var(--muted); display: block; }
+.muted-block { opacity: .5; }
 
 /* Theme-Auswahl */
 .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
@@ -218,6 +219,9 @@ label.field > :is(input, select) { margin-top: 6px; color: var(--text); font-siz
 .dashboard-event { align-items: center; }
 .dashboard-date { min-width: 76px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .dashboard-more { display: inline-block; margin-top: 12px; color: var(--muted); font-size: 12px; text-decoration: none; }
+.forecast-week h3 { margin: 0 0 6px; font-size: 14px; }
+.forecast-week .table td, .forecast-week .table th { padding: 6px 8px; }
+.forecast-balance { padding: 8px 8px 0; border-top: 1px solid var(--border); }
 .dashboard-more:hover { color: var(--text); }
 .matrix td, .matrix th { text-align: center; } .matrix td:first-child, .matrix th:first-child { text-align: left; }
 .role-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: var(--radius-sm); cursor: pointer; color: var(--muted); font-weight: 500; }
@@ -403,3 +407,14 @@ button.list-item:hover { background: var(--surface-2); }
 .exam-options li.correct { color: var(--ok); font-weight: 500; }
 .exam-result.ok { border-left: 4px solid var(--ok); }
 .exam-result.bad { border-left: 4px solid var(--bad); }
+/* Screenshot-Scanning (Transaktionen) */
+.scan-drop { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 16px; border: 2px dashed var(--border); border-radius: 12px; text-align: center; cursor: pointer; }
+.scan-drop:hover, .scan-drop:focus-visible, .scan-drop.over { border-color: var(--primary); background: var(--surface-2); }
+.scan-drop img { max-width: 100%; max-height: 220px; margin-top: 8px; border-radius: 8px; }
+.scan-table input, .scan-table select { min-width: 0; }
+.scan-table [data-k=title] { min-width: 220px; }
+.scan-table [data-k=type] { min-width: 110px; }
+.scan-table [data-k=booked_at] { min-width: 140px; }
+.scan-table td { vertical-align: top; }
+.scan-table td .tag { margin-top: 4px; }
+.scan-text { max-height: 240px; overflow: auto; white-space: pre-wrap; font-size: 12px; background: var(--surface-2); padding: 10px; border-radius: 8px; }

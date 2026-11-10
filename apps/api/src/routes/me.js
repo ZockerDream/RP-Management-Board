@@ -11,6 +11,7 @@ import { checkPassword } from './auth.js';
 import { getSetting } from '../settings.js';
 import { audit } from '../audit.js';
 import { payrollRun } from '../jobs.js';
+import { currentCaseFeatures } from '../feature-guard.js';
 
 const publicUser = (u) => ({
   id: u.id, email: u.email, name: u.name, locale: u.locale, currency: u.currency, timezone: u.timezone, week_start: u.week_start,
@@ -23,7 +24,10 @@ const publicUser = (u) => ({
 export default async function routes(app) {
   app.get('/me', requireAuth, async (req) => {
     const force = (await getSetting('security.force_2fa')) === true;
-    return { user: publicUser(req.user), permissions: [...req.perms], roles: req.userRoles.map((r) => r.name), mfa_setup_required: force && !req.user.totp_enabled };
+    return {
+      user: publicUser(req.user), permissions: [...req.perms], roles: req.userRoles.map((r) => r.name), mfa_setup_required: force && !req.user.totp_enabled,
+      features: { casefiles: await currentCaseFeatures() },
+    };
   });
 
   app.patch('/me', requireAuth, async (req) => {

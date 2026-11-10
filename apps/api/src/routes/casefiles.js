@@ -8,6 +8,7 @@ import { today } from '../lib.js';
 import { receiveUpload, sendUpload, removeUpload } from '../uploads.js';
 import { uuid, isoDate, isoDateTime, assertPerson, personJoin } from '../records.js';
 import { fileLevelSql, loadFile, assertInvolved } from '../casefile-access.js';
+import { currentCaseFeatures, disabledError } from '../feature-guard.js';
 
 const STATUS = ['open', 'dormant', 'closed'];
 export const PRIORITIES = ['low', 'normal', 'high', 'urgent'];
@@ -108,6 +109,7 @@ export default async function routes(app) {
 
   app.post('/case-files', authz('casefile:create'), async (req) => {
     const b = createBody.parse(req.body);
+    if (b.type_id && !(await currentCaseFeatures()).types) throw disabledError('types');
     const scope = await recordOwner(req.user.id, b.team_id, 'casefile', LEVEL.WRITE, b.type_id || null);
     await typeInScope(b.type_id, scope);
     const openedOn = b.opened_on || today();
@@ -192,6 +194,8 @@ export default async function routes(app) {
     if ('lead_user_id' in b) await checkLead(file, b.lead_user_id);
     // Eine andere Aktenart ändert, wer die Akte sieht: dafür „Verwalten“ hier und Schreibrecht für die neue Art
     const typeChanged = 'type_id' in b && (b.type_id || null) !== file.type_id;
+    // Ohne Aktenarten (ausgeschaltet) behält eine Akte ihre Art; ändern geht erst nach dem Einschalten
+    if (typeChanged && !(await currentCaseFeatures()).types) throw disabledError('types');
     if (typeChanged) {
       if (level < LEVEL.MANAGE) throw forbidden(needMessage('casefile', LEVEL.MANAGE));
       await typeInScope(b.type_id, file);
@@ -429,7 +433,8 @@ export default async function routes(app) {
          WHERE v.owner_person_id=$1 AND ${visibleSql('v', 'vehicle', '$2')} ORDER BY v.status = 'retired', v.plate`, [personId, req.user.id],
       );
     }
-    if (can(req, 'casefile:read')) {
+    // Ohne Fallakten (Schalter in feature-guard.js) keine Akten und Einträge aus Akten
+    if (can(req, 'casefile:read') && (await currentCaseFeatures()).files) {
       result.case_files = await many(
         `SELECT c.id, c.file_number, c.title, c.status, c.opened_on, c.closed_on, cp.role FROM case_file_people cp JOIN case_files c ON c.id=cp.case_file_id
          WHERE cp.person_id=$1 AND ${fileLevelSql('c', '$2')} >= 2 ORDER BY c.opened_on DESC`, [personId, req.user.id],
