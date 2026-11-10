@@ -12,7 +12,7 @@ const LABELS = {
   break_minutes: 'Pause', budget_id: 'Konto', category_id: 'Kategorie', checkpoints: 'Checkpoints', checkpoints_reached: 'Erreichte Checkpoints', code: 'Code',
   color: 'Farbe', copies: 'Anzahl Kopien', cost_amount: 'Kostenbetrag', cost_budget_id: 'Kostenkonto', cost_category_id: 'Kostenkategorie', cost_interval: 'Kostenintervall',
   cost_interval_count: 'Kostenabstand', currency: 'Währung', current: 'Aktuelles Passwort', daily_salary: 'Festgehalt', data_scope: 'Datenumfang', date: 'Datum',
-  description: 'Beschreibung', distance_km: 'Distanz', due_at: 'Rückgabedatum', due_date: 'Deadline', duration_seconds: 'Zeit', email: 'E-Mail', end: 'Ende',
+  description: 'Beschreibung', direction: 'Richtung', distance_km: 'Distanz', due_at: 'Rückgabedatum', due_date: 'Deadline', duration_seconds: 'Zeit', email: 'E-Mail', end: 'Ende',
   end_date: 'Enddatum', ended_at: 'Ende', events: 'Ereignisse', expires_at: 'Ablaufdatum', first_aid_kit_expires_on: 'Verbandskasten', frequency: 'Rhythmus', from: 'Von',
   function: 'Funktion', goal_id: 'Sparziel', granularity: 'Ansicht', group_ids: 'Gruppen', hourly_bonus_percent: 'Bonus', hours: 'Stunden', income_kind: 'Einnahmeart',
   installment_amount: 'Rate', installment_frequency: 'Ratenrhythmus', installment_interval: 'Ratenabstand', interval: 'Abstand', kind: 'Art', label: 'Bezeichnung',
@@ -22,7 +22,7 @@ const LABELS = {
   recipient_user_id: 'Empfänger', recipients: 'Empfänger', registered_owner: 'Besitzer', remind: 'Erinnerung', repeat: 'Wiederholung', repeat_interval: 'Wiederholungsabstand',
   responsible_person_id: 'Verantwortlich', rhythm: 'Rhythmus', rhythm_interval: 'Abstand', role_ids: 'Rollen', scope: 'Sichtbarkeit', score: 'Punkte', service_due: 'Service',
   service_due_km: 'Service bei km', service_interval_km: 'Service-Intervall', sport_type: 'Sportart', start: 'Beginn', start_date: 'Startdatum', started_at: 'Beginn',
-  status: 'Status', steps: 'Reproduktionsschritte', tags: 'Tags', target_amount: 'Zielbetrag', target_date: 'Zieldatum', team_id: 'Organisation', title: 'Titel',
+  status: 'Status', steps: 'Reproduktionsschritte', tag_ids: 'Tags', tags: 'Tags', target_amount: 'Zielbetrag', target_date: 'Zieldatum', team_id: 'Organisation', title: 'Titel',
   to: 'Bis', type: 'Typ', url: 'URL', vehicle_id: 'Fahrzeug', week_start: 'Wochenstart', weekly_work_hours: 'Wochen-Soll', work_date: 'Datum',
   // Akten, Lizenzen, Schulungen, Dokumentationen
   case_file_id: 'Akte', closed_on: 'Abgeschlossen am', completed_on: 'Abgeschlossen am', end_time: 'Ende', entry_date: 'Datum', file_number: 'Aktenzeichen',

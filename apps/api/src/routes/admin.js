@@ -340,6 +340,68 @@ export default async function routes(app) {
     return { ok: true };
   });
 
+  // ---- Notiz-Tags (global, im Notizblock nur Markierung und Filter)
+  const tagBody = z.object({
+    name: z.string().trim().min(1).max(30),
+    color: z.enum(['neutral', 'primary', 'ok', 'warn', 'bad']).default('neutral'),
+  });
+  const tagSaved = async (fn) => {
+    try {
+      return await fn();
+    } catch (e) {
+      if (e.code === '23505') throw bad('Einen Tag mit diesem Namen gibt es schon');
+      throw e;
+    }
+  };
+  const loadTag = async (tagId) => {
+    const tag = await one('SELECT * FROM note_tags WHERE id=$1', [tagId]);
+    if (!tag) throw notFound('Tag nicht gefunden');
+    return tag;
+  };
+  app.get('/admin/note-tags', A('settings:read'), async () => many(
+    `SELECT t.id, t.name, t.color, t.position, (SELECT count(*)::int FROM note_tag_links l WHERE l.tag_id=t.id) notes
+     FROM note_tags t ORDER BY t.position, lower(t.name)`,
+  ));
+  app.post('/admin/note-tags', A('settings:update'), async (req) => {
+    const b = tagBody.parse(req.body);
+    const count = await one('SELECT count(*)::int n FROM note_tags');
+    if (count.n >= 50) throw bad('Höchstens 50 Tags');
+    const row = await tagSaved(() => one(
+      'INSERT INTO note_tags(name, color, position) VALUES ($1, $2, (SELECT coalesce(max(position), 0) + 1 FROM note_tags)) RETURNING id',
+      [b.name, b.color],
+    ));
+    await audit(req, 'note_tag.created', 'note_tag', row.id, { name: b.name });
+    return row;
+  });
+  app.patch('/admin/note-tags/:id', A('settings:update'), async (req) => {
+    const tag = await loadTag(req.params.id);
+    const b = patchSchema(tagBody).parse(req.body);
+    await tagSaved(() => q('UPDATE note_tags SET name=$2, color=$3 WHERE id=$1', [tag.id, b.name ?? tag.name, b.color ?? tag.color]));
+    await audit(req, 'note_tag.updated', 'note_tag', tag.id, { name: b.name ?? tag.name, before: tag.name });
+    return { ok: true };
+  });
+  // Reihenfolge: mit dem Nachbarn tauschen, vorher lückenlos durchnummerieren
+  app.post('/admin/note-tags/:id/move', A('settings:update'), async (req) => {
+    const tag = await loadTag(req.params.id);
+    const { direction } = z.object({ direction: z.enum(['up', 'down']) }).parse(req.body);
+    await tx(async (client) => {
+      const { rows } = await client.query('SELECT id FROM note_tags ORDER BY position, lower(name) FOR UPDATE');
+      const ids = rows.map((r) => r.id);
+      const at = ids.indexOf(tag.id), to = at + (direction === 'up' ? -1 : 1);
+      if (at < 0 || to < 0 || to >= ids.length) return;
+      [ids[at], ids[to]] = [ids[to], ids[at]];
+      await client.query('UPDATE note_tags t SET position=o.n FROM unnest($1::uuid[]) WITH ORDINALITY o(id, n) WHERE t.id=o.id', [ids]);
+    });
+    return { ok: true };
+  });
+  app.delete('/admin/note-tags/:id', A('settings:update'), async (req) => {
+    const tag = await loadTag(req.params.id);
+    const used = await one('SELECT count(*)::int n FROM note_tag_links WHERE tag_id=$1', [tag.id]);
+    await q('DELETE FROM note_tags WHERE id=$1', [tag.id]);
+    await audit(req, 'note_tag.deleted', 'note_tag', tag.id, { name: tag.name, notes: used.n });
+    return { ok: true };
+  });
+
   // ---- Webhooks & API-Schlüssel (global)
   app.get('/admin/webhooks', A('settings:read'), async () => many('SELECT id, url, events, active, created_at FROM webhooks ORDER BY created_at'));
   app.post('/admin/webhooks', A('settings:update'), async (req) => {

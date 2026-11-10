@@ -117,6 +117,7 @@ label.field > :is(input, select) { margin-top: 6px; color: var(--text); font-siz
 .tag { display: inline-flex; align-items: center; padding: 1px 9px; border-radius: 99px; font-size: 11.5px; font-weight: 550; background: var(--surface-2); color: var(--muted); }
 .tag.solo { background: var(--primary-soft); color: var(--primary); }
 .tag.shared { background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+.tag.primary { background: var(--primary-soft); color: var(--primary); }
 .tag.ok { background: var(--ok-soft); color: var(--ok); }
 .tag.bad { background: var(--bad-soft); color: var(--bad); }
 .tag.warn { background: var(--warn-soft); color: var(--warn); }

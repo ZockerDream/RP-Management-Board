@@ -733,6 +733,81 @@ const noteExtra = ok('Notiz zum Löschen', await alice.post('/notes', { body: 'n
 ok('Notiz löschen', await alice.del(`/notes/${noteExtra.id}`));
 denied('Gelöschte Notiz ist weg', await alice.del(`/notes/${noteExtra.id}`), [404]);
 
+// ---------- Notiz-Tags (Server-Management, mehrere je Notiz, nur Markierung)
+const defaultTags = (await alice.get('/note-tags')).data;
+check('Standard-Tags vorhanden, ARCHIVE ist kein Tag', JSON.stringify(defaultTags.map((t) => t.name)) === JSON.stringify(['BLOCKED', 'INVALID', 'DONE', 'WIP']), JSON.stringify(defaultTags.map((t) => t.name)));
+const tWip = defaultTags.find((t) => t.name === 'WIP'), tDone = defaultTags.find((t) => t.name === 'DONE');
+denied('User liest Tag-Verwaltung nicht', await alice.get('/admin/note-tags'), [403]);
+denied('User legt keinen Tag an', await alice.post('/admin/note-tags', { name: 'X' }), [403]);
+denied('User ändert keinen Tag', await alice.patch(`/admin/note-tags/${tWip.id}`, { name: 'X' }), [403]);
+denied('User verschiebt keinen Tag', await alice.post(`/admin/note-tags/${tWip.id}/move`, { direction: 'up' }), [403]);
+denied('User löscht keinen Tag', await alice.del(`/admin/note-tags/${tWip.id}`), [403]);
+const e2eTag = ok('Admin legt Tag an', await admin.post('/admin/note-tags', { name: ' E2E-Tag ', color: 'warn' }));
+invalid('Tag doppelt (Groß/klein)', await admin.post('/admin/note-tags', { name: 'e2e-tag' }));
+invalid('Tag ohne Namen', await admin.post('/admin/note-tags', { name: '  ' }));
+invalid('Tag-Name zu lang', await admin.post('/admin/note-tags', { name: 'x'.repeat(31) }));
+invalid('Unbekannte Farbe', await admin.post('/admin/note-tags', { name: 'Farbe', color: 'pink' }));
+invalid('Umbenennen auf vorhandenen Namen', await admin.patch(`/admin/note-tags/${e2eTag.id}`, { name: 'wip' }));
+invalid('Tag-ID ungültig', await admin.patch('/admin/note-tags/abc', { name: 'x' }));
+denied('Tag nicht vorhanden', await admin.patch('/admin/note-tags/00000000-0000-4000-8000-000000000000', { name: 'x' }), [404]);
+const adminTags = async () => (await admin.get('/admin/note-tags')).data;
+check('Neuer Tag steht hinten, Name getrimmt', (await adminTags()).at(-1)?.name === 'E2E-Tag', JSON.stringify((await adminTags()).map((t) => t.name)));
+ok('Tag nach oben', await admin.post(`/admin/note-tags/${e2eTag.id}/move`, { direction: 'up' }));
+check('Reihenfolge getauscht', (await adminTags()).at(-2)?.name === 'E2E-Tag');
+check('Reihenfolge gilt auch für alle', (await alice.get('/note-tags')).data.at(-2)?.id === e2eTag.id);
+ok('Unterster Tag nach unten ändert nichts', await admin.post(`/admin/note-tags/${(await adminTags()).at(-1).id}/move`, { direction: 'down' }));
+invalid('Richtung ungültig', await admin.post(`/admin/note-tags/${e2eTag.id}/move`, { direction: 'left' }));
+const tagged = ok('Notiz mit Tags (doppelt übergeben)', await bob.post('/notes', { title: 'Getaggt', team_id: team.id, tag_ids: [tWip.id, e2eTag.id, tWip.id] }));
+const taggedRow = async (who) => (await notesOf(who)).find((n) => n.id === tagged.id);
+check('Tags an der Notiz, ohne Doppelte', (await taggedRow(bob))?.tag_ids?.length === 2, JSON.stringify((await taggedRow(bob))?.tag_ids));
+check('Viewer sieht die Tags', (await taggedRow(carol))?.tag_ids?.includes(tWip.id));
+check('Notiz ohne Tags hat leere Liste', JSON.stringify((await notesOf(alice)).find((n) => n.id === noteSolo.id)?.tag_ids) === '[]');
+denied('Viewer setzt keine Tags', await carol.patch(`/notes/${tagged.id}`, { tag_ids: [] }), [403]);
+denied('Fremder setzt keine Tags', await dave.patch(`/notes/${tagged.id}`, { tag_ids: [] }), [404]);
+const beforeTags = await taggedRow(bob);
+ok('Tags ändern', await bob.patch(`/notes/${tagged.id}`, { tag_ids: [tDone.id] }));
+const afterTags = await taggedRow(bob);
+check('Tags ersetzt', JSON.stringify(afterTags?.tag_ids) === JSON.stringify([tDone.id]), JSON.stringify(afterTags?.tag_ids));
+check('Tags zählen nicht als Bearbeitung', afterTags?.updated_at === beforeTags?.updated_at, `${beforeTags?.updated_at} ${afterTags?.updated_at}`);
+ok('Text ändern ohne tag_ids', await bob.patch(`/notes/${tagged.id}`, { body: 'mit Text' }));
+check('Tags bleiben beim Bearbeiten', JSON.stringify((await taggedRow(bob))?.tag_ids) === JSON.stringify([tDone.id]));
+invalid('Unbekannter Tag', await bob.patch(`/notes/${tagged.id}`, { tag_ids: ['00000000-0000-4000-8000-000000000000'] }));
+invalid('Tag-ID ungültig in Notiz', await bob.post('/notes', { title: 'x', tag_ids: ['abc'] }));
+invalid('Tags kein Array', await bob.post('/notes', { title: 'x', tag_ids: 'abc' }));
+check('Unbekannter Tag ändert nichts', JSON.stringify((await taggedRow(bob))?.tag_ids) === JSON.stringify([tDone.id]));
+ok('Zweiten Tag setzen', await bob.patch(`/notes/${tagged.id}`, { tag_ids: [tDone.id, e2eTag.id] }));
+check('Admin sieht Zahl der Notizen', (await adminTags()).find((t) => t.id === e2eTag.id)?.notes === 1);
+ok('Admin benennt Tag um und färbt ihn', await admin.patch(`/admin/note-tags/${e2eTag.id}`, { name: 'E2E-Tag 2', color: 'bad' }));
+check('Umbenannt', (await alice.get('/note-tags')).data.some((t) => t.id === e2eTag.id && t.name === 'E2E-Tag 2' && t.color === 'bad'));
+ok('Admin löscht Tag', await admin.del(`/admin/note-tags/${e2eTag.id}`));
+denied('Gelöschter Tag ist weg', await admin.del(`/admin/note-tags/${e2eTag.id}`), [404]);
+check('Gelöschter Tag fehlt an der Notiz, Notiz bleibt', JSON.stringify((await taggedRow(bob))?.tag_ids) === JSON.stringify([tDone.id]));
+const tagAudit = (await admin.get('/admin/audit?limit=50&q=note_tag')).data.map((row) => row.action);
+check('Tags im Audit-Log', ['note_tag.created', 'note_tag.updated', 'note_tag.deleted'].every((action) => tagAudit.includes(action)), JSON.stringify(tagAudit));
+
+// ---------- Notizen archivieren (eigener Knopf, gilt für alle, die die Notiz sehen)
+ok('Notiz anheften vor dem Archivieren', await bob.patch(`/notes/${tagged.id}`, { pinned: true }));
+const beforeArchive = await taggedRow(bob);
+ok('Notiz archivieren', await bob.patch(`/notes/${tagged.id}`, { archived: true }));
+const archivedRow = await taggedRow(bob);
+check('Archiviert mit Zeit und Name', Boolean(archivedRow?.archived_at) && archivedRow?.archived_by_name === 'bob', JSON.stringify(archivedRow));
+check('Archivieren löst das Anheften', archivedRow?.pinned === false);
+check('Archivieren zählt nicht als Bearbeitung', archivedRow?.updated_at === beforeArchive?.updated_at, `${beforeArchive?.updated_at} ${archivedRow?.updated_at}`);
+check('Archiv gilt für alle in der Organisation', Boolean((await taggedRow(carol))?.archived_at));
+check('Archivierte stehen hinten', (await notesOf(bob)).at(-1)?.id === tagged.id);
+check('Tags bleiben im Archiv', JSON.stringify(archivedRow?.tag_ids) === JSON.stringify([tDone.id]));
+invalid('Archivierte Notiz nicht anheften', await bob.patch(`/notes/${tagged.id}`, { pinned: true }));
+ok('Erneut archivieren', await alice.patch(`/notes/${tagged.id}`, { archived: true }));
+check('Zeitpunkt und Name bleiben', (await taggedRow(bob))?.archived_at === archivedRow?.archived_at && (await taggedRow(bob))?.archived_by_name === 'bob');
+ok('Archivierte Notiz bearbeiten', await bob.patch(`/notes/${tagged.id}`, { body: 'im Archiv geändert' }));
+check('Bleibt beim Bearbeiten archiviert', Boolean((await taggedRow(bob))?.archived_at));
+denied('Viewer stellt nicht wieder her', await carol.patch(`/notes/${tagged.id}`, { archived: false }), [403]);
+denied('Fremder stellt nicht wieder her', await dave.patch(`/notes/${tagged.id}`, { archived: false }), [404]);
+invalid('archived kein Wahrheitswert', await bob.patch(`/notes/${tagged.id}`, { archived: 'ja' }));
+ok('Wiederherstellen', await bob.patch(`/notes/${tagged.id}`, { archived: false }));
+const restoredRow = await taggedRow(bob);
+check('Wiederhergestellt, nicht wieder angeheftet', !restoredRow?.archived_at && !restoredRow?.archived_by_name && restoredRow?.pinned === false, JSON.stringify(restoredRow));
+
 // ---------- ToDos
 const todosOf = async (who) => (await who.get('/todos')).data;
 const todoSolo = ok('ToDo solo', await alice.post('/todos', { title: 'Steuer abgeben', due_date: dayAt(1), note: 'Belege' }));
@@ -1341,7 +1416,7 @@ ok('Organisation löschen', await bob.del(`/teams/${org.id}`));
 check('Ränge, Gruppen und Rechte sind weg', psql(`SELECT (SELECT count(*) FROM team_ranks WHERE team_id='${org.id}') + (SELECT count(*) FROM team_groups WHERE team_id='${org.id}') + (SELECT count(*) FROM team_permissions WHERE team_id='${org.id}')`) === '0');
 
 // ---------- Admin
-for (const p of ['/admin/overview', '/admin/users', '/admin/roles', '/admin/groups', '/admin/teams', '/admin/settings', '/admin/system', '/admin/audit?limit=10', '/admin/api-keys', '/admin/webhooks', '/admin/backups']) ok(`GET ${p}`, await admin.get(p));
+for (const p of ['/admin/overview', '/admin/users', '/admin/roles', '/admin/groups', '/admin/teams', '/admin/settings', '/admin/system', '/admin/audit?limit=10', '/admin/api-keys', '/admin/webhooks', '/admin/backups', '/admin/note-tags']) ok(`GET ${p}`, await admin.get(p));
 check('Audit-Export', (await admin.raw('/admin/audit/export.csv')).status === 200);
 check('User-Export', (await admin.raw('/admin/users/export.csv')).status === 200);
 ok('App-Name setzen', await admin.put('/admin/settings', { 'general.app_name': 'E2E Finanz' }));

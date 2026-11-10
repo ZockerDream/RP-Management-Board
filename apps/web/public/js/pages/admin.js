@@ -3,6 +3,7 @@ import { $, esc, eur, fdate, fdatetime, empty, openForm, confirmBox, toast, show
 import { areaChart } from '../charts.js';
 import { can, applyAppName } from '../app.js';
 import { ticketHtml, bindTickets } from './ticket-view.js';
+import { NOTE_TAG_COLORS, noteTagHtml } from './common.js';
 
 const STATUS = { active: ['ok', 'Aktiv'], locked: ['warn', 'Gesperrt'], disabled: ['bad', 'Deaktiviert'], invited: ['', 'Eingeladen'] };
 const fmtBytes = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
@@ -12,14 +13,14 @@ const btn = (attr, label) => `<button class="btn ghost sm" ${attr}>${label}</but
 
 const SECTIONS = {
   users: { title: 'User-Management', desc: 'Benutzer, Rollen, Gruppen und Organisationen', tabs: ['users', 'roles', 'groups', 'teams'] },
-  server: { title: 'Server-Management', desc: 'Übersicht, Sicherheit, System, Integrationen und Audit-Log', tabs: ['overview', 'settings', 'system', 'integr', 'audit'] },
+  server: { title: 'Server-Management', desc: 'Übersicht, Sicherheit, System, Integrationen, Notiz-Tags und Audit-Log', tabs: ['overview', 'settings', 'system', 'integr', 'notetags', 'audit'] },
   tickets: { title: 'Tickets', desc: 'Gemeldete Fehler und Anfragen', tabs: ['tickets'] },
 };
 
 export async function render(view, params, section) {
   const meta = SECTIONS[section] || SECTIONS.users;
   const ALL = [['overview', 'Übersicht', 'admin:access'], ['tickets', 'Tickets', 'admin:access'], ['users', 'Benutzer', 'user:read'], ['roles', 'Rollen & Rechte', 'role:read'], ['groups', 'Gruppen', 'group:read'], ['teams', 'Organisationen', 'team:read'],
-    ['settings', 'Sicherheit & Einstellungen', 'settings:read'], ['system', 'System & Backups', 'settings:read'], ['integr', 'Integrationen', 'settings:read'], ['audit', 'Audit-Log', 'audit:read']].filter((t) => meta.tabs.includes(t[0]) && can(t[2]));
+    ['settings', 'Sicherheit & Einstellungen', 'settings:read'], ['system', 'System & Backups', 'settings:read'], ['integr', 'Integrationen', 'settings:read'], ['notetags', 'Notiz-Tags', 'settings:read'], ['audit', 'Audit-Log', 'audit:read']].filter((t) => meta.tabs.includes(t[0]) && can(t[2]));
   const D = { roles: [], groups: [], users: [] };
   view.innerHTML = `<div class="page-head"><div><h1>${meta.title}</h1><p>${meta.desc}</p></div><div class="actions" id="ad-actions"></div></div>
     <div><div class="tabs" ${ALL.length < 2 ? 'hidden' : ''}>${ALL.map(([k, l], i) => `<button data-tab="${k}" class="${i ? '' : 'on'}">${l}</button>`).join('')}</div>${ALL.map(([k], i) => `<div class="tab-panel ${i ? '' : 'on'}" data-panel="${k}"></div>`).join('')}</div>`;
@@ -29,6 +30,19 @@ export async function render(view, params, section) {
   const loadGroups = async () => { D.groups = await api.get('/admin/groups'); };
 
   /* ----- Formulare ----- */
+  const noteTagForm = (t) => openForm({
+    title: t ? 'Tag bearbeiten' : 'Tag anlegen',
+    fields: [
+      { name: 'name', label: 'Name', value: t?.name, required: true, maxlength: 30, placeholder: 'z. B. WIP' },
+      { name: 'color', label: 'Farbe', type: 'select', value: t?.color || 'neutral', options: Object.entries(NOTE_TAG_COLORS).map(([v, [, l]]) => ({ v, l })) },
+    ],
+    onSubmit: async (v) => {
+      const body = { name: v.name.trim(), color: v.color };
+      if (t) await api.patch(`/admin/note-tags/${t.id}`, body);
+      else await api.post('/admin/note-tags', body);
+      toast('Tag gespeichert');
+    },
+  });
   async function userForm(u) {
     await Promise.all([loadRoles(), can('group:read') ? loadGroups() : 0]);
     const fields = [
@@ -187,6 +201,13 @@ export async function render(view, params, section) {
       el.innerHTML = `      <div class="card"><div class="card-head"><h2>Webhooks</h2>${can('settings:update') ? '<button class="btn ghost sm" id="w-new">Webhook hinzufügen</button>' : ''}</div>${w.length ? w.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.url)}</b><small>${esc(x.events.join(', '))}</small></div>${can('settings:update') ? btn(`data-wdel="${x.id}"`, 'Löschen') : ''}</div>`).join('') : empty('Keine Webhooks. Sie melden Konto-Limits (80 %, überschritten).')}</div>
       <div class="card"><div class="card-head"><h2>API-Schlüssel aller Benutzer</h2></div>${k.length ? `<table class="table"><thead><tr><th>Name</th><th>Besitzer</th><th>Präfix</th><th>Scope</th><th>Zuletzt genutzt</th><th></th></tr></thead><tbody>${k.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.owner)}</td><td><code>${esc(x.prefix)}…</code></td><td>${esc(x.scope)}</td><td>${fdatetime(x.last_used_at)}</td><td>${can('apikey:delete') ? btn(`data-kdel="${x.id}"`, 'Widerrufen') : ''}</td></tr>`).join('')}</tbody></table>` : empty('Keine aktiven API-Schlüssel.')}</div>`;
     },
+    async notetags(el) {
+      D.noteTags = await api.get('/admin/note-tags');
+      const edit = can('settings:update');
+      const last = D.noteTags.length - 1;
+      el.innerHTML = `<div class="card"><p class="muted" style="margin-top:0">Tags markieren Notizen im Notizblock. Jeder, der eine Notiz bearbeiten darf, kann beliebig viele davon setzen; im Notizblock lässt sich danach filtern. Ausgeblendet wird nichts.</p>${D.noteTags.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Tag</th><th>Farbe</th><th>Notizen</th><th></th></tr></thead><tbody>${D.noteTags.map((t, i) => `<tr><td>${noteTagHtml(t)}</td><td>${esc(NOTE_TAG_COLORS[t.color]?.[1] || t.color)}</td><td>${t.notes}</td>
+        <td style="white-space:nowrap">${edit ? `${btn(`data-tup="${t.id}" aria-label="${esc(t.name)} nach oben" ${i ? '' : 'disabled style="visibility:hidden"'}`, '↑')} ${btn(`data-tdown="${t.id}" aria-label="${esc(t.name)} nach unten" ${i < last ? '' : 'disabled style="visibility:hidden"'}`, '↓')} ${btn(`data-tedit="${t.id}"`, 'Bearbeiten')} ${btn(`data-tdel="${t.id}"`, 'Löschen')}` : ''}</td></tr>`).join('')}</tbody></table></div>` : empty('Noch keine Tags.')}</div>`;
+    },
     async audit(el) {
       const q = el._q || '';
       const rows = await api.get(`/admin/audit?limit=200${q ? `&q=${encodeURIComponent(q)}` : ''}`);
@@ -195,7 +216,7 @@ export async function render(view, params, section) {
     },
   };
 
-  const ADD = { users: ['user:create', 'Benutzer anlegen'], roles: ['role:create', 'Rolle anlegen'], groups: ['group:create', 'Gruppe anlegen'] };
+  const ADD = { users: ['user:create', 'Benutzer anlegen'], roles: ['role:create', 'Rolle anlegen'], groups: ['group:create', 'Gruppe anlegen'], notetags: ['settings:update', 'Tag anlegen'] };
   async function show(k = cur()) {
     if (!view.isConnected) return;
     const el = $(`.tab-panel[data-panel="${k}"]`, view);
@@ -211,7 +232,7 @@ export async function render(view, params, section) {
     const ds = (a) => g(`[data-${a}]`)?.dataset[a];
     try {
       let changed = false;
-      if (g('#ad-new')) changed = await ({ users: () => userForm(), roles: () => roleForm(), groups: () => groupForm() }[k]());
+      if (g('#ad-new')) changed = await ({ users: () => userForm(), roles: () => roleForm(), groups: () => groupForm(), notetags: () => noteTagForm() }[k]());
       else if (ds('uedit')) changed = await userForm(D.users.find((u) => u.id === ds('uedit')));
       else if (ds('u2fa') && (await confirmBox('2FA zurücksetzen', 'Die Zwei-Faktor-Authentifizierung des Benutzers wird deaktiviert.', 'Zurücksetzen'))) { await api.post(`/admin/users/${ds('u2fa')}/reset-2fa`); changed = true; toast('2FA zurückgesetzt'); }
       else if (ds('usess') && (await confirmBox('Sitzungen beenden', 'Alle Sitzungen des Benutzers werden beendet.', 'Beenden'))) { await api.post(`/admin/users/${ds('usess')}/revoke-sessions`); toast('Sitzungen beendet'); }
@@ -221,6 +242,12 @@ export async function render(view, params, section) {
       else if (ds('rdel') && (await confirmBox('Rolle löschen', 'Die Rolle wird von allen Benutzern entfernt.'))) { await api.del(`/admin/roles/${ds('rdel')}`); changed = true; }
       else if (ds('gedit')) changed = await groupForm(D.groups.find((x) => x.id === ds('gedit')));
       else if (ds('gdel') && (await confirmBox('Gruppe löschen', 'Gruppe wirklich löschen?'))) { await api.del(`/admin/groups/${ds('gdel')}`); changed = true; }
+      else if (ds('tedit')) changed = await noteTagForm(D.noteTags.find((t) => t.id === ds('tedit')));
+      else if (ds('tup') || ds('tdown')) { await api.post(`/admin/note-tags/${ds('tup') || ds('tdown')}/move`, { direction: ds('tup') ? 'up' : 'down' }); changed = true; }
+      else if (ds('tdel')) {
+        const t = D.noteTags.find((x) => x.id === ds('tdel'));
+        if (await confirmBox('Tag löschen', t?.notes ? `„${t.name}“ wird von ${t.notes} ${t.notes === 1 ? 'Notiz' : 'Notizen'} entfernt. Die Notizen selbst bleiben.` : `„${t?.name}“ wird gelöscht.`)) { await api.del(`/admin/note-tags/${ds('tdel')}`); changed = true; }
+      }
       else if (g('#b-new')) { g('#b-new').disabled = true; toast('Backup läuft…'); await api.post('/admin/backups'); toast('Backup erstellt'); changed = true; }
       else if (ds('bdl')) await api.download(`/admin/backups/${ds('bdl')}/download`, g('[data-bdl]').dataset.bn);
       else if (ds('bdel') && (await confirmBox('Backup löschen', 'Backup-Datei endgültig löschen?'))) { await api.del(`/admin/backups/${ds('bdel')}`); changed = true; }
