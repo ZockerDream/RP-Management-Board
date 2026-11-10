@@ -66,7 +66,7 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await login(page, 'alice@e2e.test', 'alice-Sehr-Sicher-9931!');
   const navs = await page.$$eval('.sidebar a.nav', (ns) => ns.filter((n) => n.offsetParent !== null).map((n) => n.getAttribute('href')));
   check('User sieht keine Admin-Links', !navs.some((h) => h.includes('admin')), navs.join());
-  for (const want of ['#/notes', '#/todos', '#/spending', '#/sport-run', '#/sport-swim', '#/sport-bike', '#/assets-vehicles', '#/assets-properties', '#/assets-people', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/datenschutz', '#/impressum']) check(`Nav ${want}`, navs.includes(want));
+  for (const want of ['#/changelog', '#/notes', '#/todos', '#/spending', '#/sport-run', '#/sport-swim', '#/sport-bike', '#/assets-vehicles', '#/assets-properties', '#/assets-people', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/datenschutz', '#/impressum']) check(`Nav ${want}`, navs.includes(want));
   for (const h of navs) {
     at(`alice ${h}`);
     await go(page, h);
@@ -767,6 +767,26 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.fill('#help-search', 'Schlüssel');
   const vis = await page.locator('[data-help-item]:visible').count();
   check('Hilfe-Suche filtert', vis > 0 && vis < total, `${vis}/${total}`);
+
+  // Changelog unter Administration: alle Versionen seit 0.0.0, Suche und Filter nach Art
+  at('alice changelog');
+  await go(page, '#/changelog');
+  // Dass die oberste Version der package.json entspricht, prüft test/changelog.test.js
+  const versions = () => page.$$eval('.changelog-version:not([hidden]) h2', (h) => h.map((x) => x.textContent.trim()));
+  const installedHeading = (await versions()).find((v) => /Installiert/.test(v)) || '';
+  check('Changelog: installierte Version markiert und im Kopf genannt', /^Version \d+\.\d+\.\d+/.test(installedHeading) && (await page.textContent('#view .page-head')).includes(installedHeading.match(/\d+\.\d+\.\d+/)?.[0]), (await versions()).slice(0, 3).join(' | '));
+  check('Changelog: bis zurück zu 0.0.0', (await versions()).at(-1) === 'Version 0.0.0');
+  await page.fill('#cl-search', 'Zinsen');
+  const zinsen = await versions();
+  check('Changelog-Suche findet Zinsen', zinsen.length >= 1 && zinsen.every((v) => !/0\.0\.0/.test(v)), zinsen.join(' | '));
+  await page.fill('#cl-search', '1.1.1');
+  check('Changelog-Suche nach Version', (await versions()).join() === 'Version 1.1.1', (await versions()).join(' | '));
+  await page.fill('#cl-search', '');
+  await page.selectOption('#cl-type', 'fixed');
+  check('Changelog-Filter nach Art', await page.$$eval('.changelog-list li:not([hidden]) .tag', (t) => t.length > 0 && t.every((x) => x.textContent === 'Behoben')));
+  await page.fill('#cl-search', 'qwertzuiop');
+  check('Changelog ohne Treffer erklärt sich', /Keine Änderung passt/.test(await page.textContent('#view')));
+  await page.screenshot({ path: `${out}/alice-changelog.png` });
 
   // Rechtliches angemeldet
   at('alice legal');

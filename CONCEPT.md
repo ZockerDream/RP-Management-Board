@@ -32,6 +32,7 @@ Webanwendung zur Verwaltung persönlicher und geteilter Konten, kombiniert mit Z
 | | Server-Management | Übersicht, Sicherheit & Einstellungen, System & Backups, Integrationen, Audit-Log (nur Admins) |
 | | Tickets | Gemeldete Fehler (nur Admins) |
 | | Hilfe, Fehler melden | Für alle Benutzer |
+| | Changelog | Alle Versionen seit 0.0.0, neueste oben als „Installiert“, mit Suche und Filter nach Art (Neu, Geändert, Behoben, Technik); für alle Benutzer. Vor 1.0.0 gab es keine Versionsnummern, die Stände 0.x sind nachträglich nummeriert (Wunsch des Auftraggebers vom 2026-11-10) |
 | Konto | Einstellungen | Profil, Sicherheit, Darstellung, Benachrichtigungen, Sitzungen, API & Kalender |
 | Rechtliches | Impressum, Datenschutz | Auch ohne Anmeldung erreichbar |
 
@@ -62,7 +63,7 @@ Filter Solo / Organisation / Gesamt, Ansicht Tag / Woche / Monat und passender Z
 ### 4.2 Konten
 Die Oberfläche nennt diese Finanzbereiche „Konten“; intern bleiben API und Datenbank aus Kompatibilitätsgründen bei `budgets` und `budget_id`. Zwei strikt getrennte Arten: `solo` (gehört einem User) und `shared` (gehört einem Team). Jede Karte zeigt Kontostand (Einkommen minus Ausgaben bis heute), Einkommen und Ausgaben. Das Formular fragt nur Name, Typ, Team und Währung ab; vorgeschlagen ist die Profilwährung, beim Ändern wird nichts umgerechnet. Ausgabenlimits werden als Budgets (4.3) gepflegt. Kategorien können eigene Limits haben. Persönliche Konten stehen in der Liste und in allen Auswahlfeldern vor den geteilten und sind damit vorausgewählt (Wunsch des Auftraggebers vom 2026-11-10).
 
-**Zinsen (optional, Wunsch des Auftraggebers vom 2026-11-10, Migration 022):** Ein Konto kann einen Zinssatz in Prozent je Zeitraum haben: pro Tag, Woche (Montag bis Sonntag), Monat oder Jahr. Am letzten Tag jedes abgeschlossenen Zeitraums wird eine Einnahme „Zinsen …“ gebucht, berechnet auf den durchschnittlichen Tagessaldo (Einnahmen minus Ausgaben, Sparziel-Einzahlungen zählen wie beim Kontostand nicht), kaufmännisch auf den Cent gerundet. Tage im Minus zählen als 0, gutgeschriebene Zinsen werden mitverzinst. Gezählt wird ab dem Tag des Einschaltens; ein geänderter Satz oder Zeitraum gilt für alles, was noch nicht gutgeschrieben ist. Gutgeschriebene Zeiträume werden nicht nachberechnet, auch nicht bei nachgetragenen Buchungen. Zinsgutschriften lassen sich nicht ändern, nur löschen; der Zeitraum bleibt dann gutgeschrieben. Einstellen darf, wer das Konto ändern darf; Änderungen stehen im Audit-Log. Beispiel: 2 % pro Monat, im November 15 Tage 1.000 und 15 Tage 2.000 → Durchschnitt 1.500 → 30,00 am 30.11.
+**Zinsen (optional, Wunsch des Auftraggebers vom 2026-11-10, Modell am selben Tag bestätigt, Migration 022):** Ein Konto kann einen Zinssatz in Prozent je Zeitraum haben: pro Tag, Woche (Montag bis Sonntag), Monat oder Jahr. Am letzten Tag jedes abgeschlossenen Zeitraums wird eine Einnahme „Zinsen …“ gebucht, berechnet auf den durchschnittlichen Tagessaldo (Einnahmen minus Ausgaben, Sparziel-Einzahlungen zählen wie beim Kontostand nicht), kaufmännisch auf den Cent gerundet. Tage im Minus zählen als 0, gutgeschriebene Zinsen werden mitverzinst. Gezählt wird ab dem Tag des Einschaltens; ein geänderter Satz oder Zeitraum gilt für alles, was noch nicht gutgeschrieben ist. Gutgeschriebene Zeiträume werden nicht nachberechnet, auch nicht bei nachgetragenen Buchungen. Zinsgutschriften lassen sich nicht ändern, nur löschen; der Zeitraum bleibt dann gutgeschrieben. Einstellen darf, wer das Konto ändern darf; Änderungen stehen im Audit-Log. Beispiel: 2 % pro Monat, im November 15 Tage 1.000 und 15 Tage 2.000 → Durchschnitt 1.500 → 30,00 am 30.11.
 
 ### 4.3 Budgets
 Ein Budget ist ein Ausgabenlimit: Name, Betrag und Zeitraum (Tag, Woche, Monat, Jahr), optional begrenzt auf ein Konto oder eine Kategorie. Die Karte zeigt laufenden Zeitraum, Verbrauch, Rest oder Überschreitung. Budgets gehören dem jeweiligen Benutzer; gezählt werden Ausgaben aller für ihn zugänglichen Konten, auch geteilter. Löschen eines Budgets lässt Buchungen unberührt.
@@ -203,7 +204,6 @@ Ein vorhandener Betreiber-Proxy kann optional TLS terminieren; er ist nicht Best
 
 - Stunden, die für eine abgeschlossene Woche nachgetragen werden, bringen keinen Bonus mehr.
 - Buchungen, die für einen schon verzinsten Zeitraum nachgetragen werden, ändern dessen Zinsen nicht mehr.
-- Das Zinsmodell (Satz je Zeitraum auf den durchschnittlichen Tagessaldo) ist ein Vorschlag vom 2026-11-10 und vom Auftraggeber noch zu bestätigen.
 - Arbeitszeiten, die vor der Aufteilung an Mitternacht erfasst wurden, bleiben unverändert am Starttag.
 - Beträge erscheinen überall in der Profilwährung, auch bei Konten in anderer Währung; umgerechnet wird nichts.
 - Nicht enthalten: SSO/OIDC, LDAP, Bankanbindung, MT940, S3/SFTP-Backupziele, E-Mail-Bestätigung bei Registrierung, Restore in der Oberfläche.

@@ -126,6 +126,10 @@ const sections = [
     text: 'Unter jedem Ticket schreiben Melder und Administratoren Kommentare; die jeweils andere Seite bekommt dazu eine Benachrichtigung. Eigene Kommentare kannst du löschen, Administratoren jeden. Das ganze Ticket löschen kann der Melder oder ein Administrator, samt allen Kommentaren. Kommentare bleiben intern, und ein verknüpftes GitHub-Issue bleibt beim Löschen bestehen.',
   },
   {
+    title: 'Changelog: Was ist neu?',
+    text: 'Unter „Administration → Changelog“ stehen alle Versionen seit dem ersten Stand, die neueste oben; sie ist als „Installiert“ markiert. Jede Änderung trägt eine Art: Neu, Geändert, Behoben oder Technik. Über das Suchfeld findest du Änderungen nach Stichwort oder Versionsnummer, die Auswahl daneben filtert nach Art. Was schon im Code steckt, aber noch keine Versionsnummer hat, steht oben unter „Noch nicht veröffentlicht“. Die Seite sehen alle Benutzer.',
+  },
+  {
     title: 'Häufige Fragen: Warum weicht die Arbeitszeit ab?',
     text: 'Pausen werden bei der Zeiterfassung nicht als Arbeitszeit gezählt. Prüfe bei manuellen Einträgen die eingetragene Pause. Das Monats-Soll verteilt deine Wochen-Sollzeit gleichmäßig auf alle Kalendertage des Monats (Wochen-Soll × Kalendertage ÷ 7); Feiertage werden nicht abgezogen.',
   },
