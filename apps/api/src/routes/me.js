@@ -22,7 +22,7 @@ const publicUser = (u) => ({
   payroll_budget_id: u.payroll_budget_id,
   theme: u.theme, accent: u.accent, gravatar_enabled: u.gravatar_enabled, totp_enabled: u.totp_enabled,
   has_ical: !!u.ical_token, last_login_at: u.last_login_at,
-  ui_version: u.ui_version, ui_prefs: normalizeUiPrefs(u.ui_prefs), has_background: !!u.background_key, background_updated_at: u.background_updated_at,
+  ui_version: u.ui_version, ui_choice_seen: u.ui_choice_seen, ui_prefs: normalizeUiPrefs(u.ui_prefs), has_background: !!u.background_key, background_updated_at: u.background_updated_at,
 });
 
 export default async function routes(app) {
@@ -49,6 +49,7 @@ export default async function routes(app) {
       accent: z.enum(['indigo', 'emerald', 'ocean', 'rose', 'amber', 'mono']).optional(),
       gravatar_enabled: z.boolean().optional(),
       ui_version: z.enum(UI_VERSIONS).optional(),
+      ui_choice_seen: z.literal(true).optional(),
       ui_prefs: uiPrefsSchema.optional(),
     }).parse(req.body);
     if (b.payroll_budget_id) {
@@ -64,6 +65,8 @@ export default async function routes(app) {
       }
     }
     const updates = { ...b };
+    // Wer das Design selbst wählt, braucht den einmaligen Auswahldialog nicht mehr
+    if (b.ui_version) updates.ui_choice_seen = true;
     if ('payroll_budget_id' in b && b.payroll_budget_id !== req.user.payroll_budget_id) {
       const parts = new Intl.DateTimeFormat('en-CA', {
         timeZone: config.tz, year: 'numeric', month: '2-digit', day: '2-digit',
