@@ -1405,7 +1405,7 @@ ok('Person ohne Unterlagen jetzt löschbar', await alice.del(`/people/${dropPers
 
 // ---------- Organisationen: Ränge, Gruppen, Rechte pro Funktion
 const catalog = ok('Rechte-Katalog', await alice.get('/teams/catalog'));
-check('Katalog hat alle Funktionen', catalog.modules.length === 14 && catalog.levels.length === 5, JSON.stringify(catalog.modules.map((m) => m.key)));
+check('Katalog hat alle Funktionen', catalog.modules.length === 15 && catalog.levels.length === 5, JSON.stringify(catalog.modules.map((m) => m.key)));
 check('Personen sind keine Funktion der Organisation', !catalog.modules.some((m) => m.key === 'person'));
 check('Keine Personen-Rechte in Organisationen', psql("SELECT count(*) FROM team_permissions WHERE module='person'") === '0');
 const org = ok('Organisation anlegen', await alice.post('/teams', { name: 'E2E Wache' }));
@@ -1560,6 +1560,59 @@ ok('Carol tritt aus', await carol.del(`/teams/${org.id}/members/${uC.id}`));
 check('Gruppen der Ausgetretenen sind weg', psql(`SELECT count(*) FROM team_group_members WHERE team_id='${org.id}'`) === '0');
 ok('Organisation löschen', await bob.del(`/teams/${org.id}`));
 check('Ränge, Gruppen und Rechte sind weg', psql(`SELECT (SELECT count(*) FROM team_ranks WHERE team_id='${org.id}') + (SELECT count(*) FROM team_groups WHERE team_id='${org.id}') + (SELECT count(*) FROM team_permissions WHERE team_id='${org.id}')`) === '0');
+
+// ---------- Fuhrpark (Alice Inhaberin, Bob Mitglied, Carol Leserin, Dave fremd; Organisation „E2E Team“)
+{
+  const fleetTeams = ok('Fuhrpark: Organisationen', await alice.get('/fleet/teams'));
+  check('Fuhrpark: Inhaberin verwaltet', fleetTeams.some((t) => t.id === team.id && t.level === 4), JSON.stringify(fleetTeams));
+  check('Fuhrpark: Mitglied liest nur', (await bob.get('/fleet/teams')).data.some((t) => t.id === team.id && t.level === 2));
+  const gTail = ok('Fuhrpark: Gruppe anlegen', await alice.post('/fleet/groups', { team_id: team.id, name: 'Tailgater 2' }));
+  const gOther = ok('Fuhrpark: Gruppe mit Fahrzeugspalte', await alice.post('/fleet/groups', { team_id: team.id, name: 'Sonstige Fahrzeuge', show_model: true, sort: 9 }));
+  invalid('Fuhrpark: Gruppenname doppelt', await alice.post('/fleet/groups', { team_id: team.id, name: 'tailgater 2' }));
+  denied('Fuhrpark: Mitglied legt keine Gruppe an', await bob.post('/fleet/groups', { team_id: team.id, name: 'X' }), [403]);
+  denied('Fuhrpark: Fremde legen keine Gruppe an', await dave.post('/fleet/groups', { team_id: team.id, name: 'X' }), [403, 404]);
+  const v1 = ok('Fuhrpark: Fahrzeug 1', await alice.post('/fleet/vehicles', { team_id: team.id, group_id: gTail.id, plate: '30 0V91M' }));
+  const v2 = ok('Fuhrpark: Fahrzeug 2', await alice.post('/fleet/vehicles', { team_id: team.id, group_id: gOther.id, plate: '30 RQF0Y', model: 'Buzzard Heli' }));
+  const dup = await alice.post('/fleet/vehicles', { team_id: team.id, group_id: gTail.id, plate: '30 0v91m' });
+  check('Fuhrpark: doppeltes Kennzeichen abgelehnt', dup.status === 400 && /Kennzeichen/.test(dup.data.message || ''), JSON.stringify(dup));
+  ok('Fuhrpark: Reihenfolge', await alice.put('/fleet/vehicles/order', { team_id: team.id, ids: [v2.id, v1.id] }));
+  const c1 = ok('Fuhrpark: Runde anlegen', await alice.post('/fleet/checks', { team_id: team.id, checked_on: dayAt(-7) }));
+  let detail = ok('Fuhrpark: Runde lesen', await alice.get(`/fleet/checks/${c1.id}`));
+  check('Fuhrpark: Runde hat beide Fahrzeuge', detail.items.length === 2, JSON.stringify(detail.items));
+  const it1 = detail.items.find((i) => i.plate === '30 0V91M');
+  ok('Fuhrpark: Werte erfassen', await alice.patch(`/fleet/checks/${c1.id}`, { items: [{ id: it1.id, odometer_km: 13394, last_service_on: dayAt(-8), first_aid_kit_until: dayAt(20), accessories_complete: true, note: 'a|b' }] }));
+  ok('Fuhrpark: erledigt', await alice.patch(`/fleet/checks/${c1.id}`, { done: true }));
+  ok('Bob schreibt im Fuhrpark', await alice.put(`/teams/${team.id}/permissions`, { subject: 'user', subject_id: uB.id, module: 'fleet', level: 3 }));
+  denied('Fuhrpark: Stufe 3 ändert erledigte Runde nicht', await bob.patch(`/fleet/checks/${c1.id}`, { items: [{ id: it1.id, odometer_km: 1 }] }), [403]);
+  denied('Fuhrpark: Stufe 3 nimmt Erledigt nicht zurück', await bob.patch(`/fleet/checks/${c1.id}`, { done: false }), [403]);
+  ok('Fuhrpark: Verwalten ändert erledigte Runde', await alice.patch(`/fleet/checks/${c1.id}`, { items: [{ id: it1.id, note: 'a|b\nc' }] }));
+  check('Fuhrpark: Änderung nach Erledigt im Audit-Log', Number(psql(`SELECT count(*) FROM audit_log WHERE action='fleet_check.updated_after_done' AND entity_id='${c1.id}'`)) >= 1);
+  const md = await alice.raw(`/fleet/checks/${c1.id}/markdown`);
+  const mdText = md.buf.toString('utf8');
+  check('Fuhrpark: Markdown', md.status === 200 && /^Stand: /.test(mdText) && mdText.includes('### Tailgater 2') && mdText.includes('a\\|b c') && mdText.includes('Erledigt?: ✔️'), mdText.slice(0, 400));
+  check('Fuhrpark: Markdown Gruppen nach Sortierung', mdText.indexOf('### Tailgater 2') < mdText.indexOf('### Sonstige Fahrzeuge'));
+  ok('Fuhrpark: Leserin sieht Markdown', await carol.get(`/fleet/checks/${c1.id}`));
+  const c2 = ok('Fuhrpark: Bob legt Runde an', await bob.post('/fleet/checks', { team_id: team.id }));
+  detail = ok('Fuhrpark: Runde 2 lesen', await bob.get(`/fleet/checks/${c2.id}`));
+  check('Fuhrpark: Werte aus letzter Runde übernommen', detail.items.find((i) => i.plate === '30 0V91M')?.odometer_km === 13394, JSON.stringify(detail.items));
+  check('Fuhrpark: Datum heute vorgegeben', String(detail.check.checked_on).slice(0, 10) === dayAt(0), JSON.stringify(detail.check));
+  const list = ok('Fuhrpark: Runden', await carol.get(`/fleet/checks?team_id=${team.id}`));
+  check('Fuhrpark: neueste Runde oben', list[0].id === c2.id && list.length === 2, JSON.stringify(list));
+  denied('Fuhrpark: Fremde sehen Runde nicht', await dave.get(`/fleet/checks/${c1.id}`), [403, 404]);
+  denied('Fuhrpark: Fremde sehen Markdown nicht', await dave.get(`/fleet/checks/${c1.id}/markdown`), [403, 404]);
+  denied('Fuhrpark: Fremde sehen Fahrzeuge nicht', await dave.get(`/fleet/vehicles?team_id=${team.id}`), [403, 404]);
+  invalid('Fuhrpark: Fahrzeug mit Runden nicht löschbar', await alice.del(`/fleet/vehicles/${v1.id}`));
+  invalid('Fuhrpark: Gruppe mit Fahrzeugen nicht löschbar', await alice.del(`/fleet/groups/${gTail.id}`));
+  ok('Fuhrpark: ausmustern', await alice.patch(`/fleet/vehicles/${v1.id}`, { active: false }));
+  ok('Fuhrpark: Kennzeichen wieder frei', await alice.post('/fleet/vehicles', { team_id: team.id, group_id: gTail.id, plate: '30 0V91M' }));
+  invalid('Fuhrpark: Reaktivieren mit belegtem Kennzeichen', await alice.patch(`/fleet/vehicles/${v1.id}`, { active: true }));
+  const c3 = ok('Fuhrpark: Runde 3', await alice.post('/fleet/checks', { team_id: team.id }));
+  const d3 = ok('Fuhrpark: Runde 3 lesen', await alice.get(`/fleet/checks/${c3.id}`));
+  check('Fuhrpark: ausgemustertes fehlt in neuer Runde', !d3.items.some((i) => i.vehicle_id === v1.id) && d3.items.length === 2, JSON.stringify(d3.items));
+  check('Fuhrpark: alte Runde behält es', (await alice.get(`/fleet/checks/${c1.id}`)).data.items.some((i) => i.vehicle_id === v1.id));
+  denied('Fuhrpark: Mitglied löscht keine Runde', await bob.del(`/fleet/checks/${c3.id}`), [403]);
+  ok('Fuhrpark: Runde löschen', await alice.del(`/fleet/checks/${c3.id}`));
+}
 
 // ---------- Admin
 for (const p of ['/admin/overview', '/admin/users', '/admin/roles', '/admin/groups', '/admin/teams', '/admin/settings', '/admin/system', '/admin/audit?limit=10', '/admin/api-keys', '/admin/webhooks', '/admin/backups', '/admin/note-tags']) ok(`GET ${p}`, await admin.get(p));

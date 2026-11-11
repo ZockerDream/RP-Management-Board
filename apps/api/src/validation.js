@@ -8,6 +8,9 @@ export function patchSchema(schema) {
 }
 
 const LABELS = {
+  // Fuhrpark
+  show_model: 'Spalte Fahrzeug', last_service_on: 'Letzte Wartung', first_aid_kit_until: 'Verbandkasten', accessories_complete: 'Zubehör vollständig',
+  checked_on: 'Stand', done: 'Erledigt', group_id: 'Gruppe', ids: 'Reihenfolge', model: 'Fahrzeug',
   ui_version: 'Design-Version', ui_prefs: 'Darstellung', ui_choice_seen: 'Design gewählt',
   achieved_on: 'Datum', active: 'Aktiv', address: 'Adresse', allDay: 'Ganztägig', amount: 'Betrag', archived: 'Archiviert', body: 'Text', booked_at: 'Datum',
   break_minutes: 'Pause', budget_id: 'Konto', category_id: 'Kategorie', checkpoints: 'Checkpoints', checkpoints_reached: 'Erreichte Checkpoints', code: 'Code',
