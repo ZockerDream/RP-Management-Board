@@ -1298,6 +1298,7 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await login(page, 'bob@e2e.test', 'bob-Sehr-Sicher-9931!');
   await go(page, '#/budgets');
   await page.click('#b-transfer');
+  await page.waitForSelector('.modal.open #f-own_budget');
   check('Umbuchung: Quellkonto nicht als eigenes Ziel', await page.evaluate(() => { const from = document.querySelector('#f-from_budget_id').value; return ![...document.querySelectorAll('#f-own_budget option')].some((o) => o.value === from); }));
   await page.selectOption('.modal.open [name=target]', 'user');
   await page.fill('#tr-user-q', 'car');
