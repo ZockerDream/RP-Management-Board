@@ -1368,6 +1368,24 @@ ok('Aktenbild beschriften', await bob.patch(`/case-file-attachments/${caseImage.
 check('Bildunterschrift geändert', (await bob.get(`/case-files/${hitFile.id}`)).data.attachments.find((a) => a.id === caseImage.id)?.caption === 'Tatort, Blick nach Norden');
 denied('Fremder sieht Aktenbild nicht', await dave.get(`/case-file-attachments/${caseImage.id}`), [404]);
 denied('Fremder beschriftet Aktenbild nicht', await dave.patch(`/case-file-attachments/${caseImage.id}`, { caption: 'x' }), [404]);
+// Akten als PDF (Wunsch des Auftraggebers vom 2026-11-11): Kopf immer, Teile wählbar; Einzelbericht
+{
+  const allParts = 'people,vehicles,links,entries,reports,charges,evidence,warrants,images,attachments';
+  const pdf = await carol.raw(`/case-files/${hitFile.id}/pdf?parts=${allParts}`);
+  check('Akten-PDF für Leserin', pdf.status === 200 && pdf.headers.get('content-type') === 'application/pdf' && pdf.buf.subarray(0, 5).toString() === '%PDF-' && pdf.buf.length > 2000, `${pdf.status} ${pdf.headers.get('content-type')} ${pdf.buf.length}`);
+  check('Akten-PDF als Download mit Aktenzeichen', /attachment; filename="akte-[\w-]+\.pdf"/.test(pdf.headers.get('content-disposition') || ''), pdf.headers.get('content-disposition'));
+  const headOnly = await carol.raw(`/case-files/${hitFile.id}/pdf`);
+  check('Akten-PDF nur Kopf ist kleiner', headOnly.status === 200 && headOnly.buf.length < pdf.buf.length, `${headOnly.buf.length} < ${pdf.buf.length}`);
+  check('Akten-PDF ignoriert unbekannte Teile', (await carol.raw(`/case-files/${hitFile.id}/pdf?parts=raketen`)).status === 200);
+  denied('Akten-PDF nicht für Fremde', await dave.get(`/case-files/${hitFile.id}/pdf`), [404]);
+  check('Akten-PDF im Audit-Log', Number(psql(`SELECT count(*) FROM audit_log WHERE action='case_file.exported_pdf' AND entity_id='${hitFile.id}'`)) >= 3);
+  const rpdf = await carol.raw(`/case-file-reports/${report.id}/pdf`);
+  check('Bericht-PDF', rpdf.status === 200 && rpdf.buf.subarray(0, 5).toString() === '%PDF-' && /bericht-[\w-]+-\d+\.pdf/.test(rpdf.headers.get('content-disposition') || ''), `${rpdf.status} ${rpdf.headers.get('content-disposition')}`);
+  check('Entwurf-PDF für Verfasser', (await bob.raw(`/case-file-reports/${amendment.id}/pdf`)).status === 200);
+  denied('Entwurf-PDF nicht für Leserin', await carol.get(`/case-file-reports/${amendment.id}/pdf`), [404]);
+  denied('Bericht-PDF nicht für Fremde', await dave.get(`/case-file-reports/${report.id}/pdf`), [404]);
+  check('Bericht-PDF im Audit-Log', Number(psql(`SELECT count(*) FROM audit_log WHERE action='case_file_report.exported_pdf'`)) >= 2);
+}
 
 ok('Haftbefehl vollstreckt', await bob.post(`/warrants/${warrant.id}/close`, { status: 'executed', note: 'Festnahme am Hafen' }));
 check('Vollstreckt steht nicht mehr in der Fahndungsliste', !(await carol.get('/warrants')).data.some((w) => w.id === warrant.id) && (await carol.get('/warrants?status=all')).data.some((w) => w.id === warrant.id && w.status === 'executed'));

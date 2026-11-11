@@ -5,11 +5,12 @@ import { LEVEL, levelSql, visibleSql, recordLevel, recordOwner, needMessage } fr
 import { audit } from '../audit.js';
 import { patchSchema } from '../validation.js';
 import { today } from '../lib.js';
-import { receiveUpload, sendUpload, removeUpload } from '../uploads.js';
+import { receiveUpload, sendUpload, removeUpload, uploadPath } from '../uploads.js';
 import { uuid, isoDate, isoDateTime, assertPerson, personJoin } from '../records.js';
 import { fileLevelSql, loadFile, assertInvolved } from '../casefile-access.js';
 import { currentCaseFeatures, disabledError } from '../feature-guard.js';
 import { loadCaseFileDetail } from '../casefile-detail.js';
+import { caseFilePdf } from '../casefile-pdf.js';
 
 const STATUS = ['open', 'dormant', 'closed'];
 export const PRIORITIES = ['low', 'normal', 'high', 'urgent'];
@@ -136,6 +137,19 @@ export default async function routes(app) {
 
   app.get('/case-files/:id', authz('casefile:read'), async (req) => {
     return loadCaseFileDetail(req, req.params.id);
+  });
+
+  // Ganze Akte als PDF (Wunsch des Auftraggebers vom 2026-11-11): Kopf immer, weitere Teile per ?parts=…
+  app.get('/case-files/:id/pdf', authz('casefile:read'), async (req, reply) => {
+    const { parts } = z.object({ parts: z.string().max(300).default('') }).parse(req.query);
+    const detail = await loadCaseFileDetail(req, req.params.id);
+    const chosen = new Set(parts.split(',').map((p) => p.trim()).filter(Boolean));
+    const keys = chosen.has('images') ? await many('SELECT id, storage_key FROM case_file_attachments WHERE case_file_id=$1', [detail.id]) : [];
+    const files = new Map(keys.map((k) => [k.id, uploadPath(k.storage_key)]));
+    await audit(req, 'case_file.exported_pdf', 'case_file', detail.id, { parts: [...chosen] });
+    const name = `akte-${String(detail.file_number).replace(/[^A-Za-z0-9_-]+/g, '_')}.pdf`;
+    reply.type('application/pdf').header('content-disposition', `attachment; filename="${name}"`);
+    return reply.send(caseFilePdf(detail, { parts: chosen, features: await currentCaseFeatures(), exportedBy: req.user.name, files }));
   });
 
   app.patch('/case-files/:id', authz('casefile:update'), async (req) => {
