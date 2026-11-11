@@ -65,6 +65,79 @@ export function applyTheme(mode, accent) {
   store.set('bm-accent', accent);
 }
 
+/* ---------- Darstellung V2 ---------- */
+// Werte aus users.ui_prefs (Regeln in apps/api/src/ui-prefs.js). Die Einstellungen rufen das auch für die Live-Vorschau
+// mit noch nicht gespeicherten Werten auf.
+let backgroundShown = null;
+let wantImage = false;
+export function applyUi(user) {
+  const root = document.documentElement;
+  const layer = $('#bg-layer');
+  wantImage = user?.ui_version === 'v2' && user.ui_prefs?.background === 'custom' && !!user.has_background;
+  if (user?.ui_version !== 'v2') {
+    delete root.dataset.ui;
+    delete root.dataset.bg;
+    root.removeAttribute('data-ui-lite');
+    layer?.classList.remove('has-image');
+    store.set('bm-ui', null);
+    return;
+  }
+  const p = user.ui_prefs || {};
+  const bg = p.background === 'custom' && !user.has_background ? 'dusk' : p.background || 'dusk';
+  root.dataset.ui = 'v2';
+  root.dataset.bg = bg === 'custom' ? 'none' : bg;
+  root.style.setProperty('--v2-blur', `${p.blur ?? 22}px`);
+  root.style.setProperty('--v2-alpha', String((p.opacity ?? 52) / 100));
+  root.style.setProperty('--v2-dim', String((p.dim ?? 20) / 100));
+  root.toggleAttribute('data-ui-lite', p.lite !== false);
+  store.set('bm-ui', { bg, blur: p.blur ?? 22, opacity: p.opacity ?? 52, dim: p.dim ?? 20, lite: p.lite !== false });
+  if (bg !== 'custom') {
+    layer?.classList.remove('has-image');
+    return;
+  }
+  // Das Bild braucht die Anmeldung; als data:-URL, weil die CSP keine blob:-Adressen erlaubt
+  const version = `${user.id}:${user.background_updated_at}`;
+  if (backgroundShown === version) {
+    layer?.classList.add('has-image');
+    return;
+  }
+  backgroundShown = version;
+  api.blob('/me/background').then((blob) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  })).then((url) => {
+    if (backgroundShown !== version || !layer) return;
+    layer.style.setProperty('--v2-image', `url("${url}")`);
+    if (wantImage) layer.classList.add('has-image');
+  }).catch(() => { backgroundShown = null; });
+}
+
+// Symbole der Navigation, nur in V2 sichtbar (theme-v2.css)
+const NAV_ICONS = {
+  dashboard: 'M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z', transactions: 'M4 6h16M4 12h16M4 18h10', work: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18zM12 7v5l3 2',
+  budgets: 'M3 7h15a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3zM3 7l12-4v4M16 14h2', spending: 'M12 3v9h9M12 3a9 9 0 1 0 9 9',
+  recurring: 'M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3', goals: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18zM12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8z',
+  reports: 'M4 20V10M10 20V4M16 20v-7M22 20H2', calendar: 'M4 5h16v16H4zM4 10h16M9 3v4M15 3v4', notes: 'M5 3h10l4 4v14H5zM14 3v5h5M8 13h8M8 17h5', todos: 'M4 4h16v16H4zM8 12l3 3 5-6',
+  'sport-run': 'M13 4.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0M6 20l3.5-5 3 2.5 1 4.5M8 11l3.5-3 3 2.5 3 .5M9.5 15l-1.5-4',
+  'sport-swim': 'M2 18c2 0 2-1.5 4-1.5s2 1.5 4 1.5 2-1.5 4-1.5 2 1.5 4 1.5 2-1.5 4-1.5M2 13c2 0 2-1.5 4-1.5s2 1.5 4 1.5 2-1.5 4-1.5 2 1.5 4 1.5 2-1.5 4-1.5M15 4.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0',
+  'sport-bike': 'M2 17a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0M15 17a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0M5.5 17L9 9h6l3.5 8M12 17L9 9M14 6h3',
+  'assets-vehicles': 'M3 13l2-6h14l2 6v5H3zM3 13h18M7 18v2M17 18v2', 'assets-properties': 'M3 11l9-7 9 7M5 10v10h14V10M10 20v-6h4v6',
+  'assets-keys': 'M15 3a6 6 0 1 0 0 12a6 6 0 1 0 0-12zM10.8 13.2L3 21M6 18l3 3M8 16l2 2', 'assets-manage': 'M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M14 4v4M8 10v4M16 16v4',
+  teams: 'M9 11a4 4 0 1 0 0-8a4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.5a4 4 0 0 1 0 7M18 14a6 6 0 0 1 4 6v1', casefiles: 'M3 6h6l2 2h10v11H3z',
+  trainings: 'M2 9l10-5 10 5-10 5zM6 11v5c3 2 9 2 12 0v-5', licenses: 'M3 5h18v14H3zM7 10a2 2 0 1 0 4 0a2 2 0 1 0-4 0M5.5 16c.5-2 5.5-2 7 0M14 10h4M14 14h3',
+  docs: 'M4 4h6a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H4zM20 4h-6a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h7z', 'admin-users': 'M9 11a4 4 0 1 0 0-8a4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.5a4 4 0 0 1 0 7M18 14a6 6 0 0 1 4 6v1',
+  'admin-server': 'M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01', 'admin-tickets': 'M3 7h18v3a2 2 0 0 0 0 4v3H3v-3a2 2 0 0 0 0-4zM13 7v10',
+  help: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18zM9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.7M12 17h.01', changelog: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01',
+  'bug-report': 'M8 8a4 4 0 0 1 8 0v6a4 4 0 0 1-8 0zM12 12v6M4 13h4M16 13h4M5 7l3 2M19 7l-3 2M5 19l3-2M19 19l-3-2',
+  impressum: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18zM12 11v6M12 7.5h.01', datenschutz: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z',
+};
+$$('.sidebar .nav[data-nav]').forEach((n) => {
+  const d = NAV_ICONS[n.dataset.nav];
+  if (d) n.insertAdjacentHTML('afterbegin', `<svg class="nav-i" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`);
+});
+
 export function renderAvatars() {
   const u = state.me;
   if (!u) return;
@@ -267,6 +340,7 @@ export async function reloadMe() {
   state.features = r.features || {};
   setCurrency(r.user.currency);
   applyTheme(r.user.theme || 'system', r.user.accent || 'indigo');
+  applyUi(r.user);
   renderAvatars();
   $$('.nav').forEach((n) => {
     const p = PAGES[n.dataset.nav]?.perm;
@@ -299,11 +373,12 @@ async function logout() {
   try { await api.post('/auth/logout'); } catch { /* ignorieren */ }
   setToken(null);
   state.me = null;
+  applyUi(null);
   history.replaceState(null, '', '#/login');
   route();
 }
 
-onLogout(() => { state.me = null; route(); });
+onLogout(() => { state.me = null; applyUi(null); route(); });
 document.addEventListener('click', async (e) => {
   const popup = $('#notification-popover');
   if (e.target.closest('#bell')) {
@@ -327,7 +402,12 @@ document.addEventListener('click', async (e) => {
     return;
   }
   if (e.target.closest('[data-action=logout]')) logout();
-  if (e.target.closest('#menuBtn')) $('.sidebar').classList.toggle('open');
+  if (e.target.closest('#menuBtn')) $('#menuBtn').setAttribute('aria-expanded', String($('.sidebar').classList.toggle('open')));
+  // Auf dem Handy schließt ein Tippen neben das Menü es wieder
+  else if ($('.sidebar').classList.contains('open') && !e.target.closest('.sidebar')) {
+    $('.sidebar').classList.remove('open');
+    $('#menuBtn').setAttribute('aria-expanded', 'false');
+  }
   const m = e.target.closest('.modal [data-close]');
   if (m) m.closest('.modal').classList.remove('open');
   const tab = e.target.closest('.tabs [data-tab]');
@@ -345,6 +425,31 @@ document.addEventListener('keydown', (e) => {
   }
 });
 window.addEventListener('hashchange', route);
+
+// Tabellen auf dem Handy als Karten (layout.css, .table.stackable): jede Zelle bekommt ihre Spaltenüberschrift.
+// Ein Beobachter erfasst auch Tabellen, die Seiten nachträglich zeichnen; ausgenommen sind schmale Rechentabellen.
+function labelTables() {
+  $$('table.table').forEach((table) => {
+    if (table.closest('.forecast-week, .no-stack')) return;
+    const heads = [];
+    $$('thead tr:last-child > th', table).forEach((th) => { for (let i = 0; i < (th.colSpan || 1); i++) heads.push(th.textContent.trim()); });
+    if (!heads.length) return;
+    table.classList.add('stackable');
+    $$('tbody > tr', table).forEach((tr) => {
+      let col = 0;
+      [...tr.children].forEach((td) => {
+        if (!td.hasAttribute('data-label')) td.setAttribute('data-label', td.colSpan > 1 ? '' : heads[col] || '');
+        col += td.colSpan || 1;
+      });
+    });
+  });
+}
+let labelQueued = false;
+new MutationObserver(() => {
+  if (labelQueued) return;
+  labelQueued = true;
+  requestAnimationFrame(() => { labelQueued = false; labelTables(); });
+}).observe(document.body, { childList: true, subtree: true });
 
 (async () => {
   const cfg = await api.get('/auth/config').catch(() => null);

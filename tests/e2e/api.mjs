@@ -2,7 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
-const BASE = process.env.BASE || 'http://localhost:18088';
+const BASE = process.env.BASE || 'http://localhost:18089';
 const results = { pass: 0, fail: [] };
 const fives = [];
 const check = (name, ok, extra = '') => {
@@ -42,7 +42,7 @@ const invalid = (name, r) => check(name, r.status >= 400 && r.status < 500, `sta
 
 // Der Stack läuft in Europe/Berlin; kurz nach Mitternacht weicht UTC davon ab
 const dayAt = (offset) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date(Date.now() + offset * 86400000));
-const project = process.env.E2E_PROJECT || 'bm-e2e';
+const project = process.env.E2E_PROJECT || 'bm-check';
 const psql = (sql) => execFileSync('docker', ['exec', `${project}-db-1`, 'psql', '-U', 'budget', '-d', 'budget', '-tA', '-c', sql]).toString().trim();
 const runJob = (name) => execFileSync('docker', ['exec', `${project}-worker-1`, 'node', '--input-type=module', '-e', `const { runJob } = await import('/app/src/jobs.js'); await runJob('${name}', { info() {}, warn() {}, error(o, m) { console.error(m, o?.err?.message); process.exitCode = 1; } }); setTimeout(() => process.exit(process.exitCode || 0), 500);`], { stdio: 'pipe' });
 
@@ -1650,6 +1650,52 @@ ok('Ablauf entfernen', await admin.patch(`/admin/users/${uD.id}`, { expires_at: 
 ok('Ohne Ablauf wieder aktiv', await expiringClient.get('/me'));
 ok('User sperren', await admin.patch(`/admin/users/${uD.id}`, { status: 'disabled' }));
 denied('Deaktivierter Login', await anon.post('/auth/login', { email: uD.email, password: uD.password }), [400, 401, 403, 423]);
+
+// ---------- Darstellung V2: Version, Hintergrund, Dashboard-Layout (je Benutzer)
+const putFile = async (who, path, content, name, type) => {
+  const form = new FormData();
+  form.append('file', new Blob([content], { type }), name);
+  const res = await fetch(`${BASE}/api${path}`, { method: 'PUT', headers: { authorization: `Bearer ${who.token.t}` }, body: form });
+  if (res.status >= 500) fives.push(`PUT ${path} -> ${res.status}`);
+  return { status: res.status, data: await res.json().catch(() => null) };
+};
+const uiStart = ok('Darstellung lesen', await carol.get('/me')).user;
+check('Neue Benutzer starten in V1 mit Standardwerten', uiStart.ui_version === 'v1' && uiStart.ui_prefs.background === 'dusk' && uiStart.ui_prefs.dashboard === null && uiStart.has_background === false, JSON.stringify(uiStart.ui_prefs));
+const uiPrefs = { background: 'night', blur: 10, opacity: 70, dim: 35, lite: false, dashboard: { order: ['timer', 'kpis'], hidden: ['fleet'], spans: { timer: 6 } } };
+const uiSaved = ok('Auf V2 wechseln mit eigenem Layout', await carol.patch('/me', { ui_version: 'v2', ui_prefs: uiPrefs }));
+check('V2 und Layout gespeichert', uiSaved.ui_version === 'v2' && JSON.stringify(uiSaved.ui_prefs) === JSON.stringify(uiPrefs), JSON.stringify(uiSaved.ui_prefs));
+check('Layout gilt nur für Carol', (await alice.get('/me')).data.user.ui_prefs.dashboard === null);
+invalid('Unbekannte Version abgelehnt', await carol.patch('/me', { ui_version: 'v3' }));
+invalid('Unvollständige Darstellung abgelehnt', await carol.patch('/me', { ui_prefs: { blur: 5 } }));
+invalid('Unschärfe außerhalb des Bereichs abgelehnt', await carol.patch('/me', { ui_prefs: { ...uiPrefs, blur: 99 } }));
+invalid('Unbekanntes Feld abgelehnt', await carol.patch('/me', { ui_prefs: { ...uiPrefs, css: 'body{}' } }));
+invalid('Ungültige Modulbreite abgelehnt', await carol.patch('/me', { ui_prefs: { ...uiPrefs, dashboard: { order: [], hidden: [], spans: { kpis: 5 } } } }));
+psql(`UPDATE users SET ui_prefs = jsonb_set(ui_prefs, '{dashboard,order}', '["gibtsnicht","kpis","kpis"]') WHERE email='carol@e2e.test'`);
+check('Unbekannte Module fallen beim Lesen weg', JSON.stringify((await carol.get('/me')).data.user.ui_prefs.dashboard.order) === '["kpis"]');
+denied('Ohne eigenes Bild kein Hintergrund', await carol.get('/me/background'), [404]);
+invalid('PDF als Hintergrund abgelehnt', await putFile(carol, '/me/background', pdfBytes, 'x.pdf', 'application/pdf'));
+invalid('Falscher Inhalt als Hintergrund abgelehnt', await putFile(carol, '/me/background', Buffer.from('kein bild'), 'x.png', 'image/png'));
+const bgUser = ok('Hintergrund hochladen', await putFile(carol, '/me/background', png, 'hintergrund.png', 'image/png'));
+check('Hintergrund vermerkt', bgUser?.has_background === true && !!bgUser.background_updated_at, JSON.stringify(bgUser));
+const bgKey1 = psql("SELECT background_key FROM users WHERE email='carol@e2e.test'");
+const bgFile = await carol.raw('/me/background');
+check('Hintergrund abrufbar', bgFile.status === 200 && bgFile.buf.equals(png) && bgFile.headers.get('content-type') === 'image/png', `${bgFile.status} ${bgFile.headers.get('content-type')}`);
+check('Hintergrund nicht öffentlich', (await anon.raw('/me/background')).status === 401);
+check('Andere sehen ihr eigenes (kein) Bild', (await alice.raw('/me/background')).status === 404);
+ok('Eigenes Bild wählen', await carol.patch('/me', { ui_prefs: { ...uiPrefs, background: 'custom' } }));
+ok('Hintergrund ersetzen', await putFile(carol, '/me/background', png, 'neu.png', 'image/png'));
+const bgKey2 = psql("SELECT background_key FROM users WHERE email='carol@e2e.test'");
+check('Altes Bild beim Ersetzen gelöscht', bgKey1 !== bgKey2 && !uploadExists(bgKey1) && uploadExists(bgKey2));
+const bgGone = ok('Hintergrund löschen', await carol.del('/me/background'));
+check('Nach dem Löschen Vorlage statt eigenem Bild', bgGone.has_background === false && bgGone.ui_prefs.background === 'dusk', JSON.stringify(bgGone.ui_prefs));
+check('Bild aus dem Upload-Volume entfernt', !uploadExists(bgKey2));
+ok('Carol zurück auf V1', await carol.patch('/me', { ui_version: 'v1' }));
+const uE = await mk('erwin');
+const erwin = await login(uE.email, uE.password);
+ok('Hintergrund eines später gelöschten Benutzers', await putFile(erwin, '/me/background', png, 'bild.png', 'image/png'));
+const erwinKey = psql(`SELECT background_key FROM users WHERE id='${uE.id}'`);
+ok('Benutzer löschen', await admin.del(`/admin/users/${uE.id}`));
+check('Hintergrund geht mit dem Konto', !!erwinKey && !uploadExists(erwinKey));
 
 // ---------- Aufräum-Kaskaden
 ok('Konto löschen entfernt Budgetbezug', await alice.del(`/budgets/${shared.id}`));

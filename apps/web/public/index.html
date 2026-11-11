@@ -11,8 +11,10 @@
 <link rel="stylesheet" href="css/components.css">
 <link rel="stylesheet" href="css/calendar.css">
 <link rel="stylesheet" href="css/auth.css">
+<link rel="stylesheet" href="css/theme-v2.css">
 </head>
 <body>
+<div id="bg-layer" aria-hidden="true"><i class="bg-sun"></i><i class="bg-m1"></i><i class="bg-m2"></i><i class="bg-m3"></i><i class="bg-dim"></i></div>
 
 <main id="auth" class="auth-screen" aria-live="polite">
   <p class="auth-loading">Wird geladen…</p>
@@ -66,7 +68,7 @@
 
   <div class="main">
     <header class="topbar">
-      <button class="icon-btn menu-btn" id="menuBtn">Menü</button>
+      <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>Menü</button>
       <div class="spacer"></div>
       <div class="notification-wrap">
         <button type="button" class="icon-btn notification-btn" id="bell" aria-label="Benachrichtigungen" aria-expanded="false" aria-controls="notification-popover">

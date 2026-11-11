@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-const BASE = process.env.BASE || 'http://localhost:18088';
+const BASE = process.env.BASE || 'http://localhost:18089';
 const out = '/work/shots';
 const fails = [], problems = [];
 // Gültiges 1×1-PNG, damit der Browser die Vorschau wirklich darstellen kann
@@ -1272,6 +1272,77 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.waitForTimeout(300);
   check('Mobilmenü öffnet', await page.locator('.sidebar.open').count() === 1);
   await page.screenshot({ path: `${out}/mobil-menu.png` });
+  await page.mouse.click(370, 400);
+  await page.waitForTimeout(300);
+  check('Mobilmenü schließt beim Tippen daneben', await page.locator('.sidebar.open').count() === 0);
+  at('mobil benachrichtigungen');
+  await page.click('#bell');
+  await page.waitForSelector('#notification-popover:not([hidden])');
+  const pop = await page.$eval('#notification-popover', (el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, width: innerWidth }; });
+  check('Mobil: Benachrichtigungen ganz im Bild', pop.left >= 0 && pop.right <= pop.width, JSON.stringify(pop));
+  await page.screenshot({ path: `${out}/mobil-benachrichtigungen.png` });
+  await page.click('#bell');
+  at('mobil tabellen als karten');
+  await go(page, '#/transactions');
+  const stacked = await page.evaluate(() => {
+    const table = document.querySelector('#view table.table');
+    const cell = table?.querySelector('tbody td');
+    return { stackable: table?.classList.contains('stackable'), label: cell?.dataset.label, head: getComputedStyle(table.querySelector('thead')).display };
+  });
+  check('Mobil: Tabelle als Karten mit Beschriftung', stacked.stackable && stacked.label === 'Datum' && stacked.head === 'none', JSON.stringify(stacked));
+  await page.screenshot({ path: `${out}/mobil-transactions-karten.png` });
+  await ctx.close();
+}
+
+// ---------- Design V2: Umschalten, eigenes Hintergrundbild, Dashboard anpassen (Wunsch des Auftraggebers vom 2026-11-11)
+{
+  const { page, at, ctx } = await session({ width: 1400, height: 900 });
+  at('v2 umschalten');
+  await login(page, 'bob@e2e.test', 'bob-Sehr-Sicher-9931!');
+  await go(page, '#/settings');
+  await page.click('[data-tab=appearance]');
+  await page.click('[data-version=v2]');
+  await page.waitForSelector('#ap-bg');
+  check('V2 aktiv', await page.evaluate(() => document.documentElement.dataset.ui === 'v2' && !!document.querySelector('.sidebar .nav .nav-i')));
+  check('V2: Karten sind Glas', await page.evaluate(() => getComputedStyle(document.querySelector('#view .card')).backdropFilter.includes('blur')));
+  at('v2 eigenes bild');
+  await page.setInputFiles('#ap-file', { name: 'bild.png', mimeType: 'image/png', buffer: PNG });
+  await page.waitForSelector('[data-bgp=custom].on', { timeout: 10000 });
+  await until(page, () => document.querySelector('#bg-layer').classList.contains('has-image'));
+  check('V2: eigenes Bild als Hintergrund', await page.evaluate(() => getComputedStyle(document.querySelector('#bg-layer')).backgroundImage.startsWith('url("data:image/jpeg')));
+  at('v2 regler');
+  await page.$eval('[data-pref=blur]', (input) => { input.value = '5'; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); });
+  await until(page, () => document.documentElement.style.getPropertyValue('--v2-blur') === '5px');
+  check('V2: Regler wirkt sofort', true);
+  await page.screenshot({ path: `${out}/v2-einstellungen.png` });
+  at('v2 dashboard anpassen');
+  await go(page, '#/dashboard');
+  await page.waitForSelector('.dash-grid');
+  check('V2: Standard-Dashboard mit Stundenzettel', await page.locator('[data-mod=timer]').count() === 1);
+  await page.click('#d-edit');
+  await page.click('[data-mod=categories] [data-hide]');
+  await page.waitForSelector('[data-add=categories]');
+  await page.selectOption('[data-mod=cashflow] [data-span]', '12');
+  await page.waitForSelector('[data-mod=cashflow][data-span="12"]');
+  await page.click('[data-mod=timer] [data-move="-1"]');
+  await page.waitForTimeout(400);
+  const before = await page.$$eval('.dash-mod', (n) => n.map((x) => x.dataset.mod).join());
+  await page.reload();
+  await page.waitForSelector('.dash-grid');
+  await settle(page);
+  const after = await page.$$eval('.dash-mod', (n) => n.map((x) => x.dataset.mod).join());
+  check('V2: Layout bleibt nach dem Neuladen', after === before && !after.includes('categories') && after.indexOf('timer') < after.indexOf('cashflow'), `${before} | ${after}`);
+  await page.screenshot({ path: `${out}/v2-dashboard.png` });
+  await page.click('#d-edit');
+  await page.click('[data-reset]');
+  await page.waitForSelector('[data-mod=categories]');
+  check('V2: Standard wiederherstellen', await page.locator('[data-mod=categories]').count() === 1);
+  at('v2 zurück auf v1');
+  await go(page, '#/settings');
+  await page.click('[data-tab=appearance]');
+  await page.click('[data-version=v1]');
+  await until(page, () => !document.documentElement.dataset.ui);
+  check('Zurück auf V1 ohne Hintergrund', await page.evaluate(() => getComputedStyle(document.querySelector('#bg-layer')).display === 'none'));
   await ctx.close();
 }
 

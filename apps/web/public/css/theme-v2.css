@@ -1,0 +1,135 @@
+/* Darstellung V2 „Glass“ (Wunsch des Auftraggebers vom 2026-11-11): Panels aus Glas über einem Hintergrund.
+   Greift nur mit <html data-ui="v2">, V1 bleibt unverändert. Werte je Benutzer setzt applyUi() in app.js:
+   --v2-blur (Unschärfe), --v2-alpha (Deckkraft der Panels), --v2-dim (Abdunkeln des Bilds), data-bg (Vorlage),
+   data-ui-lite (auf Handys ohne Unschärfe). Diese Datei muss nach theme.css geladen werden: Ihre Flächenfarben
+   ersetzen die der Farbthemen bei gleicher Spezifität. */
+
+.nav-i { display: none; }
+#bg-layer { display: none; }
+
+[data-ui="v2"] {
+  --v2-blur: 22px; --v2-alpha: .52; --v2-dim: .2;
+  --radius: 20px; --radius-sm: 12px;
+}
+[data-ui="v2"][data-theme="dark"] {
+  --bg: #0c0c12; --surface: rgb(16 16 28 / var(--v2-alpha)); --surface-2: rgb(255 255 255 / .07); --border: rgb(255 255 255 / .13);
+  --text: #f4f4f8; --muted: #c3c3d2; --glass-hi: rgb(255 255 255 / .09); --solid: #16161f; --on-image: #f4f4f8;
+  --shadow: 0 24px 48px -24px rgb(0 0 0 / .6);
+}
+[data-ui="v2"][data-theme="light"] {
+  --bg: #eef0f4; --surface: rgb(255 255 255 / calc(var(--v2-alpha) + .22)); --surface-2: rgb(20 20 40 / .05); --border: rgb(255 255 255 / .7);
+  --text: #14141a; --muted: #4a4a57; --glass-hi: rgb(255 255 255 / .8); --solid: #ffffff; --on-image: #ffffff;
+  --shadow: 0 24px 48px -24px rgb(20 20 50 / .35);
+}
+
+/* ---------- Hintergrund ---------- */
+[data-ui="v2"] body { background: var(--bg); }
+[data-ui="v2"] #bg-layer {
+  display: block; position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none;
+  background: var(--sky, var(--bg)); background-size: cover; background-position: center;
+}
+#bg-layer i { position: absolute; inset: 0; display: block; }
+#bg-layer .bg-sun {
+  inset: auto; left: 69%; top: 55%; width: 46vmin; height: 46vmin; transform: translate(-50%, -50%); border-radius: 50%;
+  background: radial-gradient(circle, var(--sun) 0 16%, color-mix(in srgb, var(--sun) 45%, transparent) 26%, transparent 68%);
+}
+:is(#bg-layer, .bg-mini) .bg-m1 { background: var(--m1); clip-path: polygon(0 64%, 12.5% 55%, 22% 59.5%, 36% 48%, 48.5% 58%, 60% 51%, 72% 59.5%, 85% 49%, 100% 58.5%, 100% 100%, 0 100%); }
+:is(#bg-layer, .bg-mini) .bg-m2 { background: var(--m2); clip-path: polygon(0 72.5%, 10% 65.5%, 21% 70.5%, 33% 62.5%, 44.5% 69.5%, 57% 64%, 69.5% 72.5%, 82% 65%, 100% 72%, 100% 100%, 0 100%); }
+:is(#bg-layer, .bg-mini) .bg-m3 { background: var(--m3); clip-path: polygon(0 82%, 15% 76.5%, 29% 83%, 43% 77.5%, 60% 84.5%, 75% 78%, 89% 83.5%, 100% 79.5%, 100% 100%, 0 100%); }
+#bg-layer .bg-dim { background: #000; opacity: var(--v2-dim); }
+[data-ui="v2"][data-theme="light"] #bg-layer .bg-dim { opacity: calc(var(--v2-dim) * .4); }
+
+[data-bg="dusk"] { --sky: linear-gradient(180deg, #1b1640 0%, #5b2a86 52%, #f08a4b 80%); --sun: #ffd29a; --m1: #3a2559; --m2: #24173d; --m3: #120c22; }
+[data-bg="night"] {
+  --sky: radial-gradient(1.5px 1.5px at 9% 8%, #fff 99%, transparent), radial-gradient(1px 1px at 18% 19%, #fff 99%, transparent), radial-gradient(1.4px 1.4px at 29% 5%, #fff 99%, transparent),
+    radial-gradient(1px 1px at 39% 15%, #fff 99%, transparent), radial-gradient(1.7px 1.7px at 48% 7%, #fff 99%, transparent), radial-gradient(1.2px 1.2px at 57% 21%, #fff 99%, transparent),
+    radial-gradient(1.5px 1.5px at 67% 10%, #fff 99%, transparent), radial-gradient(1px 1px at 77% 5%, #fff 99%, transparent), radial-gradient(1.6px 1.6px at 86% 17%, #fff 99%, transparent),
+    radial-gradient(1.2px 1.2px at 94% 8%, #fff 99%, transparent), radial-gradient(1px 1px at 24% 29%, #fff 99%, transparent), radial-gradient(1.3px 1.3px at 82% 30%, #fff 99%, transparent),
+    linear-gradient(180deg, #050816 0%, #0f1d45 55%, #2b4c7e 82%);
+  --sun: #dbe7ff; --m1: #14213d; --m2: #0c1529; --m3: #060b17;
+}
+[data-bg="forest"] { --sky: linear-gradient(180deg, #0f2a2a 0%, #2f6f62 52%, #c9e3b5 82%); --sun: #fff3c4; --m1: #2b5a4a; --m2: #1b3d33; --m3: #0c1f1a; }
+[data-bg="none"] { --sky: var(--bg); }
+[data-bg="none"] #bg-layer :is(.bg-sun, .bg-m1, .bg-m2, .bg-m3) { display: none; }
+[data-ui="v2"] #bg-layer.has-image { background: var(--v2-image) center / cover no-repeat, var(--bg); }
+#bg-layer.has-image :is(.bg-sun, .bg-m1, .bg-m2, .bg-m3) { display: none; }
+
+/* ---------- Glas ---------- */
+[data-ui="v2"] :is(.card, .sidebar, .topbar, .notification-popover, .legal-card, .auth-card, .mod-tools) {
+  background: var(--surface); border: 1px solid var(--border);
+  -webkit-backdrop-filter: blur(var(--v2-blur)) saturate(160%); backdrop-filter: blur(var(--v2-blur)) saturate(160%);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow);
+}
+/* Karten in Karten brauchen keine zweite Unschärfe */
+[data-ui="v2"] :is(.card, .modal .card) :is(.card, .legal-card) { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--surface-2); box-shadow: none; }
+[data-ui="v2"] .card.flat { background: var(--surface-2); }
+/* Dialoge und Popover kräftiger, damit lange Formulare lesbar bleiben */
+[data-ui="v2"] :is(.modal .card, .notification-popover) { background: color-mix(in srgb, var(--solid) 86%, transparent); }
+[data-ui="v2"] .modal { background: rgb(6 6 14 / .45); }
+[data-ui="v2"] :is(input, select, textarea, .md-editor) { background: var(--surface-2); }
+[data-ui="v2"] .md-editor :is(textarea, input) { background: transparent; }
+[data-ui="v2"] select option { background: var(--solid); color: var(--text); }
+[data-ui="v2"] .seg { background: var(--surface-2); border-radius: 999px; padding: 4px; }
+[data-ui="v2"] .seg button { border-radius: 999px; }
+[data-ui="v2"] .seg button.on { background: var(--primary); color: var(--on-primary); box-shadow: none; }
+[data-ui="v2"] .btn { border-radius: var(--radius-sm); }
+[data-ui="v2"] .chart-tip { background: color-mix(in srgb, var(--solid) 92%, transparent); }
+
+/* Bedienelemente direkt über dem Bild bekommen eine eigene Glasfläche */
+[data-ui="v2"] :is(.page-head, .tabs, .toolbar) :is(.seg, select, input, .btn.ghost, .icon-btn),
+[data-ui="v2"] .tabs {
+  background: var(--surface); -webkit-backdrop-filter: blur(var(--v2-blur)) saturate(160%); backdrop-filter: blur(var(--v2-blur)) saturate(160%);
+  border: 1px solid var(--border);
+}
+[data-ui="v2"] .card :is(.toolbar, .tabs) :is(.seg, select, input, .btn.ghost, .icon-btn),
+[data-ui="v2"] .card .tabs { background: var(--surface-2); -webkit-backdrop-filter: none; backdrop-filter: none; }
+[data-ui="v2"] .tabs { border-radius: 16px; padding: 4px 6px; gap: 4px; width: fit-content; max-width: 100%; }
+[data-ui="v2"] .card .tabs { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: none; padding: 0; gap: 22px; width: auto; }
+[data-ui="v2"] .tabs button { padding: 8px 14px; border-radius: 12px; border-bottom: 0; margin: 0; }
+[data-ui="v2"] .tabs button.on { background: var(--primary); color: var(--on-primary); }
+[data-ui="v2"] .card .tabs button { padding: 10px 0; border-radius: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+[data-ui="v2"] .card .tabs button.on { background: none; color: var(--text); border-color: var(--primary); }
+
+/* Text direkt über dem Bild */
+[data-ui="v2"] .page-head :is(h1, p) { color: var(--on-image); text-shadow: 0 1px 2px rgb(0 0 0 / .35), 0 2px 18px rgb(0 0 0 / .45); }
+[data-ui="v2"] .page-head p { opacity: .9; }
+[data-ui="v2"] #view > :is(p.muted, .muted) { color: var(--on-image); text-shadow: 0 1px 8px rgb(0 0 0 / .5); }
+
+/* ---------- Gerüst ---------- */
+[data-ui="v2"] .app { grid-template-columns: 252px minmax(0, 1fr); gap: 16px; padding: 16px; }
+[data-ui="v2"] .sidebar { top: 16px; height: calc(100vh - 32px); border-radius: 22px; padding: 20px 12px 16px; }
+[data-ui="v2"] .brand { padding-bottom: 18px; }
+[data-ui="v2"] .nav-label { padding: 18px 10px 6px; font-weight: 600; }
+[data-ui="v2"] .nav-label.first { padding-top: 6px; }
+[data-ui="v2"] .nav { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; }
+[data-ui="v2"] .nav-i { display: block; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+[data-ui="v2"] .nav:hover { background: var(--surface-2); }
+[data-ui="v2"] .nav.active { background: var(--surface-2); }
+[data-ui="v2"] .nav.active::before { display: none; }
+[data-ui="v2"] .nav.active .nav-i { color: var(--primary); }
+[data-ui="v2"] .sidebar-user { border-color: var(--border); border-radius: 14px; background: var(--surface-2); }
+[data-ui="v2"] .topbar { top: 16px; border-radius: 18px; padding: 8px 10px 8px 16px; margin-bottom: 4px; }
+[data-ui="v2"] .topbar .icon-btn { background: var(--surface-2); border-radius: 12px; }
+[data-ui="v2"] #view { padding: 22px 4px 48px; }
+[data-ui="v2"] .toast { border-radius: 14px; }
+
+/* ---------- Dashboard ---------- */
+[data-ui="v2"] .kpi .value { font-size: 26px; }
+
+/* ---------- Handy und Tablet ---------- */
+@media (max-width: 900px) {
+  [data-ui="v2"] .app { grid-template-columns: minmax(0, 1fr); padding: 10px; gap: 10px; }
+  [data-ui="v2"] .sidebar { position: fixed; z-index: 20; left: 10px; top: 10px; height: calc(100vh - 20px); height: calc(100dvh - 20px); width: min(280px, calc(100vw - 20px)); transform: translateX(calc(-100% - 20px)); }
+  [data-ui="v2"] .sidebar.open { transform: none; }
+  [data-ui="v2"] .topbar { top: 10px; }
+  [data-ui="v2"] #view { padding: 16px 0 40px; }
+  /* Handy-Modus: Unschärfe kostet Akku und ruckelt beim Scrollen, also kräftige Flächen ohne Filter */
+  [data-ui="v2"][data-ui-lite] :is(.card, .sidebar, .topbar, .notification-popover, .tabs, .legal-card, .auth-card),
+  [data-ui="v2"][data-ui-lite] :is(.page-head, .tabs, .toolbar) :is(.seg, select, input, .btn.ghost, .icon-btn) {
+    -webkit-backdrop-filter: none; backdrop-filter: none; background: color-mix(in srgb, var(--solid) 88%, transparent);
+  }
+  [data-ui="v2"][data-ui-lite] .modal { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  [data-ui="v2"] :is(.card, .sidebar, .topbar, .notification-popover, .tabs) { background: color-mix(in srgb, var(--solid) 94%, transparent); }
+}

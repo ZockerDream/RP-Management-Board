@@ -8,6 +8,7 @@ export function patchSchema(schema) {
 }
 
 const LABELS = {
+  ui_version: 'Design-Version', ui_prefs: 'Darstellung',
   achieved_on: 'Datum', active: 'Aktiv', address: 'Adresse', allDay: 'Ganztägig', amount: 'Betrag', archived: 'Archiviert', body: 'Text', booked_at: 'Datum',
   break_minutes: 'Pause', budget_id: 'Konto', category_id: 'Kategorie', checkpoints: 'Checkpoints', checkpoints_reached: 'Erreichte Checkpoints', code: 'Code',
   color: 'Farbe', copies: 'Anzahl Kopien', cost_amount: 'Kostenbetrag', cost_budget_id: 'Kostenkonto', cost_category_id: 'Kostenkategorie', cost_interval: 'Kostenintervall',

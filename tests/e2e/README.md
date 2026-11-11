@@ -1,16 +1,16 @@
 # End-to-End-Tests
 
-Testen die laufende App von außen gegen einen **Wegwerf-Stack**. Nie gegen die produktive Instanz ausführen: Die Skripte legen Daten an und löschen sie.
+Testen die laufende App von außen gegen einen **Wegwerf-Stack** `bm-check` auf Port 18089. Nie gegen die Hauptinstanz `budget-manager` (Port 8088) ausführen: Dort liegen die Daten des Auftraggebers, die Skripte legen Daten an und löschen sie. Außer der Hauptinstanz läuft dauerhaft kein weiterer Stack (Wunsch des Auftraggebers vom 2026-11-11); `bm-check` wird nur für einen Testlauf gestartet und danach mit `down -v` entfernt.
 
 ## Vorbereitung
 
-Eine Env-Datei außerhalb des Repositories anlegen, z. B. `/tmp/bm-e2e/test.env`. Benutzer und Port sind in den Skripten fest eingetragen:
+Eine Env-Datei außerhalb des Repositories anlegen, z. B. `/root/bm-check/test.env` (nicht unter `/tmp`: das leert WSL bei jedem Neustart, der Stack ließe sich dann nicht mehr sauber abbauen). Benutzer, Port und Projektname sind in den Skripten als Vorgabe eingetragen (`BASE`, `E2E_PROJECT` überschreiben sie):
 
 ```
-APP_URL=http://localhost:18088
+APP_URL=http://localhost:18089
 BIND_ADDR=127.0.0.1
-HTTP_PORT=18088
-IMAGE_TAG=e2e
+HTTP_PORT=18089
+IMAGE_TAG=check
 TZ=Europe/Berlin
 DB_NAME=budget
 DB_USER=budget
@@ -22,54 +22,40 @@ ADMIN_PASSWORD=E2e-Admin-Passw0rd!x
 ADMIN_NAME=E2E Admin
 ```
 
-`IMAGE_TAG=e2e` schützt das Image der produktiven Instanz (ohne heißt es wie die Code-Version, z. B. `budget-manager-api:1.1.1`); `-p bm-e2e` trennt Container und Volumes.
+`IMAGE_TAG=check` schützt das Image der produktiven Instanz (ohne heißt es wie die Code-Version, z. B. `budget-manager-api:1.1.1`); `-p bm-check` trennt Container und Volumes.
 
 ## Ablauf
 
 ```bash
-docker compose -p bm-e2e --env-file /tmp/bm-e2e/test.env up -d --build --wait
+docker compose -p bm-check --env-file /root/bm-check/test.env up -d --build --wait
 
 node tests/e2e/api.mjs                    # zuerst: legt die Testdaten an
-docker restart bm-e2e-api-1               # setzt das Login-Limit zurück (10/min pro IP)
+docker restart bm-check-api-1               # setzt das Login-Limit zurück (10/min pro IP)
 node tests/e2e/auth.mjs
 
 # Browser-Tests laufen im Playwright-Container; Screenshots landen im Arbeitsverzeichnis
-mkdir -p /tmp/bm-e2e/work && cp tests/e2e/*.mjs /tmp/bm-e2e/work/ && mkdir -p /tmp/bm-e2e/work/shots
-docker run --rm --network host -v /tmp/bm-e2e/work:/work -w /work mcr.microsoft.com/playwright:v1.49.1-noble \
+mkdir -p /root/bm-check/work && command cp -f tests/e2e/*.mjs /root/bm-check/work/ && mkdir -p /root/bm-check/work/shots
+docker run --rm --network host -v /root/bm-check/work:/work -w /work mcr.microsoft.com/playwright:v1.49.1-noble \
   sh -c 'npm i --silent --no-audit --no-fund playwright@1.49.1 && node browser.mjs'
-docker run --rm --network host -v /tmp/bm-e2e/work:/work -w /work mcr.microsoft.com/playwright:v1.49.1-noble node crawl.mjs
+docker run --rm --network host -v /root/bm-check/work:/work -w /work mcr.microsoft.com/playwright:v1.49.1-noble node crawl.mjs
 
-docker compose -p bm-e2e --env-file /tmp/bm-e2e/test.env down -v   # aufräumen
+docker compose -p bm-check --env-file /root/bm-check/test.env down -v   # aufräumen
 ```
 
 `api.mjs` startet die Jobs `payroll.run`, `interest.run`, `todos.remind` und `reminders` per `docker exec` im Worker-Container und setzt für das Gehaltsbeispiel ein Startdatum, für die Zinsen den Beginn drei Tage zurück und für die Nachtschicht die Startzeit eines Timers direkt in der Datenbank, braucht also Docker auf dem Host (auch, um zu prüfen, dass gelöschte Bilder aus dem Upload-Volume verschwinden). Der Gehaltslauf bucht den Vortag erst ab 03:45 Uhr; die Prüfung „wartet auf das Ausstempeln“ läuft deshalb nur zwischen 03:45 und 23:00 Uhr (Europe/Berlin). Mit `MAILPIT=http://localhost:18025` prüft es zusätzlich den Mailversand über einen Mailpit-Container, sonst entfällt dieser Teil. Zwischen den Stufen die API neu starten. Organisationen prüft `api.mjs` mit Rängen, Gruppen, persönlichen Rechten, Hierarchie, Aktenarten, beschränkten Akten, Schulungs-Teilnahme und Doku-Kategorien; `browser.mjs` legt Rang und Gruppe über die Oberfläche an und setzt ein Recht. Zwischen Mitternacht und 1 Uhr (Sommer 2 Uhr) schlagen Prüfungen mit „heute“ fehl, weil der Server dann noch das UTC-Datum nimmt; in diesem Zeitfenster nicht testen. `browser.mjs` und `crawl.mjs` setzen die Daten aus `api.mjs` voraus; `crawl.mjs` verändert sie stark, also für einen weiteren Lauf den Stack mit `down -v` neu aufsetzen.
-
-## Zweiter Stack neben einem benutzten Test-Stack
-
-Testet jemand gerade von Hand auf 18088, nicht denselben Stack nehmen: `down -v` löscht dessen Daten, und `crawl.mjs` verändert sie. Stattdessen eine Kopie der Env-Datei mit anderem `HTTP_PORT`, `APP_URL` und `IMAGE_TAG` anlegen und die Skripte darauf zeigen lassen:
-
-```bash
-docker compose -p bm-check --env-file /tmp/bm-e2e/check.env up -d --build --wait
-BASE=http://localhost:18089 E2E_PROJECT=bm-check node tests/e2e/api.mjs
-docker restart bm-check-api-1
-BASE=http://localhost:18089 E2E_PROJECT=bm-check node tests/e2e/auth.mjs
-# Im Playwright-Container mit -e BASE=http://localhost:18089
-```
-
-Ein Update des benutzten Stacks ohne Datenverlust: derselbe `up -d --build --wait` ohne `down -v`.
 
 ## Update im selben Browser (upgrade.mjs)
 
 Vor jedem Release ab dem zuletzt ausgerollten Stand ausführen. Der Test findet, was frische Testläufe nie sehen: neue Navigation auf altem Code aus dem Browser-Cache.
 
 ```bash
-git worktree add /tmp/bm-e2e/old <zuletzt-ausgerollter-commit>
-docker compose -p bm-e2e --env-file /tmp/bm-e2e/test.env -f /tmp/bm-e2e/old/docker-compose.yml up -d --build --wait
+git worktree add /root/bm-check/old <zuletzt-ausgerollter-commit>
+docker compose -p bm-check --env-file /root/bm-check/test.env -f /root/bm-check/old/docker-compose.yml up -d --build --wait
 
-# im Playwright-Container wie oben, mit /tmp/bm-e2e/work als /work
+# im Playwright-Container wie oben, mit /root/bm-check/work als /work
 node upgrade.mjs before                     # alte Version benutzen, alles landet im Cache
 
-docker compose -p bm-e2e --env-file /tmp/bm-e2e/test.env up -d --build --wait   # derselbe Befehl wie in update.sh
+docker compose -p bm-check --env-file /root/bm-check/test.env up -d --build --wait   # derselbe Befehl wie in update.sh
 
 node upgrade.mjs after                      # normal neu laden, nichts löschen
 ```
