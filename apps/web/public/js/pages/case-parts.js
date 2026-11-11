@@ -49,6 +49,7 @@ export function reportsHtml(f, { w, m, me, owner }) {
       r.status === 'submitted' && m ? `<button class="btn ghost sm" data-r-return="${r.id}">Zurückgeben</button>` : '',
       r.status === 'approved' && w ? `<button class="btn ghost sm" data-r-amend="${r.id}">Nachtrag</button>` : '',
       `<button class="btn ghost sm" data-r-print="${r.id}">Drucken</button>`,
+      `<button class="btn ghost sm" data-r-pdf="${r.id}">PDF</button>`,
       (r.status === 'draft' && w && (own || m)) || (r.status === 'submitted' && m) ? `<button class="btn ghost sm" data-r-del="${r.id}">Löschen</button>` : '',
     ].join('');
     const meta = [esc(r.author_name || '–'), r.occurred_at && `Zeitpunkt ${fdatetime(r.occurred_at)}`, r.submitted_at && `eingereicht ${fdatetime(r.submitted_at)}`,

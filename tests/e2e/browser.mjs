@@ -1324,6 +1324,28 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await s2.ctx.close();
 }
 
+// ---------- Akten als PDF: Teile wählen, Bericht einzeln (Wunsch des Auftraggebers vom 2026-11-11)
+{
+  const { page, at, ctx } = await session();
+  at('bob akte pdf');
+  await login(page, 'bob@e2e.test', 'bob-Sehr-Sicher-9931!');
+  await go(page, '#/casefiles?tab=files');
+  await page.click('#view [data-open]:has-text("Raubüberfall Bank"), #view tr:has-text("Raubüberfall Bank") [data-open]');
+  await page.waitForSelector('#c-pdf');
+  await page.click('#c-pdf');
+  await page.waitForSelector('.modal.open input[name=parts]');
+  const boxes = await page.$$eval('.modal.open input[name=parts]', (list) => list.map((b) => [b.value, b.checked]));
+  check('PDF-Dialog: alle Teile vorausgewählt', boxes.length >= 8 && boxes.every(([, on]) => on), JSON.stringify(boxes));
+  await page.uncheck('.modal.open input[name=parts][value=images]');
+  const [akte] = await Promise.all([page.waitForEvent('download'), page.click('.modal.open button[type=submit]')]);
+  check('PDF-Download der Akte', /^akte-.*\.pdf$/.test(akte.suggestedFilename()), akte.suggestedFilename());
+  await page.click('#view .tabs [data-tab=d-reports], #view [data-tab=d-reports]').catch(() => {});
+  await page.waitForSelector('[data-r-pdf]');
+  const [bericht] = await Promise.all([page.waitForEvent('download'), page.click('[data-r-pdf]')]);
+  check('PDF-Download eines Berichts', /^bericht-.*\.pdf$/.test(bericht.suggestedFilename()), bericht.suggestedFilename());
+  await ctx.close();
+}
+
 // ---------- Mobil & Dunkel
 {
   const { page, at, ctx } = await session({ width: 390, height: 800 });
