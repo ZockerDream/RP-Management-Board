@@ -8,6 +8,8 @@ export function patchSchema(schema) {
 }
 
 const LABELS = {
+  // Umbuchungen
+  from_budget_id: 'Von Konto', to_budget_id: 'Zielkonto', to_user_id: 'Empfänger', target: 'Ziel',
   // Fuhrpark
   show_model: 'Spalte Fahrzeug', last_service_on: 'Letzte Wartung', first_aid_kit_until: 'Verbandkasten', accessories_complete: 'Zubehör vollständig',
   checked_on: 'Stand', done: 'Erledigt', group_id: 'Gruppe', ids: 'Reihenfolge', model: 'Fahrzeug',

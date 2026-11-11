@@ -1614,6 +1614,91 @@ check('Ränge, Gruppen und Rechte sind weg', psql(`SELECT (SELECT count(*) FROM 
   ok('Fuhrpark: Runde löschen', await alice.del(`/fleet/checks/${c3.id}`));
 }
 
+// ---------- Umbuchungen (Wunsch des Auftraggebers vom 2026-11-11): eigene Konten direkt, Organisation mit
+// „Lesen & Schreiben“ direkt, sonst und an andere Benutzer erst nach Annahme
+{
+  const balance = async (who, id) => (await who.get('/budgets')).data.find((b) => b.id === id);
+  const uA1 = ok('Umbuchung: Konto A', await alice.post('/budgets', { name: 'Umbuch A', type: 'solo', currency: 'EUR' }));
+  const uA2 = ok('Umbuchung: Konto B', await alice.post('/budgets', { name: 'Umbuch B', type: 'solo', currency: 'EUR' }));
+  ok('Umbuchung: Startguthaben', await alice.post('/transactions', { budget_id: uA1.id, type: 'income', amount: '500', booked_at: dayAt(0), title: 'Start' }));
+  const direct = ok('Umbuchung: eigenes Konto', await alice.post('/transfers', { from_budget_id: uA1.id, target: 'own', to_budget_id: uA2.id, amount: '100', title: 'Sparen' }));
+  check('Umbuchung: eigenes Konto sofort gebucht', direct.status === 'accepted', JSON.stringify(direct));
+  let a1 = await balance(alice, uA1.id), a2 = await balance(alice, uA2.id);
+  check('Umbuchung: Salden nach eigener Umbuchung', a1.balance === '400.00' && a2.balance === '100.00', `${a1.balance} ${a2.balance}`);
+  check('Umbuchung zählt als Ausgabe und Einnahme', Number(a1.expenses) === 100 && Number(a2.income) === 100, JSON.stringify({ e: a1.expenses, i: a2.income }));
+  const t2 = (await alice.get(`/transactions?budget_id=${uA2.id}`)).data;
+  const transferTx = (t2.items || t2).find((t) => t.source === 'transfer');
+  check('Umbuchung: Buchung mit Quelle transfer', !!transferTx && /Sparen/.test(transferTx.title), JSON.stringify(t2).slice(0, 300));
+  invalid('Umbuchung: Buchung nicht änderbar', await alice.patch(`/transactions/${transferTx.id}`, { amount: '1' }));
+  invalid('Umbuchung: Buchung nicht löschbar', await alice.del(`/transactions/${transferTx.id}`));
+  invalid('Umbuchung: auf dasselbe Konto', await alice.post('/transfers', { from_budget_id: uA1.id, target: 'own', to_budget_id: uA1.id, amount: '1', title: 'x' }));
+  invalid('Umbuchung: Betrag 0', await alice.post('/transfers', { from_budget_id: uA1.id, target: 'own', to_budget_id: uA2.id, amount: '0', title: 'x' }));
+  // Benutzersuche: nur Name, keine E-Mail
+  const found = ok('Umbuchung: Benutzersuche', await alice.get('/transfers/users?q=dav'));
+  check('Umbuchung: Suche findet Dave ohne E-Mail', found.some((u) => u.id === uD.id) && found.every((u) => !('email' in u)), JSON.stringify(found));
+  check('Umbuchung: Suche ohne mich', !(await alice.get('/transfers/users?q=ali')).data.some((u) => u.id === uA.id));
+  // An einen anderen Benutzer: erst nach Annahme gebucht
+  const daveGiro = ok('Umbuchung: Daves Konto', await dave.post('/budgets', { name: 'Dave Giro', type: 'solo', currency: 'EUR' }));
+  const toDave = ok('Umbuchung: an Dave', await alice.post('/transfers', { from_budget_id: uA1.id, target: 'user', to_user_id: uD.id, amount: '50', title: 'Miete' }));
+  check('Umbuchung: an Dave wartet', toDave.status === 'pending');
+  check('Umbuchung: vor Annahme nichts abgebucht', (await balance(alice, uA1.id)).balance === '400.00');
+  const incoming = ok('Umbuchung: Dave sieht offene', await dave.get('/transfers'));
+  check('Umbuchung: eingehend bei Dave', incoming.incoming.some((t) => t.id === toDave.id && t.amount === '50.00'), JSON.stringify(incoming));
+  check('Umbuchung: ausgehend bei Alice', (await alice.get('/transfers')).data.outgoing.some((t) => t.id === toDave.id));
+  denied('Umbuchung: Fremde nehmen nicht an', await carol.post(`/transfers/${toDave.id}/accept`, { budget_id: daveGiro.id }), [400, 403, 404]);
+  invalid('Umbuchung: Annahme auf fremdes Konto', await dave.post(`/transfers/${toDave.id}/accept`, { budget_id: uA2.id }));
+  ok('Umbuchung: Dave nimmt an', await dave.post(`/transfers/${toDave.id}/accept`, { budget_id: daveGiro.id }));
+  check('Umbuchung: nach Annahme abgebucht', (await balance(alice, uA1.id)).balance === '350.00' && (await balance(dave, daveGiro.id)).balance === '50.00');
+  invalid('Umbuchung: zweimal annehmen', await dave.post(`/transfers/${toDave.id}/accept`, { budget_id: daveGiro.id }));
+  check('Umbuchung: Alice benachrichtigt', (await alice.get('/notifications')).data.items.some((n) => n.kind === 'transfer_decided'));
+  // Organisationskonto: Leserin wartet auf Annahme, Mitglied mit Schreibrecht nimmt an
+  const kasse = ok('Umbuchung: Organisationskonto', await alice.post('/budgets', { name: 'Orga Kasse', type: 'shared', team_id: team.id, currency: 'EUR' }));
+  const carolGiro = ok('Umbuchung: Carols Konto', await carol.post('/budgets', { name: 'Carol Giro', type: 'solo', currency: 'EUR' }));
+  ok('Umbuchung: Carols Guthaben', await carol.post('/transactions', { budget_id: carolGiro.id, type: 'income', amount: '100', booked_at: dayAt(0), title: 'Start' }));
+  const carolTargets = ok('Umbuchung: Ziele Carol', await carol.get('/transfers/targets'));
+  const carolTeam = carolTargets.teams.find((t) => t.team_id === team.id);
+  check('Umbuchung: Carol sieht Organisationskonto ohne Saldo', carolTeam?.budgets.some((b) => b.id === kasse.id && b.direct === false && !('balance' in b)), JSON.stringify(carolTargets));
+  check('Umbuchung: Alice bucht direkt auf Organisation', (await alice.get('/transfers/targets')).data.teams.find((t) => t.team_id === team.id)?.budgets.some((b) => b.id === kasse.id && b.direct));
+  check('Umbuchung: Dave sieht E2E Team nicht', !(await dave.get('/transfers/targets')).data.teams.some((t) => t.team_id === team.id));
+  const toKasse = ok('Umbuchung: Carol an Organisation', await carol.post('/transfers', { from_budget_id: carolGiro.id, target: 'team', to_budget_id: kasse.id, amount: '20', title: 'Beitrag' }));
+  check('Umbuchung: Leserin wartet', toKasse.status === 'pending');
+  invalid('Umbuchung: Nicht-Mitglied an Organisation', await dave.post('/transfers', { from_budget_id: daveGiro.id, target: 'team', to_budget_id: kasse.id, amount: '1', title: 'x' }));
+  check('Umbuchung: Bob sieht eingehend für Organisation', (await bob.get('/transfers')).data.incoming.some((t) => t.id === toKasse.id));
+  check('Umbuchung: Carol nimmt eigene nicht an', ![200].includes((await carol.post(`/transfers/${toKasse.id}/accept`, {})).status));
+  ok('Umbuchung: Bob nimmt an', await bob.post(`/transfers/${toKasse.id}/accept`, {}));
+  check('Umbuchung: Organisation gutgeschrieben', (await balance(alice, kasse.id)).balance === '20.00' && (await balance(carol, carolGiro.id)).balance === '80.00');
+  // Währung, Ablehnen, Zurückziehen, gelöschtes Quellkonto
+  const bobUsd = ok('Umbuchung: Bob USD-Konto', await bob.post('/budgets', { name: 'Bob USD', type: 'solo', currency: 'USD' }));
+  const toBob = ok('Umbuchung: an Bob', await alice.post('/transfers', { from_budget_id: uA1.id, target: 'user', to_user_id: uB.id, amount: '10', title: 'Test' }));
+  invalid('Umbuchung: Annahme in anderer Währung', await bob.post(`/transfers/${toBob.id}/accept`, { budget_id: bobUsd.id }));
+  ok('Umbuchung: Bob lehnt ab', await bob.post(`/transfers/${toBob.id}/decline`, {}));
+  check('Umbuchung: abgelehnt bucht nichts', (await balance(alice, uA1.id)).balance === '350.00');
+  const toRevoke = ok('Umbuchung: zum Zurückziehen', await alice.post('/transfers', { from_budget_id: uA1.id, target: 'user', to_user_id: uD.id, amount: '5', title: 'Weg' }));
+  denied('Umbuchung: nur Absender zieht zurück', await dave.post(`/transfers/${toRevoke.id}/revoke`, {}), [400, 403, 404]);
+  ok('Umbuchung: zurückziehen', await alice.post(`/transfers/${toRevoke.id}/revoke`, {}));
+  invalid('Umbuchung: Zurückgezogene nicht annehmbar', await dave.post(`/transfers/${toRevoke.id}/accept`, { budget_id: daveGiro.id }));
+  const temp = ok('Umbuchung: Temp-Konto', await alice.post('/budgets', { name: 'Temp', type: 'solo', currency: 'EUR' }));
+  const fromTemp = ok('Umbuchung: von Temp', await alice.post('/transfers', { from_budget_id: temp.id, target: 'user', to_user_id: uD.id, amount: '5', title: 'Temp' }));
+  ok('Umbuchung: Temp löschen', await alice.del(`/budgets/${temp.id}`));
+  check('Umbuchung: offene vom gelöschten Konto zurückgezogen', psql(`SELECT status FROM transfers WHERE id='${fromTemp.id}'`) === 'revoked');
+  invalid('Umbuchung: vom gelöschten Konto nicht annehmbar', await dave.post(`/transfers/${fromTemp.id}/accept`, { budget_id: daveGiro.id }));
+  check('Umbuchung: Dave hat keine offenen mehr', (await dave.get('/transfers')).data.incoming.length === 0);
+  // Quelle archiviert, während die Umbuchung offen ist: Annahme scheitert und lehnt ab
+  const late = ok('Umbuchung: Konto für Archiv', await alice.post('/budgets', { name: 'Spaeter', type: 'solo', currency: 'EUR' }));
+  const fromLate = ok('Umbuchung: von Archiv-Konto', await alice.post('/transfers', { from_budget_id: late.id, target: 'user', to_user_id: uD.id, amount: '5', title: 'Spaet' }));
+  ok('Umbuchung: Quelle archivieren', await alice.patch(`/budgets/${late.id}`, { archived: true }));
+  invalid('Umbuchung: Annahme bei archivierter Quelle', await dave.post(`/transfers/${fromLate.id}/accept`, { budget_id: daveGiro.id }));
+  check('Umbuchung: dabei abgelehnt', psql(`SELECT status FROM transfers WHERE id='${fromLate.id}'`) === 'declined');
+  // Zwei Berechtigte nehmen gleichzeitig an: genau einmal gebucht
+  const race = ok('Umbuchung: für gleichzeitige Annahme', await carol.post('/transfers', { from_budget_id: carolGiro.id, target: 'team', to_budget_id: kasse.id, amount: '1', title: 'Gleichzeitig' }));
+  const raced = await Promise.all([alice.post(`/transfers/${race.id}/accept`, {}), bob.post(`/transfers/${race.id}/accept`, {})]);
+  check('Umbuchung: gleichzeitig genau einmal angenommen', raced.filter((r) => r.status === 200).length === 1, raced.map((r) => r.status).join());
+  check('Umbuchung: gleichzeitig genau einmal gebucht', psql(`SELECT count(*) FROM transactions WHERE transfer_id='${race.id}'`) === '2');
+  // Prognose und Zinsjob laufen mit Umbuchungen
+  ok('Umbuchung: Prognose mit Umbuchungen', await alice.get(`/stats/forecast?scope=all&week_start=1&today=${dayAt(0)}`));
+  try { runJob('interest.run'); check('Umbuchung: Zinsjob läuft', true); } catch (e) { check('Umbuchung: Zinsjob läuft', false, e.stderr?.toString()); }
+}
+
 // ---------- Admin
 for (const p of ['/admin/overview', '/admin/users', '/admin/roles', '/admin/groups', '/admin/teams', '/admin/settings', '/admin/system', '/admin/audit?limit=10', '/admin/api-keys', '/admin/webhooks', '/admin/backups', '/admin/note-tags']) ok(`GET ${p}`, await admin.get(p));
 check('Audit-Export', (await admin.raw('/admin/audit/export.csv')).status === 200);

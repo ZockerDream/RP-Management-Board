@@ -115,7 +115,7 @@ await waitForDb().catch((e) => {
 await migrate(app.log);
 await seed(app.log);
 
-const modules = ['auth', 'me', 'finance', 'teams', 'objects', 'vehicle-images', 'calendar', 'admin', 'attachments', 'work', 'integrations', 'spending', 'sport', 'notes', 'todos', 'casefiles', 'case-records', 'case-reports', 'person-files', 'licenses', 'trainings', 'training-exams', 'docs', 'fleet', 'public'];
+const modules = ['auth', 'me', 'finance', 'teams', 'objects', 'vehicle-images', 'calendar', 'admin', 'attachments', 'work', 'integrations', 'spending', 'sport', 'notes', 'todos', 'casefiles', 'case-records', 'case-reports', 'person-files', 'licenses', 'trainings', 'training-exams', 'docs', 'fleet', 'transfers', 'public'];
 await app.register(
   async (api) => {
     guardRoutes(api);
