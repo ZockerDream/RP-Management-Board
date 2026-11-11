@@ -6,16 +6,25 @@
 // Arten: new = Neu, changed = Geändert, fixed = Behoben, tech = Technik und Betrieb
 
 export const UNRELEASED = [
-  ['fixed', 'Personenakte: Fahrzeuge (Besitzer) und ausgegebene Schlüssel fehlten, wenn sie in einem anderen Bereich lagen als die geöffnete Akte – etwa ein privates Fahrzeug in der Personenakte einer Organisation. Jetzt stehen alle, die du sehen darfst, mit ihrem Bereich daneben.'],
-  ['changed', 'Akten starten mit den Personenakten; der Tab „Personenakten“ steht vorn. Die Zahl am Tab „Fallakten“ zeigt Berichte, die auf deine Freigabe warten.'],
-  ['new', 'Einträge direkt in der Personenakte, ohne Fallakte: Datum, Art und Text mit Formatierung, bearbeiten und löschen mit „Lesen & Schreiben“ für Akten. Sie gehören wie Vermerke zum gewählten Bereich.'],
-  ['new', 'Server-Management → Sicherheit & Einstellungen → Akten: Fallakten, Fahndung, Strafkatalog, Berichtsvorlagen und Aktenarten lassen sich für alle aus- und wieder einschalten. Ausgeschaltetes verschwindet aus Akten und Personenakten, die Daten bleiben erhalten. Fahndung, Vorlagen und Aktenarten gibt es nur mit Fallakten, Anklagepunkte nur mit Strafkatalog.'],
-  ['new', 'Dashboard: Prognose für Einnahmen und Ausgaben dieser und nächster Woche aus gebuchten und vorausdatierten Buchungen, Daueraufträgen und Festgehalt, dazu für die restlichen Tage der Schnitt der letzten bis zu 8 Wochen.'],
-  ['new', 'Transaktionen → „Screenshot scannen“: Screenshot der Bank-App wählen, mit Strg+V einfügen oder hineinziehen; die App liest Beträge, Datum und Text und schlägt Buchungen vor. Gebucht wird nur, was du prüfst und anhakst; schon Gebuchtes ist abgewählt. Die Texterkennung läuft auf dem Server, das Bild wird nicht gespeichert.'],
-  ['tech', 'Migration 024 (Einträge in der Personenakte). Das Image enthält jetzt Tesseract (Texterkennung, Deutsch und Englisch); das erste Update baut deshalb etwas länger.'],
 ];
 
 export const CHANGELOG = [
+  {
+    version: '1.3.0', date: '2026-11-11', migrations: '024–025', title: 'Design V2, Personenakten zuerst, Prognose und Screenshot-Buchung',
+    changes: [
+      ['new', 'Design V2 „Glass“: Einstellungen → Darstellung → Design. Alle Seiten zeigen Glas-Panels über einem Hintergrund, die Navigation hat Symbole. Als Hintergrund wählst du eine Vorlage (Dämmerung, Nacht, Wald, ohne Bild) oder lädst ein eigenes Bild hoch, das nur du siehst. Unschärfe, Deckkraft der Panels und Abdunkeln stellst du mit Reglern ein; auf Handys gibt es auf Wunsch kräftige Flächen ohne Unschärfe. V1 bleibt unverändert, der Wechsel ist jederzeit möglich.'],
+      ['new', 'Dashboard in V2 anpassen: Module ziehen oder mit Pfeilen verschieben, Breite wählen (schmal, halb, breit, ganze Breite), ausblenden und wieder hinzufügen; „Standard wiederherstellen“ setzt alles zurück. Neue Module für V2: Stundenzettel mit Stempeluhr, Konten, Sparziele und offene ToDos. Das Layout gilt für dich auf allen Geräten.'],
+      ['new', 'Einträge direkt in der Personenakte, ohne Fallakte: Datum, Art und Text mit Formatierung, bearbeiten und löschen mit „Lesen & Schreiben“ für Akten. Sie gehören wie Vermerke zum gewählten Bereich.'],
+      ['new', 'Server-Management → Sicherheit & Einstellungen → Akten: Fallakten, Fahndung, Strafkatalog, Berichtsvorlagen und Aktenarten lassen sich für alle aus- und wieder einschalten. Ausgeschaltetes verschwindet aus Akten und Personenakten, die Daten bleiben erhalten. Fahndung, Vorlagen und Aktenarten gibt es nur mit Fallakten, Anklagepunkte nur mit Strafkatalog.'],
+      ['new', 'Dashboard: Prognose für Einnahmen und Ausgaben dieser und nächster Woche aus gebuchten und vorausdatierten Buchungen, Daueraufträgen und Festgehalt, dazu für die restlichen Tage der Schnitt der letzten bis zu 8 Wochen.'],
+      ['new', 'Transaktionen → „Screenshot scannen“: Screenshot der Bank-App wählen, mit Strg+V einfügen oder hineinziehen; die App liest Beträge, Datum und Text und schlägt Buchungen vor. Gebucht wird nur, was du prüfst und anhakst; schon Gebuchtes ist abgewählt. Die Texterkennung läuft auf dem Server, das Bild wird nicht gespeichert.'],
+      ['changed', 'Handy: Tabellen werden auf schmalen Bildschirmen zu Karten mit beschrifteten Zeilen statt seitlich abgeschnitten, der Kalender startet dort in der Agenda, Kennzahlen stehen zu zweit nebeneinander, Formulare einspaltig. Das Menü schließt beim Tippen daneben, die Benachrichtigungen passen auf den Bildschirm, Eingabefelder zoomen auf dem iPhone nicht mehr.'],
+      ['changed', 'Akten starten mit den Personenakten; der Tab „Personenakten“ steht vorn. Die Zahl am Tab „Fallakten“ zeigt Berichte, die auf deine Freigabe warten.'],
+      ['fixed', 'Personenakte: Fahrzeuge (Besitzer) und ausgegebene Schlüssel fehlten, wenn sie in einem anderen Bereich lagen als die geöffnete Akte – etwa ein privates Fahrzeug in der Personenakte einer Organisation. Jetzt stehen alle, die du sehen darfst, mit ihrem Bereich daneben.'],
+      ['fixed', 'Fahrzeug, Haus oder Schlüssel speichern, den jemand anderes gerade gelöscht hat, ergab einen internen Fehler; jetzt kommt „Nicht gefunden“.'],
+      ['tech', 'Migration 024 (Einträge in der Personenakte) und 025 (Darstellung V2 je Benutzer, eigenes Hintergrundbild im Upload-Volume). Das Image enthält jetzt Tesseract (Texterkennung, Deutsch und Englisch); das erste Update baut deshalb etwas länger.'],
+    ],
+  },
   {
     version: '1.2.4', date: '2026-11-10', migrations: '023', title: 'Notiz-Tags und Archiv',
     changes: [
