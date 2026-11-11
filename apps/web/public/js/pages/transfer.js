@@ -39,7 +39,17 @@ export async function openTransferDialog(budgets, defaults = {}) {
   const m = $('#modals .modal.open:last-child');
   const field = (name) => $(`#f-${name}`, m)?.closest('label');
   const hint = $('[data-transfer-hint]', m);
+  // Das Quellkonto kann nicht zugleich Ziel sein; die Auswahl folgt dem gewählten Quellkonto
+  const ownSelect = $('#f-own_budget', m);
+  const syncOwn = () => {
+    const fromId = $('#f-from_budget_id', m).value, before = ownSelect.value;
+    const list = targets.own.filter((b) => b.id !== fromId);
+    ownSelect.innerHTML = list.length ? list.map((b) => `<option value="${esc(b.id)}">${esc(b.name)} (${esc(b.currency)})</option>`).join('')
+      : '<option value="">Kein weiteres eigenes Konto</option>';
+    if (list.some((b) => b.id === before)) ownSelect.value = before;
+  };
   const update = () => {
+    syncOwn();
     const kind = $('#f-target', m).value;
     field('own_budget').hidden = kind !== 'own';
     field('team_budget').hidden = kind !== 'team';

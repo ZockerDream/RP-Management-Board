@@ -6,6 +6,11 @@
 // Arten: new = Neu, changed = Geändert, fixed = Behoben, tech = Technik und Betrieb
 
 export const UNRELEASED = [
+  ['new', 'Fuhrpark unter Organisation → Fuhrpark: Fahrzeuge der Organisation in Gruppen (z. B. „Tailgater 2“, „Sonstige Fahrzeuge“ mit Spalte Fahrzeug), Kontrollrunden mit Stand-Datum, km-Stand, letzter Wartung, Verbandkasten, Zubehör vollständig und Notiz. Eine neue Runde übernimmt die Werte der letzten. „Erledigt“ schließt die Runde ab; ändern lässt sie sich danach nur mit „Verwalten“ (steht im Audit-Log). „Als Markdown“ erzeugt die Liste im gewohnten Format zum Kopieren oder Herunterladen, auch für alte Runden. Unabhängig von Object Management → Fahrzeuge.'],
+  ['new', 'Umbuchen unter Konten und Transaktionen: auf eigene Konten und Konten deiner Organisationen sofort, wenn du dort „Lesen & Schreiben“ hast. An andere Benutzer und auf Organisationskonten ohne dieses Recht geht die Umbuchung erst nach Annahme: Der Empfänger wählt sein Konto, gebucht wird erst dann. Offene Umbuchungen stehen oben auf Konten und Transaktionen; ablehnen und zurückziehen bucht nichts. Umbuchungen zählen als Ausgabe und Einnahme und lassen sich nicht ändern oder löschen.'],
+  ['new', 'Akten als PDF: „PDF“ in einer Fallakte exportiert den Aktenkopf mit Sachverhalt und die angekreuzten Teile (Personen, Fahrzeuge, Verknüpfungen, Einträge, freigegebene Berichte, Anklagepunkte, Beweismittel mit Übergabekette, Fahndungen, Bilder, Anhänge als Liste). „PDF“ an einem Bericht exportiert ihn einzeln; Entwürfe tragen den Vermerk „ENTWURF“. Formatierter Text erscheint formatiert, jeder Export steht im Audit-Log.'],
+  ['fixed', 'Dialoge auf dem Handy waren breiter als der Bildschirm, Knöpfe lagen teils außerhalb.'],
+  ['tech', 'Migrationen 027 (Fuhrpark, Recht „Fuhrpark“ in Organisationen und Rollen) und 028 (Umbuchungen); das Image enthält die Schriften DejaVu für PDFs.'],
 ];
 
 export const CHANGELOG = [
