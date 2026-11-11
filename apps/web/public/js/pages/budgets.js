@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { $, esc, eur, empty, budgetTag, progress, openForm, confirmBox, toast, parseAmount, fdate } from '../ui.js';
 import { loadBudgets } from './common.js';
 import { can, state } from '../app.js';
+import { openTransferDialog, renderPendingTransfers } from './transfer.js';
 
 const INTEREST_PERIODS = [{ v: 'daily', l: 'pro Tag' }, { v: 'weekly', l: 'pro Woche' }, { v: 'monthly', l: 'pro Monat' }, { v: 'yearly', l: 'pro Jahr' }];
 const rateText = (rate) => Number(rate).toLocaleString('de-DE', { maximumFractionDigits: 4 });
@@ -49,10 +50,11 @@ export async function render(view) {
   let scope = 'all', sel = null, budgets = [];
   view.innerHTML = `<div class="page-head"><div><h1>Konten</h1><p>Persönliche Konten und geteilte Konten einer Organisation getrennt verwalten</p></div>
     <div class="actions"><div class="seg" id="b-scope"><button data-s="all" class="on">Alle</button><button data-s="solo">Solo</button><button data-s="shared">Geteilt</button></div>
-    ${can('budget:create') ? '<button class="btn" id="b-new">Neues Konto</button>' : ''}</div></div><div id="b-body"></div>`;
+    ${can('transaction:create') ? '<button class="btn ghost" id="b-transfer">Umbuchen</button>' : ''}${can('budget:create') ? '<button class="btn" id="b-new">Neues Konto</button>' : ''}</div></div><div id="b-transfers"></div><div id="b-body"></div>`;
 
   async function load() {
     budgets = await loadBudgets();
+    renderPendingTransfers($('#b-transfers'), load).catch((x) => toast(x.message, true));
     const list = budgets.filter((b) => scope === 'all' || b.type === scope);
     if (!list.find((b) => b.id === sel)) sel = list[0]?.id;
     const cur = list.find((b) => b.id === sel);
@@ -80,6 +82,7 @@ export async function render(view) {
     try {
       if (t('#b-scope [data-s]')) { scope = t('#b-scope [data-s]').dataset.s; document.querySelectorAll('#b-scope button').forEach((x) => x.classList.toggle('on', x === t('#b-scope [data-s]'))); return load(); }
       if (t('#b-new')) { if (await budgetForm()) load(); return; }
+      if (t('#b-transfer')) { if (await openTransferDialog(budgets, { from_budget_id: sel })) load(); return; }
       if (t('[data-edit]')) { if (await budgetForm(budgets.find((b) => b.id === t('[data-edit]').dataset.edit))) load(); return; }
       if (t('[data-del]')) {
         if (await confirmBox('Konto löschen', 'Das Konto inklusive aller Buchungen wird unwiderruflich gelöscht.')) { await api.del(`/budgets/${t('[data-del]').dataset.del}`); toast('Gelöscht'); load(); }

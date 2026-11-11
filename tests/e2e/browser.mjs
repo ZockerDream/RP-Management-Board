@@ -1291,6 +1291,39 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await ctx.close();
 }
 
+// ---------- Umbuchungen: an einen anderen Benutzer senden, dort annehmen (Wunsch des Auftraggebers vom 2026-11-11)
+{
+  const { page, at, ctx } = await session();
+  at('bob umbuchen');
+  await login(page, 'bob@e2e.test', 'bob-Sehr-Sicher-9931!');
+  await go(page, '#/budgets');
+  await page.click('#b-transfer');
+  await page.selectOption('.modal.open [name=target]', 'user');
+  await page.fill('#tr-user-q', 'car');
+  await until(page, () => [...document.querySelectorAll('.modal.open [name=to_user_id] option')].some((o) => o.textContent === 'carol'));
+  await page.selectOption('.modal.open [name=to_user_id]', { label: 'carol' });
+  await page.fill('.modal.open [name=amount]', '12,50');
+  await page.fill('.modal.open [name=title]', 'Browser-Umbuchung');
+  await submit(page);
+  check('Umbuchung: ausgehend sichtbar', /Browser-Umbuchung/.test(await page.textContent('#transfers-pending')));
+  await ctx.close();
+  const s2 = await session({ width: 390, height: 800 });
+  s2.at('carol annehmen');
+  await login(s2.page, 'carol@e2e.test', 'carol-Sehr-Sicher-9931!');
+  await go(s2.page, '#/budgets');
+  check('Umbuchung: Carol sieht eingehend', /Browser-Umbuchung/.test(await s2.page.textContent('#transfers-pending')));
+  check('Umbuchung mobil kein horizontales Scrollen', (await s2.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1);
+  await s2.page.click('#transfers-pending [data-tr-accept]');
+  await s2.page.waitForSelector('.modal.open [name=budget_id]');
+  await submit(s2.page);
+  await go(s2.page, '#/transactions');
+  const row = await s2.page.$('#view tr:has-text("Umbuchung: Browser-Umbuchung")');
+  check('Umbuchung: Buchung bei Carol', !!row);
+  check('Umbuchung: Tag und kein Löschen', !!row && /Umbuchung/.test(await row.textContent()) && !(await row.$('[data-del]')) && !(await row.$('[data-edit]')));
+  await s2.page.screenshot({ path: `${out}/umbuchung-carol.png` });
+  await s2.ctx.close();
+}
+
 // ---------- Mobil & Dunkel
 {
   const { page, at, ctx } = await session({ width: 390, height: 800 });
