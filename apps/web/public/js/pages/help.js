@@ -7,7 +7,7 @@ const sections = [
   },
   {
     title: 'Design V2 und eigener Hintergrund',
-    text: 'Unter „Einstellungen → Darstellung → Design“ wählst du zwischen V1 (klassisch, flach) und V2 (Glas-Panels über einem Hintergrund). Die Wahl gilt nur für dich, auf allen Geräten, und lässt sich jederzeit zurückstellen. In V2 erscheint darunter „Hintergrund“: eine Vorlage anklicken oder mit „Bild hochladen“ ein eigenes Foto wählen (PNG, JPEG oder WebP). Das Bild wird im Browser auf höchstens 2560 Pixel verkleinert, auf dem Server gespeichert und ist nur für dich sichtbar; „Eigenes Bild löschen“ entfernt es wieder. Mit den Reglern stellst du Unschärfe, Deckkraft der Panels und Abdunkeln ein; ist dein Bild sehr hell, hilft Abdunkeln bei der Lesbarkeit. „Auf Handys ohne Unschärfe“ zeigt auf kleinen Bildschirmen kräftige Flächen statt Glas, das spart Akku.',
+    text: 'Unter „Einstellungen → Darstellung → Design“ wählst du zwischen V1 (klassisch, flach) und V2 (Glas-Panels über einem Hintergrund). Beim ersten Login nach der Einführung fragt die App das einmal in einem Dialog ab. Die Wahl gilt nur für dich, auf allen Geräten, und lässt sich jederzeit zurückstellen. In V2 erscheint darunter „Hintergrund“: eine Vorlage anklicken oder mit „Bild hochladen“ ein eigenes Foto wählen (PNG, JPEG oder WebP). Das Bild wird im Browser auf höchstens 2560 Pixel verkleinert, auf dem Server gespeichert und ist nur für dich sichtbar; „Eigenes Bild löschen“ entfernt es wieder. Mit den Reglern stellst du Unschärfe, Deckkraft der Panels und Abdunkeln ein; ist dein Bild sehr hell, hilft Abdunkeln bei der Lesbarkeit. „Auf Handys ohne Unschärfe“ zeigt auf kleinen Bildschirmen kräftige Flächen statt Glas, das spart Akku.',
   },
   {
     title: 'Dashboard anpassen (V2)',

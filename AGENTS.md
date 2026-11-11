@@ -196,7 +196,7 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 - Rechte als `ressource:aktion`, Systemrollen `Admin` und `User`, eigene Rollen frei. Jede Route prüft serverseitig, Frontend blendet nur aus.
 
 ### Darstellung (Wünsche des Auftraggebers vom 2026-11-11)
-- **Design V2 „Glass“:** Jeder Benutzer wählt unter Einstellungen → Darstellung zwischen V1 und V2; V1 bleibt Standard und unverändert. V2 gilt für alle Seiten: Glas-Panels über einem Hintergrund, Symbole in der Navigation.
+- **Design V2 „Glass“:** Jeder Benutzer wählt unter Einstellungen → Darstellung zwischen V1 und V2; V1 bleibt Standard und unverändert. Beim nächsten Login fragt ein Dialog einmalig nach dem Design (Migration 026, `ui_choice_seen`); neue E2E-Logins müssen ihn schließen, sonst liegt er über der Seite. V2 gilt für alle Seiten: Glas-Panels über einem Hintergrund, Symbole in der Navigation.
 - **Hintergrund:** Jeder Benutzer darf selbst ein Bild hochladen (nur für ihn sichtbar), sonst Vorlagen. Regler für Unschärfe, Deckkraft, Abdunkeln; auf Handys standardmäßig ohne Unschärfe.
 - **Dashboard in V2:** fester Standard, den jeder Benutzer anpassen kann (verschieben, Breite, ausblenden, zurücksetzen); zusätzliche Module Stundenzettel, Konten, Sparziele, ToDos.
 - **Handy:** V1 und V2 bis 390 px bedienbar; Tabellen als Karten, Kalender startet in der Agenda.

@@ -1,5 +1,5 @@
 import { api, refresh, setToken, onLogout, hasToken } from './api.js';
-import { $, $$, esc, toast, setCurrency, bindPasswordToggles, passwordToggleButton } from './ui.js';
+import { $, $$, esc, toast, setCurrency, bindPasswordToggles, passwordToggleButton, openForm } from './ui.js';
 import { md5 } from './md5.js';
 
 export const state = { me: null, perms: new Set(), mfaSetup: false, appName: 'RP-Management-Board' };
@@ -366,6 +366,53 @@ async function boot() {
   if (state.me) {
     loadBell();
     if (state.mfaSetup) toast('Zwei-Faktor-Authentifizierung ist vorgeschrieben – bitte einrichten.');
+    else if (!state.me.ui_choice_seen) chooseDesign();
+  }
+}
+
+// Einmalige Auswahl des Designs nach dem Login (Wunsch des Auftraggebers vom 2026-11-11). Ein Klick zeigt die Wahl sofort;
+// „Übernehmen“ speichert sie, „Später“ behält das bisherige Design. In beiden Fällen erscheint der Dialog nicht wieder.
+let choosing = false;
+async function chooseDesign() {
+  if (choosing) return;
+  choosing = true;
+  let pick = state.me.ui_version === 'v2' ? 'v2' : 'v1';
+  const option = (value, title, text) => `<button type="button" role="radio" aria-checked="${pick === value}" class="ui-version ${pick === value ? 'on' : ''}" data-version="${value}">
+    <span class="ui-pv ${value}" aria-hidden="true"><i></i><i></i><i></i><i></i></span><b>${title}</b><small class="muted">${text}</small></button>`;
+  const done = openForm({
+    title: 'Wähle dein Design',
+    submit: 'Übernehmen',
+    cancel: 'Später',
+    wide: true,
+    fields: [{
+      type: 'html',
+      html: `<div><p class="muted" style="margin:0 0 14px">Es gibt jetzt zwei Designs. Klick eins an, um es gleich zu sehen. Ändern kannst du das jederzeit unter Einstellungen → Darstellung.</p>
+        <div class="ui-versions" role="radiogroup" aria-label="Design">
+          ${option('v1', 'V1 · Klassisch', 'Ruhige, flache Flächen wie bisher')}
+          ${option('v2', 'V2 · Glass <span class="tag primary">Neu</span>', 'Glas-Panels über einem Hintergrund, eigenes Bild möglich, Dashboard frei anpassbar')}
+        </div></div>`,
+    }],
+    onSubmit: async () => true,
+  });
+  const modal = $('#modals .modal:last-child');
+  modal.classList.add('design-choice');
+  modal.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-version]');
+    if (!b) return;
+    pick = b.dataset.version;
+    $$('[data-version]', modal).forEach((n) => { n.classList.toggle('on', n === b); n.setAttribute('aria-checked', String(n === b)); });
+    applyUi({ ...state.me, ui_version: pick });
+  });
+  const accepted = await done;
+  try {
+    await api.patch('/me', accepted ? { ui_version: pick, ui_choice_seen: true } : { ui_choice_seen: true });
+    await reloadMe();
+    if (accepted && pick === 'v2') toast('V2 aktiv – Hintergrund und Dashboard passt du unter Einstellungen → Darstellung an.');
+  } catch (error) {
+    applyUi(state.me);
+    toast(error.message, true);
+  } finally {
+    choosing = false;
   }
 }
 

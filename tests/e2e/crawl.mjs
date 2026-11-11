@@ -54,6 +54,8 @@ async function session(role, destructive, pass) {
       await page.waitForSelector('.app:not(.hidden) #view', { timeout: 15000 });
     }
     await settle();
+    // Einmaliger Design-Dialog nach dem Login: schließen, sonst liegt er über allen Seiten
+    if (await page.waitForSelector('.design-choice', { timeout: 1500 }).catch(() => null)) await page.click('.design-choice [data-x]');
   };
   const ensure = async () => { if (await page.evaluate(() => !!document.querySelector('#auth:not(.hidden) #login') || !document.querySelector('.app:not(.hidden) #view'))) { find('ABGEMELDET', where, 'Sitzung nach Aktion beendet'); await login(); } };
   const clearModals = () => page.evaluate(() => { document.querySelectorAll('#modals .modal').forEach((m) => m.remove()); document.querySelectorAll('.modal.open').forEach((m) => m.classList.remove('open')); document.getElementById('toasts')?.replaceChildren(); });

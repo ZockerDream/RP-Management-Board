@@ -20,13 +20,18 @@ async function session(viewport = { width: 1400, height: 900 }) {
 }
 const until = async (page, fn, arg, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await page.evaluate(fn, arg)) return true; await page.waitForTimeout(60); } throw new Error(`Timeout: ${fn}`); };
 const settle = (page) => until(page, () => !/Wird geladen/.test(document.querySelector('#view')?.textContent || '')).catch(() => {});
-async function login(page, email, password) {
+async function login(page, email, password, { keepChoice = false } = {}) {
   await page.goto(`${BASE}/#/login`);
   await page.fill('#login [name=email]', email);
   await page.fill('#login [name=password]', password);
   await page.click('#login button[type=submit]');
   await page.waitForSelector('.app:not(.hidden) #view');
   await settle(page);
+  // Einmaliger Design-Dialog nach dem ersten Login: „Später“, außer der Test prüft ihn selbst
+  if (!keepChoice && (await page.waitForSelector('.design-choice', { timeout: 1500 }).catch(() => null))) {
+    await page.click('.design-choice [data-x]');
+    await page.waitForSelector('.design-choice', { state: 'detached' });
+  }
 }
 const go = async (page, hash) => { await page.evaluate((h) => { location.hash = h; }, hash); await page.waitForTimeout(150); await settle(page); await page.waitForTimeout(200); };
 const submit = async (page) => { await page.click('.modal.open button[type=submit]'); await until(page, () => !document.querySelector('.modal.open form')); await page.waitForTimeout(350); };
@@ -1291,6 +1296,27 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   });
   check('Mobil: Tabelle als Karten mit Beschriftung', stacked.stackable && stacked.label === 'Datum' && stacked.head === 'none', JSON.stringify(stacked));
   await page.screenshot({ path: `${out}/mobil-transactions-karten.png` });
+  await ctx.close();
+}
+
+// ---------- Einmaliger Design-Dialog nach dem Login (Wunsch des Auftraggebers vom 2026-11-11)
+{
+  const { page, at, ctx } = await session({ width: 1400, height: 900 });
+  at('design-dialog');
+  await login(page, 'dave@e2e.test', 'dave-Sehr-Sicher-9931!', { keepChoice: true });
+  await page.waitForSelector('.design-choice', { timeout: 5000 });
+  check('Design-Dialog beim ersten Login', await page.locator('.design-choice [data-version]').count() === 2);
+  await page.click('.design-choice [data-version=v2]');
+  check('Design-Dialog: Klick zeigt V2 sofort', await page.evaluate(() => document.documentElement.dataset.ui === 'v2'));
+  await page.screenshot({ path: `${out}/design-dialog.png` });
+  await page.click('.design-choice button[type=submit]');
+  await page.waitForSelector('.design-choice', { state: 'detached' });
+  await page.reload();
+  await page.waitForSelector('.app:not(.hidden) #view');
+  await settle(page);
+  await page.waitForTimeout(1500);
+  check('Design-Dialog erscheint nur einmal', await page.locator('.design-choice').count() === 0);
+  check('Design-Dialog: Wahl gespeichert', await page.evaluate(() => document.documentElement.dataset.ui === 'v2'));
   await ctx.close();
 }
 

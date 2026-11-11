@@ -60,7 +60,8 @@ users(id, email citext unique, password_hash, name, locale, currency, timezone, 
       status[active|locked|invited|disabled], totp_secret_enc, totp_enabled, force_2fa,
       weekly_work_hours, daily_salary, hourly_bonus_percent, payroll_budget_id, payroll_start_date,
       gravatar_enabled default false, theme, accent, max_budgets, expires_at, last_login_at, deleted_at,
-      ui_version[v1|v2] default v1, ui_prefs jsonb, background_key, background_updated_at)   -- 025
+      ui_version[v1|v2] default v1, ui_prefs jsonb, background_key, background_updated_at,   -- 025
+      ui_choice_seen default false)   -- 026: einmaliger Design-Dialog
 recovery_codes, sessions, password_resets, invitations
 roles(id, name, description, is_system, is_default, data_scope[all|groups|own], max_budgets)
 permissions(id, key), role_permissions, user_roles, groups, group_members, group_roles
@@ -193,7 +194,7 @@ In JS: `levelSql(alias, modul, n, scope)` und `visibleSql(…)` für Listen (Ali
 | Bereich | Endpunkte |
 |---|---|
 | Auth | `POST /auth/login`, `/auth/2fa/login`, `/auth/refresh`, `/auth/logout`, `/auth/forgot`, `/auth/reset`, `/auth/register`, `/auth/invite/:token`; `GET /auth/config` |
-| Konto | `GET/PATCH /me` (auch `ui_version`, `ui_prefs`), `PUT/GET/DELETE /me/background` (eigenes Hintergrundbild, nur PNG/JPEG), `/me/password`, `/me/2fa/*`, `/me/sessions`, `/me/export`, `/me/notification-prefs`, `/me/api-keys`, `/me/ical`, `/notifications` |
+| Konto | `GET/PATCH /me` (auch `ui_version`, `ui_prefs`, `ui_choice_seen: true`; eine Wahl von `ui_version` setzt `ui_choice_seen` mit), `PUT/GET/DELETE /me/background` (eigenes Hintergrundbild, nur PNG/JPEG), `/me/password`, `/me/2fa/*`, `/me/sessions`, `/me/export`, `/me/notification-prefs`, `/me/api-keys`, `/me/ical`, `/notifications` |
 | Admin | `/admin/users`, `/roles`, `/groups`, `/teams`, `/settings`, `/system`, `/overview`, `/audit`, `/api-keys`, `/webhooks`, `/backups`, `/bug-reports` |
 | Organisationen | `GET/POST /teams`, `GET /teams/catalog`, `PATCH/DELETE /teams/:id`, `POST /teams/:id/members` (`rank_id`), `PATCH/DELETE /teams/:id/members/:uid` (`rank_id`, `is_owner`, `group_ids`), `GET /teams/:id/members/:uid/levels`, `DELETE /teams/:id/invitations/:iid`, `POST /teams/:id/ranks`, `PATCH/DELETE /team-ranks/:id` (`name`, `move: up\|down`), `POST /teams/:id/groups`, `PATCH/DELETE /team-groups/:id`, `GET/PUT /teams/:id/permissions` (`subject`, `subject_id`, `module`, `scope_id`, `level` oder `null`) |
 | Finanzen | `/budgets` (mit `interest_rate`, `interest_period`), `/budgets/:id/categories`, `/categories/:id`, `/transactions`, `/transactions/export.csv`, `POST /transactions/scan` (Bild als Multipart, `?today=`; liefert `items`, `text`), `POST /transactions/import` (`{ budget_id, items }`, höchstens 100, Quelle `import`), `/recurring`, `/goals`, `/spending-budgets` |
@@ -272,6 +273,7 @@ Der Server liefert für `[from, to]` die Vereinigung aus eigenen Terminen und ab
 - Bei jedem Seitenwechsel wird `#view` ersetzt; Listener an `view` stapeln sich daher nicht.
 - Navigation wird anhand der Rechte aus `/me` ausgeblendet, Abschnittsüberschriften ohne sichtbaren Eintrag ebenso; das Backend prüft unabhängig davon.
 - Theme: `data-theme` und `data-accent` auf `<html>` steuern CSS-Variablen.
+- Design-Dialog: `boot` (`app.js`) ruft nach dem Login `chooseDesign` auf, solange `ui_choice_seen` falsch ist und keine 2FA-Einrichtung ansteht; Vorschau über `applyUi`, gespeichert wird beim Schließen (`openForm` mit `cancel`). Die E2E-Skripte schließen ihn beim Login mit „Später“, `browser.mjs` prüft ihn mit Dave.
 - Design V2: `applyUi` (`app.js`) setzt `data-ui="v2"`, `data-bg`, `data-ui-lite` und `--v2-blur`/`--v2-alpha`/`--v2-dim` auf `<html>` und lädt ein eigenes Bild in `#bg-layer` (`index.html`); `theme.js` übernimmt die Werte aus `localStorage` (`bm-ui`) schon vor dem ersten Bild. Alles Aussehen steht in `css/theme-v2.css` (nach `theme.css` laden: gleiche Spezifität, spätere Regel gewinnt) und greift nur unter `[data-ui="v2"]`; Glas = `--surface` mit Alpha plus `backdrop-filter`, Karten in Karten ohne zweite Unschärfe. Vorlagen sind reines CSS (Verlauf plus `clip-path`-Berge), keine Bilddateien. Die Symbole der Navigation setzt `app.js` (`NAV_ICONS`), in V1 sind sie ausgeblendet.
 - Dashboard (`pages/dashboard.js`): `MODULES` (Titel, nötige Daten, erlaubte Breiten, Recht, nur V2), `V1_LAYOUT` fest, `V2_LAYOUT` als Standard; `resolveLayout` bildet das gespeicherte Layout auf die verfügbaren Module ab (neue ans Ende). Geladen werden nur die Daten sichtbarer Module. Raster mit 12 Spalten (`.dash-grid`, `--span`), jedes Modul ist ein Container (`container-type: inline-size`), damit z. B. die Prognose schmal einspaltig wird.
 - Handy: `labelTables` (`app.js`, über einen `MutationObserver`) schreibt die Spaltenüberschrift in `data-label` jeder Zelle und setzt `.stackable`; unter 640 px zeigt `layout.css` Tabellen als Karten. Ausgenommen: Tabellen in `.forecast-week` oder `.no-stack`.

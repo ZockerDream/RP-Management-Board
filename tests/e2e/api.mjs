@@ -1650,6 +1650,8 @@ ok('Ablauf entfernen', await admin.patch(`/admin/users/${uD.id}`, { expires_at: 
 ok('Ohne Ablauf wieder aktiv', await expiringClient.get('/me'));
 ok('User sperren', await admin.patch(`/admin/users/${uD.id}`, { status: 'disabled' }));
 denied('Deaktivierter Login', await anon.post('/auth/login', { email: uD.email, password: uD.password }), [400, 401, 403, 423]);
+// browser.mjs prüft mit Dave den einmaligen Design-Dialog
+ok('User wieder aktiv', await admin.patch(`/admin/users/${uD.id}`, { status: 'active' }));
 
 // ---------- Darstellung V2: Version, Hintergrund, Dashboard-Layout (je Benutzer)
 const putFile = async (who, path, content, name, type) => {
@@ -1661,6 +1663,10 @@ const putFile = async (who, path, content, name, type) => {
 };
 const uiStart = ok('Darstellung lesen', await carol.get('/me')).user;
 check('Neue Benutzer starten in V1 mit Standardwerten', uiStart.ui_version === 'v1' && uiStart.ui_prefs.background === 'dusk' && uiStart.ui_prefs.dashboard === null && uiStart.has_background === false, JSON.stringify(uiStart.ui_prefs));
+check('Design-Dialog steht noch aus', uiStart.ui_choice_seen === false);
+invalid('Design-Dialog lässt sich nicht zurücksetzen', await carol.patch('/me', { ui_choice_seen: false }));
+check('„Später“ merkt sich den Dialog', (ok('Design-Dialog geschlossen', await carol.patch('/me', { ui_choice_seen: true }))).ui_choice_seen === true);
+check('Wahl eines Designs erledigt den Dialog', (ok('Bob wählt V1', await bob.patch('/me', { ui_version: 'v1' }))).ui_choice_seen === true);
 const uiPrefs = { background: 'night', blur: 10, opacity: 70, dim: 35, lite: false, dashboard: { order: ['timer', 'kpis'], hidden: ['fleet'], spans: { timer: 6 } } };
 const uiSaved = ok('Auf V2 wechseln mit eigenem Layout', await carol.patch('/me', { ui_version: 'v2', ui_prefs: uiPrefs }));
 check('V2 und Layout gespeichert', uiSaved.ui_version === 'v2' && JSON.stringify(uiSaved.ui_prefs) === JSON.stringify(uiPrefs), JSON.stringify(uiSaved.ui_prefs));
