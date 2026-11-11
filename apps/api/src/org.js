@@ -24,6 +24,7 @@ export const ORG_MODULES = [
   { key: 'training', label: 'Schulungen', levels: [0, 1, 2, 3, 4], hints: { 1: 'Schulungen und Termine sehen, sich an- und abmelden', 2: 'Teilnehmer, Ergebnisse und Übersicht sehen', 3: 'Termine, Teilnehmer und Ergebnisse eintragen', 4: 'Schulungen anlegen, ändern, löschen' } },
   { key: 'license', label: 'Lizenzen', levels: [0, 2, 3, 4], hints: { 2: 'Lizenzen sehen', 3: 'Lizenzen ausstellen, ändern, verlängern, sperren', 4: 'Lizenzen löschen, Lizenzarten verwalten' } },
   { key: 'doc', label: 'Dokumentationen', scope: 'Kategorie', levels: [0, 2, 3, 4], hints: { 2: 'Seiten lesen', 3: 'Seiten schreiben und ändern', 4: 'Seiten löschen, Kategorien verwalten' } },
+  { key: 'fleet', label: 'Fuhrpark', levels: [0, 2, 3, 4], hints: { 2: 'Fahrzeuge und Kontrollrunden sehen, Markdown', 3: 'Fahrzeuge und Gruppen pflegen, Runden erfassen und erledigt setzen', 4: 'Erledigte Runden ändern, löschen' } },
 ];
 const MODULES = new Map(ORG_MODULES.map((m) => [m.key, m]));
 export const MODULE_KEYS = ORG_MODULES.map((m) => m.key);
