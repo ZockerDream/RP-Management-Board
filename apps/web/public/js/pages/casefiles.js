@@ -130,6 +130,29 @@ const entryForm = (file, entry) => openForm({
   },
 });
 
+// Akte als PDF (Wunsch des Auftraggebers vom 2026-11-11): Kopf immer, weitere Teile ankreuzbar (Vorgabe: alle).
+// Ausgeschaltete Teile des Aktensystems stehen nicht zur Wahl.
+const safeName = (s) => String(s).replace(/[^A-Za-z0-9_-]+/g, '_');
+const PDF_PARTS = [
+  ['people', 'Beteiligte Personen'], ['vehicles', 'Fahrzeuge'], ['links', 'Verknüpfte Akten'], ['entries', 'Einträge (Verlauf)'],
+  ['reports', 'Berichte (nur freigegebene)'], ['charges', 'Anklagepunkte', 'charges'], ['evidence', 'Beweismittel mit Übergabekette'],
+  ['warrants', 'Fahndungen', 'wanted'], ['images', 'Bilder'], ['attachments', 'Anhänge (als Liste)'],
+];
+function pdfDialog(f) {
+  const parts = PDF_PARTS.filter(([, , feature]) => !feature || caseFeature(feature));
+  return openForm({
+    title: 'Akte als PDF',
+    fields: [
+      { type: 'html', html: '<p class="muted">Der Aktenkopf mit Sachverhalt ist immer enthalten. Wähle, was zusätzlich hinein soll.</p>' },
+      { name: 'parts', label: 'Teile', type: 'multi', options: parts.map(([v, l]) => ({ v, l })), value: parts.map(([v]) => v), full: true },
+    ],
+    submit: 'Exportieren',
+    onSubmit: async (v) => {
+      await api.download(`/case-files/${f.id}/pdf?parts=${encodeURIComponent(v.parts.join(','))}`, `akte-${safeName(f.file_number)}.pdf`);
+    },
+  });
+}
+
 export async function render(view, params) {
   let files = [];
   let detail = null;
@@ -210,7 +233,7 @@ export async function render(view, params) {
     el.className = 'case-detail';
     el.innerHTML = `<div class="card"><div class="card-head"><div><h2>${esc(f.file_number)} · ${esc(f.title)}</h2>
         <div class="row wrap">${tag(...CASE_STATUS[f.status])} ${P.st(P.PRIORITY, f.priority)} ${scopeTag(f)}${f.type_name && caseFeature('types') ? ` ${tag('', f.type_name)}` : ''}${f.restricted ? ` ${tag('warn', 'Beschränkt')}` : ''}</div></div>
-        <div class="row wrap no-print"><button class="btn ghost sm" id="c-back">Zurück</button><button class="btn ghost sm" id="c-print">Drucken</button>${w ? '<button class="btn ghost sm" id="c-edit">Bearbeiten</button>' : ''}
+        <div class="row wrap no-print"><button class="btn ghost sm" id="c-back">Zurück</button><button class="btn ghost sm" id="c-print">Drucken</button><button class="btn ghost sm" id="c-pdf">PDF</button>${w ? '<button class="btn ghost sm" id="c-edit">Bearbeiten</button>' : ''}
         ${f.team_id && f.level >= 4 && can('casefile:update') ? '<button class="btn ghost sm" id="c-access">Zugriff</button>' : ''}
         ${f.level >= 4 && can('casefile:delete') ? '<button class="btn ghost sm" id="c-del">Löschen</button>' : ''}</div></div>
         <dl class="case-meta">
@@ -325,6 +348,7 @@ export async function render(view, params) {
     const find = (list, id) => list.find((x) => x.id === id);
     if (target.id === 'c-back') { await reload(); ctx.url('#/casefiles?tab=files'); return false; }
     if (target.id === 'c-print') { printArea($('#c-main .case-detail')); return false; }
+    if (target.id === 'c-pdf') { await pdfDialog(f); return false; }
     if (target.id === 'c-edit') return fileForm(f, fileTeams(), types);
     if (target.id === 'c-access') return accessForm(f);
     if (target.id === 'c-del') {
@@ -363,6 +387,7 @@ export async function render(view, params) {
     }
     if (d.rReturn) return P.reviewForm(find(f.reports, d.rReturn));
     if (d.rPrint) { printArea(target.closest('.case-report')); return false; }
+    if (d.rPdf) { await api.download(`/case-file-reports/${d.rPdf}/pdf`, `bericht-${safeName(f.file_number)}-${find(f.reports, d.rPdf)?.number ?? ''}.pdf`); return false; }
     if (d.rDel) return (await confirmBox('Bericht löschen', 'Der Bericht wird endgültig gelöscht.')) && api.del(`/case-file-reports/${d.rDel}`);
     // Anklagepunkte
     if (target.id === 'ch-new') return P.chargeForm(f);

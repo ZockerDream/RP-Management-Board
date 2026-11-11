@@ -1368,6 +1368,24 @@ ok('Aktenbild beschriften', await bob.patch(`/case-file-attachments/${caseImage.
 check('Bildunterschrift geändert', (await bob.get(`/case-files/${hitFile.id}`)).data.attachments.find((a) => a.id === caseImage.id)?.caption === 'Tatort, Blick nach Norden');
 denied('Fremder sieht Aktenbild nicht', await dave.get(`/case-file-attachments/${caseImage.id}`), [404]);
 denied('Fremder beschriftet Aktenbild nicht', await dave.patch(`/case-file-attachments/${caseImage.id}`, { caption: 'x' }), [404]);
+// Akten als PDF (Wunsch des Auftraggebers vom 2026-11-11): Kopf immer, Teile wählbar; Einzelbericht
+{
+  const allParts = 'people,vehicles,links,entries,reports,charges,evidence,warrants,images,attachments';
+  const pdf = await carol.raw(`/case-files/${hitFile.id}/pdf?parts=${allParts}`);
+  check('Akten-PDF für Leserin', pdf.status === 200 && pdf.headers.get('content-type') === 'application/pdf' && pdf.buf.subarray(0, 5).toString() === '%PDF-' && pdf.buf.length > 2000, `${pdf.status} ${pdf.headers.get('content-type')} ${pdf.buf.length}`);
+  check('Akten-PDF als Download mit Aktenzeichen', /attachment; filename="akte-[\w-]+\.pdf"/.test(pdf.headers.get('content-disposition') || ''), pdf.headers.get('content-disposition'));
+  const headOnly = await carol.raw(`/case-files/${hitFile.id}/pdf`);
+  check('Akten-PDF nur Kopf ist kleiner', headOnly.status === 200 && headOnly.buf.length < pdf.buf.length, `${headOnly.buf.length} < ${pdf.buf.length}`);
+  check('Akten-PDF ignoriert unbekannte Teile', (await carol.raw(`/case-files/${hitFile.id}/pdf?parts=raketen`)).status === 200);
+  denied('Akten-PDF nicht für Fremde', await dave.get(`/case-files/${hitFile.id}/pdf`), [404]);
+  check('Akten-PDF im Audit-Log', Number(psql(`SELECT count(*) FROM audit_log WHERE action='case_file.exported_pdf' AND entity_id='${hitFile.id}'`)) >= 3);
+  const rpdf = await carol.raw(`/case-file-reports/${report.id}/pdf`);
+  check('Bericht-PDF', rpdf.status === 200 && rpdf.buf.subarray(0, 5).toString() === '%PDF-' && /bericht-[\w-]+-\d+\.pdf/.test(rpdf.headers.get('content-disposition') || ''), `${rpdf.status} ${rpdf.headers.get('content-disposition')}`);
+  check('Entwurf-PDF für Verfasser', (await bob.raw(`/case-file-reports/${amendment.id}/pdf`)).status === 200);
+  denied('Entwurf-PDF nicht für Leserin', await carol.get(`/case-file-reports/${amendment.id}/pdf`), [404]);
+  denied('Bericht-PDF nicht für Fremde', await dave.get(`/case-file-reports/${report.id}/pdf`), [404]);
+  check('Bericht-PDF im Audit-Log', Number(psql(`SELECT count(*) FROM audit_log WHERE action='case_file_report.exported_pdf'`)) >= 2);
+}
 
 ok('Haftbefehl vollstreckt', await bob.post(`/warrants/${warrant.id}/close`, { status: 'executed', note: 'Festnahme am Hafen' }));
 check('Vollstreckt steht nicht mehr in der Fahndungsliste', !(await carol.get('/warrants')).data.some((w) => w.id === warrant.id) && (await carol.get('/warrants?status=all')).data.some((w) => w.id === warrant.id && w.status === 'executed'));
@@ -1405,7 +1423,7 @@ ok('Person ohne Unterlagen jetzt löschbar', await alice.del(`/people/${dropPers
 
 // ---------- Organisationen: Ränge, Gruppen, Rechte pro Funktion
 const catalog = ok('Rechte-Katalog', await alice.get('/teams/catalog'));
-check('Katalog hat alle Funktionen', catalog.modules.length === 14 && catalog.levels.length === 5, JSON.stringify(catalog.modules.map((m) => m.key)));
+check('Katalog hat alle Funktionen', catalog.modules.length === 15 && catalog.levels.length === 5, JSON.stringify(catalog.modules.map((m) => m.key)));
 check('Personen sind keine Funktion der Organisation', !catalog.modules.some((m) => m.key === 'person'));
 check('Keine Personen-Rechte in Organisationen', psql("SELECT count(*) FROM team_permissions WHERE module='person'") === '0');
 const org = ok('Organisation anlegen', await alice.post('/teams', { name: 'E2E Wache' }));
@@ -1560,6 +1578,150 @@ ok('Carol tritt aus', await carol.del(`/teams/${org.id}/members/${uC.id}`));
 check('Gruppen der Ausgetretenen sind weg', psql(`SELECT count(*) FROM team_group_members WHERE team_id='${org.id}'`) === '0');
 ok('Organisation löschen', await bob.del(`/teams/${org.id}`));
 check('Ränge, Gruppen und Rechte sind weg', psql(`SELECT (SELECT count(*) FROM team_ranks WHERE team_id='${org.id}') + (SELECT count(*) FROM team_groups WHERE team_id='${org.id}') + (SELECT count(*) FROM team_permissions WHERE team_id='${org.id}')`) === '0');
+
+// ---------- Fuhrpark (Alice Inhaberin, Bob Mitglied, Carol Leserin, Dave fremd; Organisation „E2E Team“)
+{
+  const fleetTeams = ok('Fuhrpark: Organisationen', await alice.get('/fleet/teams'));
+  check('Fuhrpark: Inhaberin verwaltet', fleetTeams.some((t) => t.id === team.id && t.level === 4), JSON.stringify(fleetTeams));
+  check('Fuhrpark: Mitglied liest nur', (await bob.get('/fleet/teams')).data.some((t) => t.id === team.id && t.level === 2));
+  const gTail = ok('Fuhrpark: Gruppe anlegen', await alice.post('/fleet/groups', { team_id: team.id, name: 'Tailgater 2' }));
+  const gOther = ok('Fuhrpark: Gruppe mit Fahrzeugspalte', await alice.post('/fleet/groups', { team_id: team.id, name: 'Sonstige Fahrzeuge', show_model: true, sort: 9 }));
+  invalid('Fuhrpark: Gruppenname doppelt', await alice.post('/fleet/groups', { team_id: team.id, name: 'tailgater 2' }));
+  denied('Fuhrpark: Mitglied legt keine Gruppe an', await bob.post('/fleet/groups', { team_id: team.id, name: 'X' }), [403]);
+  denied('Fuhrpark: Fremde legen keine Gruppe an', await dave.post('/fleet/groups', { team_id: team.id, name: 'X' }), [403, 404]);
+  const v1 = ok('Fuhrpark: Fahrzeug 1', await alice.post('/fleet/vehicles', { team_id: team.id, group_id: gTail.id, plate: '30 0V91M' }));
+  const v2 = ok('Fuhrpark: Fahrzeug 2', await alice.post('/fleet/vehicles', { team_id: team.id, group_id: gOther.id, plate: '30 RQF0Y', model: 'Buzzard Heli' }));
+  const dup = await alice.post('/fleet/vehicles', { team_id: team.id, group_id: gTail.id, plate: '30 0v91m' });
+  check('Fuhrpark: doppeltes Kennzeichen abgelehnt', dup.status === 400 && /Kennzeichen/.test(dup.data.message || ''), JSON.stringify(dup));
+  ok('Fuhrpark: Reihenfolge', await alice.put('/fleet/vehicles/order', { team_id: team.id, ids: [v2.id, v1.id] }));
+  const c1 = ok('Fuhrpark: Runde anlegen', await alice.post('/fleet/checks', { team_id: team.id, checked_on: dayAt(-7) }));
+  let detail = ok('Fuhrpark: Runde lesen', await alice.get(`/fleet/checks/${c1.id}`));
+  check('Fuhrpark: Runde hat beide Fahrzeuge', detail.items.length === 2, JSON.stringify(detail.items));
+  const it1 = detail.items.find((i) => i.plate === '30 0V91M');
+  ok('Fuhrpark: Werte erfassen', await alice.patch(`/fleet/checks/${c1.id}`, { items: [{ id: it1.id, odometer_km: 13394, last_service_on: dayAt(-8), first_aid_kit_until: dayAt(20), accessories_complete: true, note: 'a|b' }] }));
+  ok('Fuhrpark: erledigt', await alice.patch(`/fleet/checks/${c1.id}`, { done: true }));
+  ok('Bob schreibt im Fuhrpark', await alice.put(`/teams/${team.id}/permissions`, { subject: 'user', subject_id: uB.id, module: 'fleet', level: 3 }));
+  denied('Fuhrpark: Stufe 3 ändert erledigte Runde nicht', await bob.patch(`/fleet/checks/${c1.id}`, { items: [{ id: it1.id, odometer_km: 1 }] }), [403]);
+  denied('Fuhrpark: Stufe 3 nimmt Erledigt nicht zurück', await bob.patch(`/fleet/checks/${c1.id}`, { done: false }), [403]);
+  ok('Fuhrpark: Verwalten ändert erledigte Runde', await alice.patch(`/fleet/checks/${c1.id}`, { items: [{ id: it1.id, note: 'a|b\nc' }] }));
+  check('Fuhrpark: Änderung nach Erledigt im Audit-Log', Number(psql(`SELECT count(*) FROM audit_log WHERE action='fleet_check.updated_after_done' AND entity_id='${c1.id}'`)) >= 1);
+  const md = await alice.raw(`/fleet/checks/${c1.id}/markdown`);
+  const mdText = md.buf.toString('utf8');
+  check('Fuhrpark: Markdown', md.status === 200 && /^Stand: /.test(mdText) && mdText.includes('### Tailgater 2') && mdText.includes('a\\|b c') && mdText.includes('Erledigt?: ✔️'), mdText.slice(0, 400));
+  check('Fuhrpark: Markdown Gruppen nach Sortierung', mdText.indexOf('### Tailgater 2') < mdText.indexOf('### Sonstige Fahrzeuge'));
+  ok('Fuhrpark: Leserin sieht Markdown', await carol.get(`/fleet/checks/${c1.id}`));
+  const c2 = ok('Fuhrpark: Bob legt Runde an', await bob.post('/fleet/checks', { team_id: team.id }));
+  detail = ok('Fuhrpark: Runde 2 lesen', await bob.get(`/fleet/checks/${c2.id}`));
+  check('Fuhrpark: Werte aus letzter Runde übernommen', detail.items.find((i) => i.plate === '30 0V91M')?.odometer_km === 13394, JSON.stringify(detail.items));
+  check('Fuhrpark: Datum heute vorgegeben', String(detail.check.checked_on).slice(0, 10) === dayAt(0), JSON.stringify(detail.check));
+  const list = ok('Fuhrpark: Runden', await carol.get(`/fleet/checks?team_id=${team.id}`));
+  check('Fuhrpark: neueste Runde oben', list[0].id === c2.id && list.length === 2, JSON.stringify(list));
+  denied('Fuhrpark: Fremde sehen Runde nicht', await dave.get(`/fleet/checks/${c1.id}`), [403, 404]);
+  denied('Fuhrpark: Fremde sehen Markdown nicht', await dave.get(`/fleet/checks/${c1.id}/markdown`), [403, 404]);
+  denied('Fuhrpark: Fremde sehen Fahrzeuge nicht', await dave.get(`/fleet/vehicles?team_id=${team.id}`), [403, 404]);
+  invalid('Fuhrpark: Fahrzeug mit Runden nicht löschbar', await alice.del(`/fleet/vehicles/${v1.id}`));
+  invalid('Fuhrpark: Gruppe mit Fahrzeugen nicht löschbar', await alice.del(`/fleet/groups/${gTail.id}`));
+  ok('Fuhrpark: ausmustern', await alice.patch(`/fleet/vehicles/${v1.id}`, { active: false }));
+  ok('Fuhrpark: Kennzeichen wieder frei', await alice.post('/fleet/vehicles', { team_id: team.id, group_id: gTail.id, plate: '30 0V91M' }));
+  invalid('Fuhrpark: Reaktivieren mit belegtem Kennzeichen', await alice.patch(`/fleet/vehicles/${v1.id}`, { active: true }));
+  const c3 = ok('Fuhrpark: Runde 3', await alice.post('/fleet/checks', { team_id: team.id }));
+  const d3 = ok('Fuhrpark: Runde 3 lesen', await alice.get(`/fleet/checks/${c3.id}`));
+  check('Fuhrpark: ausgemustertes fehlt in neuer Runde', !d3.items.some((i) => i.vehicle_id === v1.id) && d3.items.length === 2, JSON.stringify(d3.items));
+  check('Fuhrpark: alte Runde behält es', (await alice.get(`/fleet/checks/${c1.id}`)).data.items.some((i) => i.vehicle_id === v1.id));
+  denied('Fuhrpark: Mitglied löscht keine Runde', await bob.del(`/fleet/checks/${c3.id}`), [403]);
+  ok('Fuhrpark: Runde löschen', await alice.del(`/fleet/checks/${c3.id}`));
+}
+
+// ---------- Umbuchungen (Wunsch des Auftraggebers vom 2026-11-11): eigene Konten direkt, Organisation mit
+// „Lesen & Schreiben“ direkt, sonst und an andere Benutzer erst nach Annahme
+{
+  // Ohne neuen Login (Login-Limit 10/min) und ohne Alices Konten, die browser.mjs nachrechnet:
+  // Bob ist Inhaber, Dave Mitglied mit Schreibrecht und Empfänger, Carol Leserin; Alice bleibt außen vor
+  const [fritz, hugo, gina, ida, uF, uH, uG, uI] = [bob, dave, carol, dave, uB, uD, uC, uD];
+  const uorg = ok('Umbuchung: Organisation', await fritz.post('/teams', { name: 'Umbuch-Orga' }));
+  ok('Umbuchung: Hugo Mitglied', await fritz.post(`/teams/${uorg.id}/members`, { email: uH.email, rank_id: await rankIdOf(fritz, uorg.id, 'Mitglied') }));
+  ok('Umbuchung: Gina Leserin', await fritz.post(`/teams/${uorg.id}/members`, { email: uG.email, rank_id: await rankIdOf(fritz, uorg.id, 'Leser') }));
+  const balance = async (who, id) => (await who.get('/budgets')).data.find((b) => b.id === id);
+  const uA1 = ok('Umbuchung: Konto A', await fritz.post('/budgets', { name: 'Umbuch A', type: 'solo', currency: 'EUR' }));
+  const uA2 = ok('Umbuchung: Konto B', await fritz.post('/budgets', { name: 'Umbuch B', type: 'solo', currency: 'EUR' }));
+  ok('Umbuchung: Startguthaben', await fritz.post('/transactions', { budget_id: uA1.id, type: 'income', amount: '500', booked_at: dayAt(0), title: 'Start' }));
+  const direct = ok('Umbuchung: eigenes Konto', await fritz.post('/transfers', { from_budget_id: uA1.id, target: 'own', to_budget_id: uA2.id, amount: '100', title: 'Sparen' }));
+  check('Umbuchung: eigenes Konto sofort gebucht', direct.status === 'accepted', JSON.stringify(direct));
+  let a1 = await balance(fritz, uA1.id), a2 = await balance(fritz, uA2.id);
+  check('Umbuchung: Salden nach eigener Umbuchung', a1.balance === '400.00' && a2.balance === '100.00', `${a1.balance} ${a2.balance}`);
+  check('Umbuchung zählt als Ausgabe und Einnahme', Number(a1.expenses) === 100 && Number(a2.income) === 100, JSON.stringify({ e: a1.expenses, i: a2.income }));
+  const t2 = (await fritz.get(`/transactions?budget_id=${uA2.id}`)).data;
+  const transferTx = (t2.items || t2).find((t) => t.source === 'transfer');
+  check('Umbuchung: Buchung mit Quelle transfer', !!transferTx && /Sparen/.test(transferTx.title), JSON.stringify(t2).slice(0, 300));
+  invalid('Umbuchung: Buchung nicht änderbar', await fritz.patch(`/transactions/${transferTx.id}`, { amount: '1' }));
+  invalid('Umbuchung: Buchung nicht löschbar', await fritz.del(`/transactions/${transferTx.id}`));
+  invalid('Umbuchung: auf dasselbe Konto', await fritz.post('/transfers', { from_budget_id: uA1.id, target: 'own', to_budget_id: uA1.id, amount: '1', title: 'x' }));
+  invalid('Umbuchung: Betrag 0', await fritz.post('/transfers', { from_budget_id: uA1.id, target: 'own', to_budget_id: uA2.id, amount: '0', title: 'x' }));
+  // Benutzersuche: nur Name, keine E-Mail
+  const found = ok('Umbuchung: Benutzersuche', await fritz.get('/transfers/users?q=dav'));
+  check('Umbuchung: Suche findet Ida ohne E-Mail', found.some((u) => u.id === uI.id) && found.every((u) => !('email' in u)), JSON.stringify(found));
+  check('Umbuchung: Suche ohne mich', !(await fritz.get('/transfers/users?q=bob')).data.some((u) => u.id === uF.id));
+  // An einen anderen Benutzer: erst nach Annahme gebucht
+  const idaGiro = ok('Umbuchung: Idas Konto', await ida.post('/budgets', { name: 'Ida Giro', type: 'solo', currency: 'EUR' }));
+  const toIda = ok('Umbuchung: an Ida', await fritz.post('/transfers', { from_budget_id: uA1.id, target: 'user', to_user_id: uI.id, amount: '50', title: 'Miete' }));
+  check('Umbuchung: an Ida wartet', toIda.status === 'pending');
+  check('Umbuchung: vor Annahme nichts abgebucht', (await balance(fritz, uA1.id)).balance === '400.00');
+  const incoming = ok('Umbuchung: Ida sieht offene', await ida.get('/transfers'));
+  check('Umbuchung: eingehend bei Ida', incoming.incoming.some((t) => t.id === toIda.id && t.amount === '50.00'), JSON.stringify(incoming));
+  check('Umbuchung: ausgehend bei Fritz', (await fritz.get('/transfers')).data.outgoing.some((t) => t.id === toIda.id));
+  denied('Umbuchung: Fremde nehmen nicht an', await gina.post(`/transfers/${toIda.id}/accept`, { budget_id: idaGiro.id }), [400, 403, 404]);
+  invalid('Umbuchung: Annahme auf fremdes Konto', await ida.post(`/transfers/${toIda.id}/accept`, { budget_id: uA2.id }));
+  ok('Umbuchung: Ida nimmt an', await ida.post(`/transfers/${toIda.id}/accept`, { budget_id: idaGiro.id }));
+  check('Umbuchung: nach Annahme abgebucht', (await balance(fritz, uA1.id)).balance === '350.00' && (await balance(ida, idaGiro.id)).balance === '50.00');
+  invalid('Umbuchung: zweimal annehmen', await ida.post(`/transfers/${toIda.id}/accept`, { budget_id: idaGiro.id }));
+  check('Umbuchung: Fritz benachrichtigt', (await fritz.get('/notifications')).data.items.some((n) => n.kind === 'transfer_decided'));
+  // Organisationskonto: Leserin wartet auf Annahme, Mitglied mit Schreibrecht nimmt an
+  const kasse = ok('Umbuchung: Organisationskonto', await fritz.post('/budgets', { name: 'Orga Kasse', type: 'shared', team_id: uorg.id, currency: 'EUR' }));
+  const ginaGiro = ok('Umbuchung: Ginas Konto', await gina.post('/budgets', { name: 'Gina Giro', type: 'solo', currency: 'EUR' }));
+  ok('Umbuchung: Ginas Guthaben', await gina.post('/transactions', { budget_id: ginaGiro.id, type: 'income', amount: '100', booked_at: dayAt(0), title: 'Start' }));
+  const ginaTargets = ok('Umbuchung: Ziele Gina', await gina.get('/transfers/targets'));
+  const ginaTeam = ginaTargets.teams.find((t) => t.team_id === uorg.id);
+  check('Umbuchung: Gina sieht Organisationskonto ohne Saldo', ginaTeam?.budgets.some((b) => b.id === kasse.id && b.direct === false && !('balance' in b)), JSON.stringify(ginaTargets));
+  check('Umbuchung: Fritz bucht direkt auf Organisation', (await fritz.get('/transfers/targets')).data.teams.find((t) => t.team_id === uorg.id)?.budgets.some((b) => b.id === kasse.id && b.direct));
+  check('Umbuchung: Nicht-Mitglied sieht die Organisation nicht', !(await alice.get('/transfers/targets')).data.teams.some((t) => t.team_id === uorg.id));
+  const toKasse = ok('Umbuchung: Gina an Organisation', await gina.post('/transfers', { from_budget_id: ginaGiro.id, target: 'team', to_budget_id: kasse.id, amount: '20', title: 'Beitrag' }));
+  check('Umbuchung: Leserin wartet', toKasse.status === 'pending');
+  invalid('Umbuchung: Nicht-Mitglied an Organisation', await alice.post('/transfers', { from_budget_id: solo.id, target: 'team', to_budget_id: kasse.id, amount: '1', title: 'x' }));
+  check('Umbuchung: Hugo sieht eingehend für Organisation', (await hugo.get('/transfers')).data.incoming.some((t) => t.id === toKasse.id));
+  check('Umbuchung: Gina nimmt eigene nicht an', ![200].includes((await gina.post(`/transfers/${toKasse.id}/accept`, {})).status));
+  ok('Umbuchung: Hugo nimmt an', await hugo.post(`/transfers/${toKasse.id}/accept`, {}));
+  check('Umbuchung: Organisation gutgeschrieben', (await balance(fritz, kasse.id)).balance === '20.00' && (await balance(gina, ginaGiro.id)).balance === '80.00');
+  // Währung, Ablehnen, Zurückziehen, gelöschtes Quellkonto
+  const bobUsd = ok('Umbuchung: Hugo USD-Konto', await hugo.post('/budgets', { name: 'Hugo USD', type: 'solo', currency: 'USD' }));
+  const toHugo = ok('Umbuchung: an Hugo', await fritz.post('/transfers', { from_budget_id: uA1.id, target: 'user', to_user_id: uH.id, amount: '10', title: 'Test' }));
+  invalid('Umbuchung: Annahme in anderer Währung', await hugo.post(`/transfers/${toHugo.id}/accept`, { budget_id: bobUsd.id }));
+  ok('Umbuchung: Hugo lehnt ab', await hugo.post(`/transfers/${toHugo.id}/decline`, {}));
+  check('Umbuchung: abgelehnt bucht nichts', (await balance(fritz, uA1.id)).balance === '350.00');
+  const toRevoke = ok('Umbuchung: zum Zurückziehen', await fritz.post('/transfers', { from_budget_id: uA1.id, target: 'user', to_user_id: uI.id, amount: '5', title: 'Weg' }));
+  denied('Umbuchung: nur Absender zieht zurück', await ida.post(`/transfers/${toRevoke.id}/revoke`, {}), [400, 403, 404]);
+  ok('Umbuchung: zurückziehen', await fritz.post(`/transfers/${toRevoke.id}/revoke`, {}));
+  invalid('Umbuchung: Zurückgezogene nicht annehmbar', await ida.post(`/transfers/${toRevoke.id}/accept`, { budget_id: idaGiro.id }));
+  const temp = ok('Umbuchung: Temp-Konto', await fritz.post('/budgets', { name: 'Temp', type: 'solo', currency: 'EUR' }));
+  const fromTemp = ok('Umbuchung: von Temp', await fritz.post('/transfers', { from_budget_id: temp.id, target: 'user', to_user_id: uI.id, amount: '5', title: 'Temp' }));
+  ok('Umbuchung: Temp löschen', await fritz.del(`/budgets/${temp.id}`));
+  check('Umbuchung: offene vom gelöschten Konto zurückgezogen', psql(`SELECT status FROM transfers WHERE id='${fromTemp.id}'`) === 'revoked');
+  invalid('Umbuchung: vom gelöschten Konto nicht annehmbar', await ida.post(`/transfers/${fromTemp.id}/accept`, { budget_id: idaGiro.id }));
+  check('Umbuchung: Ida hat keine offenen mehr', (await ida.get('/transfers')).data.incoming.length === 0);
+  // Quelle archiviert, während die Umbuchung offen ist: Annahme scheitert und lehnt ab
+  const late = ok('Umbuchung: Konto für Archiv', await fritz.post('/budgets', { name: 'Spaeter', type: 'solo', currency: 'EUR' }));
+  const fromLate = ok('Umbuchung: von Archiv-Konto', await fritz.post('/transfers', { from_budget_id: late.id, target: 'user', to_user_id: uI.id, amount: '5', title: 'Spaet' }));
+  ok('Umbuchung: Quelle archivieren', await fritz.patch(`/budgets/${late.id}`, { archived: true }));
+  invalid('Umbuchung: Annahme bei archivierter Quelle', await ida.post(`/transfers/${fromLate.id}/accept`, { budget_id: idaGiro.id }));
+  check('Umbuchung: dabei abgelehnt', psql(`SELECT status FROM transfers WHERE id='${fromLate.id}'`) === 'declined');
+  // Zwei Berechtigte nehmen gleichzeitig an: genau einmal gebucht
+  const race = ok('Umbuchung: für gleichzeitige Annahme', await gina.post('/transfers', { from_budget_id: ginaGiro.id, target: 'team', to_budget_id: kasse.id, amount: '1', title: 'Gleichzeitig' }));
+  const raced = await Promise.all([fritz.post(`/transfers/${race.id}/accept`, {}), hugo.post(`/transfers/${race.id}/accept`, {})]);
+  check('Umbuchung: gleichzeitig genau einmal angenommen', raced.filter((r) => r.status === 200).length === 1, raced.map((r) => r.status).join());
+  check('Umbuchung: gleichzeitig genau einmal gebucht', psql(`SELECT count(*) FROM transactions WHERE transfer_id='${race.id}'`) === '2');
+  // Prognose und Zinsjob laufen mit Umbuchungen
+  ok('Umbuchung: Prognose mit Umbuchungen', await fritz.get(`/stats/forecast?scope=all&week_start=1&today=${dayAt(0)}`));
+  try { runJob('interest.run'); check('Umbuchung: Zinsjob läuft', true); } catch (e) { check('Umbuchung: Zinsjob läuft', false, e.stderr?.toString()); }
+}
 
 // ---------- Admin
 for (const p of ['/admin/overview', '/admin/users', '/admin/roles', '/admin/groups', '/admin/teams', '/admin/settings', '/admin/system', '/admin/audit?limit=10', '/admin/api-keys', '/admin/webhooks', '/admin/backups', '/admin/note-tags']) ok(`GET ${p}`, await admin.get(p));

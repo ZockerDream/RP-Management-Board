@@ -41,3 +41,12 @@ test('SQL helpers reject unknown modules and keep the parameter', () => {
   assert.match(visibleSql('c', 'casefile', '$2', 3), /team_level\(c\.team_id, \$2, 'casefile'\) END\) >= 3$/);
   assert.match(levelSql('d', 'doc', '$1', 'd.id'), /team_level\(d\.team_id, \$1, 'doc', d\.id\)/);
 });
+
+test('fleet is an organisation module with levels 0, 2, 3, 4', () => {
+  const fleet = ORG_MODULES.find((m) => m.key === 'fleet');
+  assert.ok(fleet, 'fleet fehlt in ORG_MODULES');
+  assert.equal(fleet.label, 'Fuhrpark');
+  assert.deepEqual(fleet.levels, [0, 2, 3, 4]);
+  for (const l of [2, 3, 4]) assert.ok(fleet.hints[l]);
+  assert.equal(validLevel('fleet', 1), false);
+});

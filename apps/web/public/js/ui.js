@@ -97,7 +97,7 @@ export function openForm({ title, fields, submit = 'Speichern', cancel = 'Abbrec
   return new Promise((resolve) => {
     const m = document.createElement('div');
     m.className = 'modal open';
-    m.innerHTML = `<div class="card" ${wide ? 'style="width:720px"' : ''}><div class="card-head"><h2>${esc(title)}</h2></div>
+    m.innerHTML = `<div class="card" ${wide ? 'style="width:min(720px, 100%)"' : ''}><div class="card-head"><h2>${esc(title)}</h2></div>
       <form novalidate><div class="form">${fields.map(fieldHtml).join('')}</div>
       <p class="auth-error" role="alert" hidden></p>
       <div class="modal-foot"><button type="button" class="btn ghost" data-x>${esc(cancel)}</button>${extraButtons}<button type="submit" class="btn ${danger ? 'danger' : ''}">${esc(submit)}</button></div></form></div>`;

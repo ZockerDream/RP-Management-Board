@@ -4,7 +4,7 @@
 // Freigeben mit „Verwalten“ und nach dem Vier-Augen-Prinzip: nicht den eigenen Bericht, außer als Inhaber oder privat.
 import { z } from 'zod';
 import { one, many, q, tx } from '../db.js';
-import { authz, bad, forbidden } from '../authz.js';
+import { authz, bad, forbidden, notFound } from '../authz.js';
 import { LEVEL, levelSql, needMessage } from '../org.js';
 import { audit } from '../audit.js';
 import { patchSchema } from '../validation.js';
@@ -12,6 +12,7 @@ import { notify } from '../lib.js';
 import { uuid, isoDateTime } from '../records.js';
 import { loadFile, loadChild, assertInvolved, area, areaRecord } from '../casefile-access.js';
 import { TEMPLATE_SETS } from '../report-templates.js';
+import { reportPdf } from '../casefile-pdf.js';
 
 const reportFields = z.object({
   kind: z.string().trim().max(100).default(''), title: z.string().trim().min(1).max(200), body: z.string().max(50000).default(''),
@@ -112,6 +113,25 @@ export default async function routes(app) {
     if (report.status === 'draft' && report.author_id !== req.user.id && level < manage) throw forbidden('Den Entwurf sieht nur, wer ihn schreibt oder Berichte freigibt');
     return { report, file, level };
   }
+
+  // Einzelner Bericht als PDF (Wunsch des Auftraggebers vom 2026-11-11): jeder Bericht, den man sehen darf;
+  // Entwürfe und nicht freigegebene tragen einen Vermerk
+  app.get('/case-file-reports/:id/pdf', authz('casefile:read'), async (req, reply) => {
+    const { row, file, level } = await loadChild(req, 'case_file_reports', req.params.id, LEVEL.READ);
+    if (row.status === 'draft' && row.author_id !== req.user.id && level < manage) throw notFound();
+    const report = await one(
+      `SELECT r.*, au.name author_name, ap.name approved_by_name, am.number amends_number,
+         (SELECT COALESCE(json_agg(json_build_object('id', pe.id, 'name', pe.name) ORDER BY pe.name), '[]')
+            FROM case_file_report_people rp JOIN people pe ON pe.id=rp.person_id WHERE rp.report_id=r.id) people
+       FROM case_file_reports r LEFT JOIN users au ON au.id=r.author_id LEFT JOIN users ap ON ap.id=r.approved_by
+         LEFT JOIN case_file_reports am ON am.id=r.amends_report_id WHERE r.id=$1`,
+      [row.id],
+    );
+    await audit(req, 'case_file_report.exported_pdf', 'case_file', file.id, { report: row.id, number: row.number });
+    const name = `bericht-${String(file.file_number).replace(/[^A-Za-z0-9_-]+/g, '_')}-${row.number}.pdf`;
+    reply.type('application/pdf').header('content-disposition', `attachment; filename="${name}"`);
+    return reply.send(reportPdf(report, file, { exportedBy: req.user.name }));
+  });
 
   app.patch('/case-file-reports/:id', authz('casefile:update'), async (req) => {
     const { report, file } = await loadReport(req);

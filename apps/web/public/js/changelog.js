@@ -10,6 +10,16 @@ export const UNRELEASED = [
 
 export const CHANGELOG = [
   {
+    version: '1.3.2', date: '2026-11-11', migrations: '027–028', title: 'Fuhrpark, Umbuchungen und Akten als PDF',
+    changes: [
+      ['new', 'Fuhrpark unter Organisation → Fuhrpark: Fahrzeuge der Organisation in Gruppen (z. B. „Tailgater 2“, „Sonstige Fahrzeuge“ mit Spalte Fahrzeug), Kontrollrunden mit Stand-Datum, km-Stand, letzter Wartung, Verbandkasten, Zubehör vollständig und Notiz. Eine neue Runde übernimmt die Werte der letzten. „Erledigt“ schließt die Runde ab; ändern lässt sie sich danach nur mit „Verwalten“ (steht im Audit-Log). „Als Markdown“ erzeugt die Liste im gewohnten Format zum Kopieren oder Herunterladen, auch für alte Runden. Unabhängig von Object Management → Fahrzeuge.'],
+      ['new', 'Umbuchen unter Konten und Transaktionen: auf eigene Konten und Konten deiner Organisationen sofort, wenn du dort „Lesen & Schreiben“ hast. An andere Benutzer und auf Organisationskonten ohne dieses Recht geht die Umbuchung erst nach Annahme: Der Empfänger wählt sein Konto, gebucht wird erst dann. Offene Umbuchungen stehen oben auf Konten und Transaktionen; ablehnen und zurückziehen bucht nichts. Umbuchungen zählen als Ausgabe und Einnahme und lassen sich nicht ändern oder löschen.'],
+      ['new', 'Akten als PDF: „PDF“ in einer Fallakte exportiert den Aktenkopf mit Sachverhalt und die angekreuzten Teile (Personen, Fahrzeuge, Verknüpfungen, Einträge, freigegebene Berichte, Anklagepunkte, Beweismittel mit Übergabekette, Fahndungen, Bilder, Anhänge als Liste). „PDF“ an einem Bericht exportiert ihn einzeln; Entwürfe tragen den Vermerk „ENTWURF“. Formatierter Text erscheint formatiert, jeder Export steht im Audit-Log.'],
+      ['fixed', 'Dialoge auf dem Handy waren breiter als der Bildschirm, Knöpfe lagen teils außerhalb.'],
+      ['tech', 'Migrationen 027 (Fuhrpark, Recht „Fuhrpark“ in Organisationen und Rollen) und 028 (Umbuchungen); das Image enthält die Schriften DejaVu für PDFs.'],
+    ],
+  },
+  {
     version: '1.3.0', date: '2026-11-11', migrations: '024–026', title: 'Design V2, Personenakten zuerst, Prognose und Screenshot-Buchung',
     changes: [
       ['new', 'Design V2 „Glass“: Einstellungen → Darstellung → Design. Alle Seiten zeigen Glas-Panels über einem Hintergrund, die Navigation hat Symbole. Als Hintergrund wählst du eine Vorlage (Dämmerung, Nacht, Wald, ohne Bild) oder lädst ein eigenes Bild hoch, das nur du siehst. Unschärfe, Deckkraft der Panels und Abdunkeln stellst du mit Reglern ein; auf Handys gibt es auf Wunsch kräftige Flächen ohne Unschärfe. V1 bleibt unverändert, der Wechsel ist jederzeit möglich.'],

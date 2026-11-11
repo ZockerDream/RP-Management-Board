@@ -131,6 +131,8 @@ export default async function routes(app) {
 
   app.delete('/budgets/:id', authz('budget:delete'), async (req) => {
     await budgetAccess(req.user.id, req.params.id, LEVEL.MANAGE);
+    // Offene Umbuchungen von oder auf dieses Konto ziehen sich zurück, gebucht ist dabei noch nichts
+    await q("UPDATE transfers SET status='revoked', decline_reason='Konto gelöscht', decided_at=now() WHERE status='pending' AND (from_budget_id=$1 OR to_budget_id=$1)", [req.params.id]);
     // Objektkosten, die dieses Konto nutzen, zurücksetzen (sonst verletzt SET NULL den Kosten-Check)
     for (const t of ['properties', 'vehicles', 'keys']) {
       await q(`UPDATE ${t} SET cost_amount=NULL, cost_interval=NULL, cost_category_id=NULL, cost_recurring_id=NULL WHERE cost_budget_id=$1`, [req.params.id]);
@@ -247,6 +249,7 @@ export default async function routes(app) {
     if (!t) throw notFound();
     if (t.source === 'payroll') throw bad('Automatische Gehaltsbuchungen können nicht geändert werden');
     if (t.source === 'interest') throw bad('Zinsgutschriften lassen sich nicht ändern, nur löschen');
+    if (t.source === 'transfer') throw bad('Umbuchungen lassen sich nicht ändern oder löschen – buche zurück');
     const { budget } = await budgetAccess(req.user.id, t.budget_id, true);
     const b = patchSchema(txBody.omit({ budget_id: true })).parse(req.body);
     await checkRefs(b, budget);
@@ -262,6 +265,7 @@ export default async function routes(app) {
     const t = await one('SELECT budget_id,source FROM transactions WHERE id=$1', [req.params.id]);
     if (!t) throw notFound();
     if (t.source === 'payroll') throw bad('Automatische Gehaltsbuchungen können nicht gelöscht werden');
+    if (t.source === 'transfer') throw bad('Umbuchungen lassen sich nicht ändern oder löschen – buche zurück');
     await budgetAccess(req.user.id, t.budget_id, true);
     await q('DELETE FROM transactions WHERE id=$1', [req.params.id]);
     await audit(req, 'transaction.deleted', 'transaction', req.params.id);

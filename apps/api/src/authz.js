@@ -35,6 +35,7 @@ export const PERMISSION_CATALOG = [
   { resource: 'training', label: 'Schulungen', actions: R },
   { resource: 'license', label: 'Lizenzen', actions: R },
   { resource: 'doc', label: 'Dokumentationen', actions: R },
+  { resource: 'fleet', label: 'Fuhrpark', actions: R },
   { resource: 'apikey', label: 'API-Schlüssel', actions: ['read', 'create', 'delete'] },
   { resource: 'audit', label: 'Audit-Log', actions: ['read', 'export'] },
   { resource: 'settings', label: 'Einstellungen', actions: ['read', 'update'] },

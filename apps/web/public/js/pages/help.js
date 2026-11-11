@@ -30,6 +30,10 @@ const sections = [
     text: 'Beim Anlegen oder Bearbeiten eines Kontos kannst du unter „Zinsen“ einen Zinssatz in Prozent und einen Zeitraum wählen: pro Tag, pro Woche (Montag bis Sonntag), pro Monat oder pro Jahr. Am letzten Tag jedes abgeschlossenen Zeitraums schreibt das System die Zinsen als Einnahme „Zinsen …“ gut, berechnet auf den durchschnittlichen Tagessaldo. Beispiel: 2 % pro Monat, im November 15 Tage 1.000 und 15 Tage 2.000 auf dem Konto ergibt durchschnittlich 1.500 und damit 30,00 am 30. November. Tage im Minus zählen als 0, Sparziel-Einzahlungen ändern den Saldo nicht, gutgeschriebene Zinsen werden mitverzinst. Gezählt wird ab dem Tag, an dem du die Zinsen einschaltest; ein geänderter Satz gilt für alles, was noch nicht gutgeschrieben ist. Buchungen, die du später für einen schon gutgeschriebenen Zeitraum nachträgst, ändern dessen Zinsen nicht mehr. Die Karte des Kontos zeigt Satz, bisherige Zinsen und die nächste Gutschrift. Eine Zinsgutschrift lässt sich nicht ändern, nur löschen; der Zeitraum bleibt dann gutgeschrieben. Leeres Feld schaltet die Zinsen ab.',
   },
   {
+    title: 'Umbuchen',
+    text: '„Umbuchen“ unter Konten oder Transaktionen bringt Geld von einem Konto, auf dem du buchen darfst, auf ein anderes: auf eigene Konten und auf Konten deiner Organisationen mit „Lesen & Schreiben“ sofort. An andere Benutzer (Suche nach Namen) und auf Organisationskonten ohne dieses Recht wird erst gebucht, wenn angenommen wird: Der Empfänger wählt unter „Offene Umbuchungen“ sein Konto in derselben Währung oder lehnt ab. Bis dahin kannst du die Umbuchung zurückziehen. Umbuchungen erscheinen als Ausgabe und Einnahme mit dem Zusatz „Umbuchung“ und lassen sich nicht ändern; bei einem Fehler buchst du zurück.',
+  },
+  {
     title: 'Budgets: Ausgaben begrenzen',
     text: 'Unter „Budgets“ legst du Ausgabenlimits an, zum Beispiel 100 € pro Woche für Lebensmittel. Wähle Betrag und Zeitraum (Tag, Woche, Monat oder Jahr) und optional ein Konto oder eine Kategorie. Die Karte zeigt, was im laufenden Zeitraum verbraucht ist, was noch übrig bleibt und um wie viel du überzogen hast. Budgets sind nur für dich sichtbar. Ein Budget zu löschen, ändert keine Buchungen.',
   },
@@ -80,6 +84,14 @@ const sections = [
   {
     title: 'Teile der Akten ausschalten',
     text: 'Braucht ihr nicht alles, schalten Administratoren unter „Server-Management → Sicherheit & Einstellungen → Akten“ Fallakten, Fahndung, Strafkatalog, Berichtsvorlagen und Aktenarten für alle aus. Ausgeschaltetes verschwindet aus den Tabs, aus der Fallakte und aus den Personenakten; die Daten bleiben erhalten und sind nach dem Einschalten wieder da. Fahndung, Berichtsvorlagen und Aktenarten gibt es nur mit Fallakten; ohne Strafkatalog entfallen auch Anklagepunkte und Vorstrafen. Den Strafkatalog allein kannst du zum Nachschlagen anlassen. Personenakten mit ihren Einträgen bleiben immer an.',
+  },
+  {
+    title: 'Akten als PDF',
+    text: 'In einer Fallakte öffnet „PDF“ die Auswahl: Der Aktenkopf mit Sachverhalt ist immer dabei, dazu kreuzt du an, was mit soll (Personen, Fahrzeuge, Verknüpfungen, Einträge, freigegebene Berichte, Anklagepunkte, Beweismittel mit Übergabekette, Fahndungen, Bilder, Anhänge als Liste). Ausgeschaltete Teile des Aktensystems fehlen in der Auswahl. „PDF“ an einem Bericht exportiert nur diesen; Entwürfe und nicht freigegebene Berichte tragen einen Vermerk. Formatierter Text bleibt formatiert. Jeder Export steht im Audit-Log.',
+  },
+  {
+    title: 'Fuhrpark',
+    text: 'Unter „Organisation → Fuhrpark“ pflegt das Team des Fuhrparks die Fahrzeuge der Organisation, unabhängig von Object Management. Im Tab „Fahrzeuge“ legst du Gruppen an (z. B. je Modell; „Spalte Fahrzeug“ für gemischte Gruppen) und darin Fahrzeuge mit Kennzeichen; ausgemusterte Fahrzeuge fehlen in neuen Runden. „Neue Runde“ übernimmt alle aktiven Fahrzeuge mit den Werten der letzten Runde; du trägst km-Stand, letzte Wartung, Verbandkasten, Zubehör und Notiz ein, speicherst und setzt am Ende „Erledigt“. Danach ändert die Runde nur, wer „Verwalten“ hat. „Als Markdown“ zeigt die fertige Liste zum Kopieren, z. B. für Discord. Rechte: „Lesen“ sieht alles, „Lesen & Schreiben“ erfasst, „Verwalten“ ändert erledigte Runden und löscht.',
   },
   {
     title: 'Lizenzen',
