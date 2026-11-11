@@ -147,8 +147,20 @@ function writer(ctx) {
       font(bold ? 'B' : 'R').fontSize(9.5);
       return Math.max(14, ...cells.map((c) => doc.heightOfString(clean(c) || ' ', { width: w - 8 }) + 6));
     };
+    // Höher als eine ganze Seite: als Liste „Spalte: Wert“ setzen, damit nichts über den Rand läuft
+    const stacked = (cells) => {
+      doc.moveDown(0.3);
+      cells.forEach((c, i) => {
+        const label = head[i] ? `${head[i]}: ` : '';
+        font('B').fontSize(9.5).fillColor('#111').text(clean(label), left + indent, doc.y, { continued: !!label && !!c, width: fullWidth() - indent });
+        if (c) font('R').text(clean(c));
+      });
+      doc.moveTo(left + indent, doc.y + 2).lineTo(left + fullWidth(), doc.y + 2).strokeColor('#ccc').lineWidth(0.5).stroke();
+      doc.moveDown(0.4);
+    };
     const drawRow = (cells, bold) => {
       const h = rowHeight(cells, bold);
+      if (h > bottom() - doc.page.margins.top - 30) { stacked(cells); return; }
       if (doc.y + h > bottom()) { doc.addPage(); if (!bold && head.length) drawRow(head, true); }
       const y = doc.y;
       font(bold ? 'B' : 'R').fontSize(9.5).fillColor('#111');
@@ -218,8 +230,10 @@ function reportBody(w, r) {
 }
 
 // ---------- Ganze Akte. files: Map Anhang-ID → Dateipfad für eingebettete Bilder
-export function caseFilePdf(detail, { parts, features, exportedBy, files = new Map() }) {
+// onDoc: nur für Tests, sieht das Dokument vor dem Setzen
+export function caseFilePdf(detail, { parts, features, exportedBy, files = new Map(), onDoc }) {
   const ctx = setup(`Akte ${detail.file_number}`);
+  onDoc?.(ctx.doc);
   const w = writer(ctx);
   w.title(`Akte ${detail.file_number}`, detail.title);
   w.pairs([
@@ -258,7 +272,8 @@ export function caseFilePdf(detail, { parts, features, exportedBy, files = new M
       ])),
       images: () => s.items.forEach((a) => {
         const file = files.get(a.id);
-        w.ensure(220);
+        // Bild bis 300 pt hoch, dazu die Bildunterschrift
+        w.ensure(300 + 40);
         try {
           if (!file || !fs.existsSync(file)) throw new Error('fehlt');
           ctx.doc.image(file, w.left, ctx.doc.y, { fit: [w.fullWidth(), 300] });

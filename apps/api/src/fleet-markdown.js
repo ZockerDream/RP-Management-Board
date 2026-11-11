@@ -8,8 +8,8 @@ const shortDay = (d) => {
   const [y, m, dd] = String(d).slice(0, 10).split('-');
   return `${dd}.${m}.${y.slice(2)}`;
 };
-// Tabellenzellen dürfen weder | noch Zeilenumbrüche enthalten
-const cell = (v) => String(v ?? '').replace(/\r?\n/g, ' ').replace(/\|/g, '\\|').trim();
+// Tabellenzellen dürfen weder | noch Zeilenumbrüche enthalten; ein \ am Ende würde das folgende | maskieren
+const cell = (v) => String(v ?? '').replace(/\r?\n/g, ' ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').trim();
 const row = (cells) => `|${cells.join('|')}|`;
 
 export function fleetMarkdown(check, sections) {

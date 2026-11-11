@@ -51,3 +51,10 @@ test('fleetMarkdown lässt leere Abschnitte weg', () => {
   const md = fleetMarkdown({ checked_on: '2026-11-07', done: true }, [{ name: 'Leer', show_model: false, items: [] }]);
   assert.ok(!md.includes('### Leer'));
 });
+
+test('fleetMarkdown: Backslash am Ende einer Notiz bricht die Zeile nicht', () => {
+  const md = fleetMarkdown({ checked_on: '2026-11-07', done: true }, [
+    { name: 'A', show_model: false, items: [item('X 1', 1, null, null, true, 'ende\\')] },
+  ]);
+  assert.ok(md.includes('|X 1|1|||✔️|ende\\\\|'), md);
+});
