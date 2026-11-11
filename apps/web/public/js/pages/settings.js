@@ -1,9 +1,25 @@
 import { api } from '../api.js';
-import { $, esc, fdatetime, empty, openForm, confirmBox, toast, showSecret, download } from '../ui.js';
-import { state, can, reloadMe, applyTheme, renderAvatars } from '../app.js';
+import { $, $$, esc, fdatetime, empty, openForm, confirmBox, toast, showSecret, download } from '../ui.js';
+import { state, can, reloadMe, applyTheme, applyUi, renderAvatars } from '../app.js';
 import { payrollAccountOptions, payrollAccountHint } from './common.js';
 
 const ACCENTS = [['indigo', 'Indigo'], ['emerald', 'Smaragd'], ['ocean', 'Ozean'], ['rose', 'Rose'], ['amber', 'Bernstein'], ['mono', 'Mono']];
+const BACKGROUNDS = [['dusk', 'Dämmerung'], ['night', 'Nacht'], ['forest', 'Wald'], ['none', 'Ohne Bild']];
+
+// Hintergrundbild im Browser verkleinern (höchstens 2560 px, JPEG): spart Platz im Upload-Volume und Ladezeit
+async function shrinkImage(file) {
+  if (!/^image\/(png|jpeg|webp)$/.test(file.type)) throw new Error('Erlaubt sind PNG, JPEG und WebP.');
+  let bitmap;
+  try { bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch { throw new Error('Das Bild lässt sich nicht lesen.'); }
+  const scale = Math.min(1, 2560 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+  if (!blob) throw new Error('Das Bild lässt sich nicht verkleinern.');
+  return blob;
+}
 const KINDS = [['budget_80', 'Kontolimit zu 80 % erreicht'], ['budget_exceeded', 'Kontolimit überschritten'], ['calendar', 'Termin-Erinnerungen'], ['vehicle_service', 'Fahrzeug-Service fällig'], ['first_aid_kit', 'Verbandskasten läuft ab'], ['key_overdue', 'Schlüssel-Rückgabe fällig'], ['team_added', 'Organisationen: Aufnahme und Rang'], ['recurring_share', 'Geteilte Daueraufträge'], ['todo_due', 'ToDo-Deadlines'], ['ticket_comment', 'Kommentare zu Tickets'], ['license_expiry', 'Lizenzen laufen ab'], ['training_expiry', 'Schulungsnachweise laufen ab'], ['report_review', 'Bericht wartet auf Freigabe'], ['report_decided', 'Eigener Bericht freigegeben oder zurückgegeben']];
 
 export async function render(view) {
@@ -60,10 +76,31 @@ export async function render(view) {
     },
     appearance(el) {
       const mode = u().theme || 'system', acc = u().accent || 'indigo';
-      el.innerHTML = `<div class="card"><div class="card-head"><h2>Darstellung</h2></div>
+      const v2 = u().ui_version === 'v2';
+      const prefs = u().ui_prefs;
+      const bgOn = (key) => (prefs.background === key || (key === 'dusk' && prefs.background === 'custom' && !u().has_background) ? 'on' : '');
+      el.innerHTML = `<div class="card"><div class="card-head"><h2>Design</h2><small class="muted">Gilt nur für dich, auf allen Geräten</small></div>
+        <div class="ui-versions" role="radiogroup" aria-label="Design-Version">
+          <button type="button" role="radio" aria-checked="${!v2}" class="ui-version ${v2 ? '' : 'on'}" data-version="v1"><span class="ui-pv v1" aria-hidden="true"><i></i><i></i><i></i><i></i></span><b>V1 · Klassisch</b><small class="muted">Ruhige, flache Flächen wie bisher</small></button>
+          <button type="button" role="radio" aria-checked="${v2}" class="ui-version ${v2 ? 'on' : ''}" data-version="v2"><span class="ui-pv v2" aria-hidden="true"><i></i><i></i><i></i><i></i></span><b>V2 · Glass <span class="tag primary">Neu</span></b><small class="muted">Glas-Panels über deinem Hintergrund, Dashboard frei anpassbar</small></button>
+        </div>
         <div class="setting"><span>Modus</span><div class="seg" id="ap-mode">${[['system', 'System'], ['light', 'Hell'], ['dark', 'Dunkel']].map(([v, l]) => `<button data-m="${v}" class="${v === mode ? 'on' : ''}">${l}</button>`).join('')}</div></div>
         <div class="setting"><span>Akzentfarbe</span><div class="chips" id="ap-acc">${ACCENTS.map(([v, l]) => `<button class="btn ghost sm" data-a="${v}" style="${v === acc ? 'outline:2px solid var(--primary)' : ''}">${l}</button>`).join('')}</div></div>
-        <label class="setting"><span>Gravatar-Avatar verwenden<small>Sendet einen E-Mail-Hash an gravatar.com</small></span><input type="checkbox" id="ap-grav" ${u().gravatar_enabled ? 'checked' : ''}></label></div>`;
+        <label class="setting"><span>Gravatar-Avatar verwenden<small>Sendet einen E-Mail-Hash an gravatar.com</small></span><input type="checkbox" id="ap-grav" ${u().gravatar_enabled ? 'checked' : ''}></label></div>
+        ${v2 ? `<div class="card"><div class="card-head"><h2>Hintergrund</h2><small class="muted">Das Bild sieht nur du</small></div>
+        <div class="bg-thumbs" id="ap-bg">
+          <label class="bg-thumb bg-upload"><input type="file" id="ap-file" accept="image/png,image/jpeg,image/webp"><span>${u().has_background ? 'Bild ersetzen' : 'Bild hochladen'}</span></label>
+          ${u().has_background ? `<button type="button" class="bg-thumb ${bgOn('custom')}" data-bgp="custom" aria-pressed="${prefs.background === 'custom'}"><span class="bg-mini bg-own" id="ap-own"></span><span class="bg-name">Eigenes Bild</span></button>` : ''}
+          ${BACKGROUNDS.map(([key, label]) => `<button type="button" class="bg-thumb ${bgOn(key)}" data-bgp="${key}" aria-pressed="${!!bgOn(key)}"><span class="bg-mini" data-bg="${key}"><i class="bg-m1"></i><i class="bg-m3"></i></span><span class="bg-name">${label}</span></button>`).join('')}
+        </div>
+        <p class="muted" style="margin:10px 0 0">PNG, JPEG oder WebP. Wird im Browser auf höchstens 2560 Pixel verkleinert und als JPEG gespeichert.${u().has_background ? ' <button type="button" class="link" id="ap-del">Eigenes Bild löschen</button>' : ''}</p>
+        <div class="ui-sliders">
+          <label class="ui-slider"><span>Unschärfe</span><input type="range" min="0" max="40" value="${prefs.blur}" data-pref="blur"><output>${prefs.blur} px</output></label>
+          <label class="ui-slider"><span>Deckkraft der Panels</span><input type="range" min="20" max="90" value="${prefs.opacity}" data-pref="opacity"><output>${prefs.opacity} %</output></label>
+          <label class="ui-slider"><span>Bild abdunkeln</span><input type="range" min="0" max="70" value="${prefs.dim}" data-pref="dim"><output>${prefs.dim} %</output></label>
+        </div>
+        <label class="setting"><span>Auf Handys ohne Unschärfe<small>Kräftige Flächen statt Glas, spart Akku und scrollt flüssiger</small></span><input type="checkbox" id="ap-lite" ${prefs.lite ? 'checked' : ''}></label>
+        <div class="row" style="justify-content:flex-start;gap:8px;margin-top:12px;flex-wrap:wrap"><a class="btn ghost sm" href="#/dashboard?edit=1">Dashboard anpassen</a>${prefs.dashboard ? '<button type="button" class="btn ghost sm" id="ap-dash-reset">Dashboard auf Standard</button>' : ''}<button type="button" class="btn ghost sm" id="ap-bg-reset">Hintergrund auf Standard</button></div></div>` : ''}`;
       // Speichern kann scheitern, etwa wenn die Sitzung gerade abgelaufen ist: dann Meldung statt unbehandeltem Fehler,
       // und die Anzeige springt auf den gespeicherten Stand zurück (nach dem Abmelden gibt es keinen mehr)
       const save = async (body, undo) => {
@@ -73,6 +110,55 @@ export async function render(view) {
       $('#ap-mode', el).addEventListener('click', async (e) => { const b = e.target.closest('[data-m]'); if (b) { applyTheme(b.dataset.m, u().accent); if (await save({ theme: b.dataset.m }, restoreTheme)) P.appearance(el); } });
       $('#ap-acc', el).addEventListener('click', async (e) => { const b = e.target.closest('[data-a]'); if (b) { applyTheme(u().theme || 'system', b.dataset.a); if (await save({ accent: b.dataset.a }, restoreTheme)) P.appearance(el); } });
       $('#ap-grav', el).addEventListener('change', async (e) => { const box = e.target; await save({ gravatar_enabled: box.checked }, () => { box.checked = !box.checked; }); });
+      $('.ui-versions', el).addEventListener('click', async (e) => {
+        const b = e.target.closest('[data-version]');
+        if (b && b.dataset.version !== u().ui_version && (await save({ ui_version: b.dataset.version }, () => applyUi(u())))) P.appearance(el);
+      });
+      if (!v2) return;
+      // Live-Vorschau beim Schieben, gespeichert wird beim Loslassen
+      const draft = { ...prefs };
+      const savePrefs = async (next) => { applyUi({ ...u(), ui_prefs: next }); if (await save({ ui_prefs: next }, () => applyUi(u()))) P.appearance(el); };
+      $$('[data-pref]', el).forEach((input) => {
+        const unit = input.dataset.pref === 'blur' ? ' px' : ' %';
+        input.addEventListener('input', () => {
+          draft[input.dataset.pref] = Number(input.value);
+          input.nextElementSibling.textContent = `${input.value}${unit}`;
+          applyUi({ ...u(), ui_prefs: draft });
+        });
+        input.addEventListener('change', () => save({ ui_prefs: { ...draft } }, () => applyUi(u())));
+      });
+      $('#ap-lite', el).addEventListener('change', (e) => { draft.lite = e.target.checked; savePrefs({ ...draft }); });
+      $('#ap-bg', el).addEventListener('click', (e) => {
+        const b = e.target.closest('[data-bgp]');
+        if (b) savePrefs({ ...draft, background: b.dataset.bgp });
+      });
+      $('#ap-bg-reset', el).addEventListener('click', () => savePrefs({ ...draft, background: 'dusk', blur: 22, opacity: 52, dim: 20, lite: true }));
+      $('#ap-dash-reset', el)?.addEventListener('click', () => savePrefs({ ...draft, dashboard: null }));
+      $('#ap-del', el)?.addEventListener('click', async () => {
+        if (!(await confirmBox('Hintergrundbild löschen', 'Dein eigenes Bild wird vom Server gelöscht; der Hintergrund wechselt auf „Dämmerung“.'))) return;
+        try { await api.del('/me/background'); await reloadMe(); P.appearance(el); toast('Bild gelöscht'); } catch (error) { toast(error.message, true); }
+      });
+      $('#ap-file', el).addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        try {
+          const form = new FormData();
+          form.append('file', await shrinkImage(file), 'hintergrund.jpg');
+          await api.put('/me/background', form);
+          await patchMe({ ui_prefs: { ...draft, background: 'custom' } });
+          toast('Hintergrund gespeichert');
+          P.appearance(el);
+        } catch (error) {
+          toast(error.message, true);
+          e.target.value = '';
+        }
+      });
+      const own = $('#ap-own', el);
+      // data:-URL, weil die CSP keine blob:-Adressen erlaubt
+      if (own) {
+        api.blob('/me/background').then((blob) => new Promise((resolve) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.readAsDataURL(blob); }))
+          .then((url) => { own.style.backgroundImage = `url("${url}")`; }).catch(() => {});
+      }
     },
     async notif(el) {
       const [prefs, n] = await Promise.all([api.get('/me/notification-prefs'), api.get('/notifications')]);

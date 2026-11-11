@@ -12,6 +12,9 @@ import { getSetting } from '../settings.js';
 import { audit } from '../audit.js';
 import { payrollRun } from '../jobs.js';
 import { currentCaseFeatures } from '../feature-guard.js';
+import { uiPrefsSchema, normalizeUiPrefs, UI_VERSIONS } from '../ui-prefs.js';
+import { receiveUpload, uploadPath, removeUpload } from '../uploads.js';
+import fs from 'node:fs';
 
 const publicUser = (u) => ({
   id: u.id, email: u.email, name: u.name, locale: u.locale, currency: u.currency, timezone: u.timezone, week_start: u.week_start,
@@ -19,6 +22,7 @@ const publicUser = (u) => ({
   payroll_budget_id: u.payroll_budget_id,
   theme: u.theme, accent: u.accent, gravatar_enabled: u.gravatar_enabled, totp_enabled: u.totp_enabled,
   has_ical: !!u.ical_token, last_login_at: u.last_login_at,
+  ui_version: u.ui_version, ui_prefs: normalizeUiPrefs(u.ui_prefs), has_background: !!u.background_key, background_updated_at: u.background_updated_at,
 });
 
 export default async function routes(app) {
@@ -44,6 +48,8 @@ export default async function routes(app) {
       theme: z.enum(['system', 'light', 'dark']).optional(),
       accent: z.enum(['indigo', 'emerald', 'ocean', 'rose', 'amber', 'mono']).optional(),
       gravatar_enabled: z.boolean().optional(),
+      ui_version: z.enum(UI_VERSIONS).optional(),
+      ui_prefs: uiPrefsSchema.optional(),
     }).parse(req.body);
     if (b.payroll_budget_id) {
       const budget = await one(
@@ -70,6 +76,32 @@ export default async function routes(app) {
       await q(`UPDATE users SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(', ')}, updated_at=now() WHERE id=$1`, [req.user.id, ...keys.map((k) => updates[k])]);
     }
     if (b.payroll_budget_id) payrollRun(req.log).catch((err) => req.log.error({ err }, 'Gehaltslauf fehlgeschlagen'));
+    return publicUser(await one('SELECT * FROM users WHERE id=$1', [req.user.id]));
+  });
+
+  // Eigenes Hintergrundbild für V2: sieht nur der Benutzer selbst. Der Browser verkleinert es vorher und schickt JPEG oder PNG.
+  app.put('/me/background', requireAuth, async (req) => {
+    const file = await receiveUpload(req, { images: true });
+    const old = req.user.background_key;
+    await q('UPDATE users SET background_key=$2, background_updated_at=now() WHERE id=$1', [req.user.id, file.key]);
+    if (old) removeUpload(old);
+    return publicUser(await one('SELECT * FROM users WHERE id=$1', [req.user.id]));
+  });
+  app.get('/me/background', requireAuth, async (req, reply) => {
+    const key = req.user.background_key;
+    if (!key || !fs.existsSync(uploadPath(key))) throw notFound();
+    const head = Buffer.alloc(4);
+    const fd = fs.openSync(uploadPath(key), 'r');
+    try { fs.readSync(fd, head, 0, 4, 0); } finally { fs.closeSync(fd); }
+    reply.header('content-type', head[0] === 0x89 ? 'image/png' : 'image/jpeg').header('cache-control', 'private, no-cache').header('x-content-type-options', 'nosniff');
+    return reply.send(fs.createReadStream(uploadPath(key)));
+  });
+  app.delete('/me/background', requireAuth, async (req) => {
+    const key = req.user.background_key;
+    const prefs = normalizeUiPrefs(req.user.ui_prefs);
+    if (prefs.background === 'custom') prefs.background = 'dusk';
+    await q('UPDATE users SET background_key=NULL, background_updated_at=now(), ui_prefs=$2 WHERE id=$1', [req.user.id, prefs]);
+    if (key) removeUpload(key);
     return publicUser(await one('SELECT * FROM users WHERE id=$1', [req.user.id]));
   });
 

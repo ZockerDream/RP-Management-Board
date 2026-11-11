@@ -6,6 +6,14 @@ const sections = [
     text: 'Oben im Dashboard wechselst du zwischen den Ansichten Tag, Woche und Monat und wählst daneben den Zeitraum. Einnahmen, Ausgaben, Sparquote und die Ausgaben nach Kategorie beziehen sich auf den gewählten Zeitraum; der Cashflow zeigt die letzten 14 Tage, 8 Wochen oder 6 Monate. Der Gesamtsaldo bleibt immer der heutige Stand. Die Woche beginnt mit dem Tag, den du im Profil als Wochenstart eingestellt hast. Deine Ansicht merkt sich der Browser.',
   },
   {
+    title: 'Design V2 und eigener Hintergrund',
+    text: 'Unter „Einstellungen → Darstellung → Design“ wählst du zwischen V1 (klassisch, flach) und V2 (Glas-Panels über einem Hintergrund). Die Wahl gilt nur für dich, auf allen Geräten, und lässt sich jederzeit zurückstellen. In V2 erscheint darunter „Hintergrund“: eine Vorlage anklicken oder mit „Bild hochladen“ ein eigenes Foto wählen (PNG, JPEG oder WebP). Das Bild wird im Browser auf höchstens 2560 Pixel verkleinert, auf dem Server gespeichert und ist nur für dich sichtbar; „Eigenes Bild löschen“ entfernt es wieder. Mit den Reglern stellst du Unschärfe, Deckkraft der Panels und Abdunkeln ein; ist dein Bild sehr hell, hilft Abdunkeln bei der Lesbarkeit. „Auf Handys ohne Unschärfe“ zeigt auf kleinen Bildschirmen kräftige Flächen statt Glas, das spart Akku.',
+  },
+  {
+    title: 'Dashboard anpassen (V2)',
+    text: 'In V2 hat das Dashboard oben rechts „Anpassen“. Dann trägt jedes Modul eine Leiste: Ziehen am Titel oder die Pfeile verschieben es, die Auswahl bestimmt die Breite (schmal, halb, breit, ganze Breite), das durchgestrichene Auge blendet es aus. Ausgeblendete Module stehen oben und lassen sich mit einem Klick wieder hinzufügen. Jede Änderung wird sofort gespeichert; „Standard wiederherstellen“ bringt die Grundanordnung zurück. Zusätzlich zu V1 gibt es die Module Stundenzettel (mit Ein- und Ausstempeln), Konten, Sparziele und ToDos (abhaken direkt im Dashboard). Module, für die dir das Recht fehlt, erscheinen nicht.',
+  },
+  {
     title: 'Dashboard: Prognose für diese und nächste Woche',
     text: 'Die Karte „Prognose“ schätzt Einnahmen und Ausgaben dieser und der nächsten Woche für die oben gewählten Konten (Solo, Organisation oder Gesamt). Sie zählt zusammen, was schon gebucht ist, Buchungen mit Datum in der Zukunft („Vorausdatiert“), die noch offenen Ausführungen deiner Daueraufträge und dein Festgehalt für die Tage ohne Gehaltsbuchung. Für die restlichen Tage kommt eine Schätzung dazu: der Schnitt pro Tag aus den letzten bis zu 8 abgeschlossenen Wochen, ohne Daueraufträge und Festgehalt, damit nichts doppelt zählt. Diese Woche wird für die Tage nach heute geschätzt, nächste Woche für alle 7. Der Bonus für Stunden über dem Wochen-Soll steckt nur in diesem Erfahrungswert. Einzahlungen auf ein Sparziel zählen wie beim Kontostand nicht. Ohne abgeschlossene Woche mit Buchungen zeigt die Karte nur Geplantes.',
   },

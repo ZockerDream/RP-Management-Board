@@ -16,6 +16,7 @@ import { toCsv } from '../lib.js';
 import { verifyMail, mailConfigured } from '../mail.js';
 import { audit } from '../audit.js';
 import { runBackup } from '../backup.js';
+import { removeUpload } from '../uploads.js';
 
 const id = z.string().uuid();
 
@@ -144,11 +145,14 @@ export default async function routes(app) {
   app.delete('/admin/users/:id', A('user:delete'), async (req) => {
     if (req.params.id === req.user.id) throw bad('Du kannst dich nicht selbst löschen');
     if (await isAdmin(req.params.id)) await lastAdminGuard(req.params.id);
+    const background = await one('SELECT background_key FROM users WHERE id=$1', [req.params.id]);
     await tx(async (c) => {
-      await c.query("UPDATE users SET deleted_at=now(), status='disabled', email=$2 WHERE id=$1", [req.params.id, `deleted-${req.params.id}@invalid`]);
+      await c.query("UPDATE users SET deleted_at=now(), status='disabled', email=$2, background_key=NULL WHERE id=$1", [req.params.id, `deleted-${req.params.id}@invalid`]);
       await c.query('UPDATE sessions SET revoked_at=now() WHERE user_id=$1', [req.params.id]);
       await c.query('UPDATE api_keys SET revoked_at=now() WHERE created_by=$1', [req.params.id]);
     });
+    // Das Hintergrundbild gehört allein dem Benutzer, es geht mit dem Konto
+    if (background?.background_key) removeUpload(background.background_key);
     await audit(req, 'user.deleted', 'user', req.params.id);
     return { ok: true };
   });

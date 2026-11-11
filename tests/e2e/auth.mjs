@@ -1,10 +1,10 @@
 // Auth-Flows: 2FA, Refresh-Rotation, Sitzungen, Passwort, Reset-Token aus DB, Einladung
 import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
-const BASE = `${process.env.BASE || 'http://localhost:18088'}/api`;
+const BASE = `${process.env.BASE || 'http://localhost:18089'}/api`;
 let pass = 0; const fails = [];
 const check = (n, ok, x = '') => { if (ok) pass++; else { fails.push(`${n} ${x}`); console.log('FAIL', n, x); } };
-const psql = (sql) => execSync(`docker exec ${process.env.E2E_PROJECT || 'bm-e2e'}-db-1 psql -U budget -d budget -tA -c "${sql}"`).toString().trim();
+const psql = (sql) => execSync(`docker exec ${process.env.E2E_PROJECT || 'bm-check'}-db-1 psql -U budget -d budget -tA -c "${sql}"`).toString().trim();
 const req = async (m, p, { t, body, cookie } = {}) => {
   const r = await fetch(BASE + p, { method: m, headers: { ...(t ? { authorization: `Bearer ${t}` } : {}), ...(body ? { 'content-type': 'application/json' } : {}), ...(cookie ? { cookie } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const text = await r.text(); let data; try { data = JSON.parse(text); } catch { data = text; }

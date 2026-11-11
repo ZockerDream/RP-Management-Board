@@ -4,7 +4,7 @@
 // Umgebung: BASE, CRAWL_OUT, CRAWL_WORKERS (Standard 3), CRAWL_ROLES (z. B. carol,alice), CRAWL_SHOTS (pages | all | none), ONLY_ADMIN
 import { chromium } from 'playwright';
 import fs from 'node:fs';
-const BASE = process.env.BASE || 'http://localhost:18088', OUT = process.env.CRAWL_OUT || '/work/crawl'; fs.mkdirSync(OUT, { recursive: true });
+const BASE = process.env.BASE || 'http://localhost:18089', OUT = process.env.CRAWL_OUT || '/work/crawl'; fs.mkdirSync(OUT, { recursive: true });
 const WORKERS = Math.max(1, Number(process.env.CRAWL_WORKERS) || 3);
 const SHOTS = process.env.CRAWL_SHOTS || 'pages';
 const ROLES = { admin: ['admin@e2e.test', 'E2e-Admin-Passw0rd!x'], alice: ['alice@e2e.test', 'alice-Sehr-Sicher-9931!'], carol: ['carol@e2e.test', 'carol-Sehr-Sicher-9931!'] };

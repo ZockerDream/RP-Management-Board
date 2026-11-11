@@ -184,7 +184,7 @@ Alle vier gehören einer Person (Solo) oder einer Organisation; die Sichtbarkeit
 |---|---|
 | Profil | Name, Sprache, Währung, Zeitzone, erster Wochentag, Festgehalt pro Tag, Wochen-Sollzeit, Bonus, Konto für Gehaltsgutschrift, DSGVO-Export |
 | Sicherheit | 2FA per Authenticator-App (QR-Code, Wiederherstellungscodes), Passwort ändern |
-| Darstellung | Akzentfarbe, Modus (System, Hell, Dunkel), Gravatar (Standard aus, nur mit Einwilligung) |
+| Darstellung | Design V1 oder V2, Akzentfarbe, Modus (System, Hell, Dunkel), Gravatar (Standard aus, nur mit Einwilligung); in V2 Hintergrund (Vorlage oder eigenes Bild), Unschärfe, Deckkraft, Abdunkeln, Handy ohne Unschärfe |
 | Benachrichtigungen | In-App und E-Mail je Ereignisart |
 | Sitzungen | Aktive Sitzungen ansehen und beenden |
 | API & Kalender | API-Schlüssel, iCal-Abo, Google-/Microsoft-Verbindung |
@@ -200,7 +200,9 @@ Alle vier gehören einer Person (Solo) oder einer Organisation; die Sichtbarkeit
 
 - Schlicht und flach, wenige Icons, modulare Karten, SVG-Diagramme.
 - Sechs Akzentfarben (Indigo, Smaragd, Ozean, Rosé, Bernstein, Mono), jeweils hell und dunkel; optional folgt der Modus dem System.
-- Bedienbar bis 390 px Breite; breite Tabellen scrollen innerhalb ihrer Karte.
+- Bedienbar bis 390 px Breite. Unter 640 px werden Tabellen zu Karten (Spaltenüberschrift links in jeder Zeile), Formulare einspaltig, Kennzahlen zu zweit; der Kalender startet dort in der Agenda. Eingaben haben auf dem Handy 16 px Schrift, damit iOS nicht hineinzoomt.
+- **Design V2 „Glass“ (Wunsch des Auftraggebers vom 2026-11-11):** je Benutzer wählbar, V1 bleibt Standard und unverändert. Alle Seiten zeigen Karten, Seitenleiste und Kopfleiste als Glas-Panels (durchscheinend mit Unschärfe) über einem festen Hintergrund; die Navigation hat Symbole. Hintergrund: Vorlagen Dämmerung, Nacht, Wald, ohne Bild oder ein eigenes Bild, das jeder Benutzer selbst hochlädt und nur selbst sieht. Regler für Unschärfe (0–40 px), Deckkraft der Panels (20–90 %) und Abdunkeln (0–70 %); auf Handys standardmäßig ohne Unschärfe. Dialoge und Popover sind kräftiger, damit Formulare lesbar bleiben.
+- **Dashboard in V2:** Module mit eigenem Standard (Kennzahlen; Cashflow + Stundenzettel; Prognose + Konten; Budgets, Buchungen, Termine; ToDos, Sparziele, Kategorien; Fuhrpark) und frei anpassbar: verschieben (Ziehen oder Pfeile), Breite 4/6/8/12 von 12 Spalten, ausblenden, wieder hinzufügen, auf Standard zurück. Gespeichert je Benutzer. V1 zeigt immer die feste Anordnung von früher, ohne die V2-Module.
 
 ## 13. Architektur
 

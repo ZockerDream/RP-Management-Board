@@ -308,6 +308,8 @@ export default async function routes(app) {
         await tx(async (c) => {
           let after = before;
           if (keys.length) after = (await c.query(`UPDATE ${table} SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1 RETURNING *`, [before.id, ...keys.map((k) => k === 'cost_interval_count' ? patch[k] ?? 1 : patch[k] ?? null)])).rows[0];
+          // Inzwischen von jemand anderem gelöscht (vom Crawler mit parallelen Browsern gefunden): 404 statt 500
+          if (!after) throw notFound();
           await syncCost(c, table, kind, before, after, req.user.id);
         });
       } catch (e) {

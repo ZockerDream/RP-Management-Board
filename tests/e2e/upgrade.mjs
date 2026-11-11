@@ -1,11 +1,11 @@
 // Update im selben Browserprofil ohne Cache-Löschen. Erst "before" auf der alten Version, dann Update einspielen, dann "after".
 import { chromium } from 'playwright';
-const BASE = process.env.BASE || 'http://localhost:18088';
+const BASE = process.env.BASE || 'http://localhost:18089';
 const phase = process.argv[2] || 'after';
 const OUT = process.argv[3] || '/work/upgrade-shots';
 const PROFILE = process.argv[4] || '/work/upgrade-profile';
 // Teile, die nur der neue Code hat (je Release anpassen): Seite und Selektor
-const MARKERS = [['notes', '#n-state [data-state=archived]'], ['admin-server', '#view .tabs [data-tab=notetags]']];
+const MARKERS = [['transactions', '#t-scan'], ['dashboard', '.dash-grid .dash-mod[data-mod=kpis]']];
 const ROUTES = { teams: 'Organisationen', notes: 'Notizblock', todos: 'ToDos', spending: 'Budgets', 'sport-run': 'Laufen', 'sport-swim': 'Schwimmen', 'sport-bike': 'Biken', 'assets-vehicles': 'Fahrzeuge', 'assets-properties': 'Häuser', 'assets-keys': 'Schlüssel', 'assets-manage': 'Verwaltung', casefiles: 'Akten', trainings: 'Schulungen', licenses: 'Lizenzen', docs: 'Dokumentationen', 'admin-users': 'User-Management', 'admin-server': 'Server-Management', 'admin-tickets': 'Tickets', changelog: 'Changelog', datenschutz: 'Datenschutzerklärung', impressum: 'Impressum' };
 
 const ctx = await chromium.launchPersistentContext(PROFILE, { viewport: { width: 1400, height: 900 }, serviceWorkers: 'block' });

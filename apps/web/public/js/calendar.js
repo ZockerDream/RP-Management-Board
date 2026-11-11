@@ -28,7 +28,8 @@ export const TYPES = {
 
 const today = new Date(); today.setHours(0, 0, 0, 0);
 let events = [];
-const st = { view: 'month', cursor: new Date(today), hidden: new Set(['holiday'].filter(() => false)), editing: null };
+// Auf dem Handy ist die Monatsansicht zu eng für Titel: dort startet der Kalender in der Agenda
+const st = { view: matchMedia('(max-width: 640px)').matches ? 'agenda' : 'month', cursor: new Date(today), hidden: new Set(['holiday'].filter(() => false)), editing: null };
 
 const on = d => events.filter(e => !st.hidden.has(e.type) && occursOn(e.date, e.repeat, e.repeat_interval, ymd(d)))
   .sort((a, b) => (b.allDay ? 1 : 0) - (a.allDay ? 1 : 0) || (a.start || '').localeCompare(b.start || ''));

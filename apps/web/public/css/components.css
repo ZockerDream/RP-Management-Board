@@ -418,3 +418,124 @@ button.list-item:hover { background: var(--surface-2); }
 .scan-table td { vertical-align: top; }
 .scan-table td .tag { margin-top: 4px; }
 .scan-text { max-height: 240px; overflow: auto; white-space: pre-wrap; font-size: 12px; background: var(--surface-2); padding: 10px; border-radius: 8px; }
+
+/* Dashboard-Module (dashboard.js): 12er-Raster, Breite je Modul über --span; V1 nutzt eine feste Anordnung */
+.dash-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 18px; margin-bottom: 18px; }
+.dash-mod { grid-column: span var(--span, 12); display: flex; flex-direction: column; min-width: 0; container-type: inline-size; }
+.dash-mod > .card { flex: 1; }
+@container (max-width: 620px) { .forecast-weeks { grid-template-columns: minmax(0, 1fr); } }
+@container (max-width: 330px) { .gauge-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1100px) {
+  .dash-grid > .dash-mod { grid-column: span 12; }
+  .dash-grid > .dash-mod[data-span="6"], [data-ui="v2"] .dash-grid > .dash-mod[data-span="4"] { grid-column: span 6; }
+}
+@media (max-width: 900px) { .dash-grid.dash-grid > .dash-mod.dash-mod[data-span] { grid-column: span 12; } }
+.dash-tray { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; }
+.dash-tray .grow { flex: 1 1 260px; }
+.dash-tray small { display: block; }
+.dash-tray .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+#d-edit.on { background: var(--primary-soft); border-color: var(--primary); }
+.dash-grid.editing .dash-mod { outline: 2px dashed color-mix(in srgb, var(--primary) 70%, transparent); outline-offset: 4px; border-radius: var(--radius); cursor: grab; }
+.dash-mod.dragging { opacity: .45; }
+.dash-mod.drop-before { box-shadow: -6px 0 0 -2px var(--primary); }
+.dash-mod.drop-after { box-shadow: 6px 0 0 -2px var(--primary); }
+.mod-tools { display: flex; align-items: center; flex-wrap: nowrap; gap: 6px; margin-bottom: 8px; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--border); }
+.mod-grip { display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; font-size: 13px; color: var(--muted); }
+.mod-grip b { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mod-btn { width: 34px; height: 34px; display: inline-grid; place-items: center; border-radius: 9px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); cursor: pointer; padding: 0; }
+.mod-btn:disabled { opacity: .4; cursor: default; }
+.mod-tools select { width: auto; max-width: 118px; padding: 6px 8px; flex: none; }
+.mod-btn { flex: none; }
+.dash-timer-body { display: flex; align-items: center; gap: 16px; }
+.dash-ring { width: 84px; height: 84px; flex: none; }
+.dash-ring circle { fill: none; stroke-width: 8; }
+.dash-ring .track { stroke: color-mix(in srgb, var(--text) 12%, transparent); }
+.dash-ring .fill { stroke: var(--primary); stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
+.dash-ring text { font-size: 15px; font-weight: 700; fill: var(--text); }
+.dash-clock { font-size: 28px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.dash-goal { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.dash-goal:last-child { border-bottom: 0; }
+.dash-todo { cursor: pointer; }
+.dash-todo b, .dash-todo small { display: block; }
+
+/* Einstellungen → Darstellung: Design-Version und Hintergrund (V2) */
+.ui-versions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 8px; }
+.ui-version { display: flex; flex-direction: column; gap: 6px; text-align: left; font: inherit; color: var(--text); cursor: pointer; padding: 12px; border-radius: var(--radius); border: 1.5px solid var(--border); background: var(--surface-2); }
+.ui-version.on { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.ui-version b { display: flex; align-items: center; gap: 8px; }
+.ui-pv { width: 100%; height: 92px; border-radius: 10px; display: grid; grid-template-columns: 26% 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 6px; padding: 8px; margin-bottom: 4px; }
+.ui-pv i { display: block; min-width: 0; }
+.ui-pv i:first-child { grid-row: span 2; }
+.ui-pv i:last-child { grid-column: span 2; }
+.ui-pv.v1 { background: var(--bg); border: 1px solid var(--border); }
+.ui-pv.v1 i { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+.ui-pv.v2 { background: linear-gradient(180deg, #1b1640, #5b2a86 60%, #f08a4b); }
+.ui-pv.v2 i { background: rgb(16 16 28 / .5); border: 1px solid rgb(255 255 255 / .18); border-radius: 8px; }
+.bg-thumbs { display: flex; flex-wrap: wrap; gap: 10px; }
+.bg-thumb { position: relative; width: 104px; height: 70px; padding: 0; border-radius: 14px; overflow: hidden; cursor: pointer; border: 2px solid var(--border); background: var(--surface-2); color: var(--text); font: inherit; }
+.bg-thumb.on { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.bg-thumb:focus-within { outline: 2px solid var(--primary); outline-offset: 2px; }
+.bg-mini { position: absolute; inset: 0; background: var(--sky, var(--bg)); background-size: cover; background-position: center; }
+.bg-mini i { position: absolute; inset: 0; display: block; }
+.bg-mini[data-bg="none"] i { display: none; }
+.bg-name { position: absolute; left: 7px; bottom: 4px; font-size: 11px; font-weight: 650; color: #fff; text-shadow: 0 1px 4px rgb(0 0 0 / .85); }
+.bg-upload { display: grid; place-items: center; text-align: center; border-style: dashed; font-size: 12px; font-weight: 600; color: var(--muted); }
+.bg-upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.ui-sliders { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; }
+.ui-slider { display: grid; grid-template-columns: 170px minmax(0, 1fr) 56px; align-items: center; gap: 12px; }
+.ui-slider input { accent-color: var(--primary); padding: 0; border: 0; background: none; }
+.ui-slider output { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+@media (max-width: 640px) {
+  .ui-versions { grid-template-columns: minmax(0, 1fr); }
+  .ui-slider { grid-template-columns: minmax(0, 1fr) 56px; }
+  .ui-slider input { grid-column: 1 / -1; grid-row: 2; }
+}
+
+/* Handy (Wunsch des Auftraggebers vom 2026-11-11: V1 mobilfähig). Gilt für V1 und V2. Steht am Ende von components.css,
+   weil layout.css vorher geladen wird und bei gleicher Spezifität sonst die Regeln oben gewinnen. */
+@media (max-width: 900px) {
+  .sidebar.open ~ .main::after { content: ""; position: fixed; inset: 0; z-index: 15; background: rgb(0 0 0 / .45); }
+  .sidebar { height: 100dvh; }
+  .grid:has(> .kpi) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Unter 16 px zoomt iOS beim Antippen in jedes Eingabefeld */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px; }
+  .icon-btn.menu-btn { gap: 6px; }
+}
+@media (max-width: 640px) {
+  #view { padding: 14px 12px 48px; }
+  .topbar { padding: 10px 12px; gap: 8px; }
+  .card { padding: 16px; }
+  .grid { gap: 12px; margin-bottom: 12px; }
+  .page-head { margin-bottom: 18px; }
+  .page-head h1 { font-size: 22px; }
+  .page-head .actions { width: 100%; }
+  .kpi .value { font-size: 20px; }
+  .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .seg button { white-space: nowrap; }
+  .form { grid-template-columns: minmax(0, 1fr); }
+  .toolbar .search { max-width: none; flex-basis: 100%; }
+  .toolbar select, .toolbar input { flex: 1 1 140px; }
+  .modal { padding: 8px; align-items: end; }
+  .modal .card { max-height: 94dvh; }
+  .modal-foot { flex-wrap: wrap; }
+  .setting { flex-wrap: wrap; }
+  .list-item { flex-wrap: wrap; gap: 8px 12px; }
+  .list-item .grow { flex-basis: 60%; }
+  /* Tabellen als gestapelte Karten; app.js schreibt die Spaltenüberschrift in data-label jeder Zelle */
+  .table.stackable thead { display: none; }
+  .table.stackable, .table.stackable tbody, .table.stackable tr, .table.stackable td { display: block; width: 100%; }
+  .table.stackable tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .table.stackable tr:last-child { border-bottom: 0; }
+  .table.stackable td { position: relative; min-height: 26px; padding: 3px 0 3px calc(36% + 10px); border: 0; text-align: left !important; white-space: normal; overflow-wrap: anywhere; }
+  .table.stackable td::before { content: attr(data-label); position: absolute; left: 0; top: 5px; width: 36%; color: var(--muted); font-size: 12px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .table.stackable td[data-label=""] { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 0; }
+  .table.stackable td[data-label=""]::before { display: none; }
+  .table.stackable td:empty { display: none; }
+}
+@media (max-width: 900px) { .icon-btn.menu-btn { display: inline-flex; align-items: center; } }
+@media (max-width: 640px) { .table.stackable td > * { max-width: 100%; } }
+/* Benachrichtigungen: auf dem Handy über die ganze Kopfleiste statt rechtsbündig an der Glocke (ragte links aus dem Bild) */
+@media (max-width: 640px) {
+  .notification-wrap { position: static; }
+  .notification-popover { left: 8px; right: 8px; width: auto; top: calc(100% + 6px); max-height: 75vh; max-height: 75dvh; }
+}
