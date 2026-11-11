@@ -6,6 +6,7 @@
 // Arten: new = Neu, changed = Geändert, fixed = Behoben, tech = Technik und Betrieb
 
 export const UNRELEASED = [
+  ['fixed', 'Design V2: Die Schrift im Hinweisfeld der Diagramme (Maus über dem Cashflow) war dunkel auf dunklem Grund. Sie hat jetzt immer die Kontrastfarbe zum Hintergrund, hell oder dunkel je nach Modus.'],
 ];
 
 export const CHANGELOG = [
