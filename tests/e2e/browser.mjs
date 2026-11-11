@@ -1250,12 +1250,53 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await ctx.close();
 }
 
+// ---------- Fuhrpark: Fahrzeuge, Kontrollrunde, Markdown (Wunsch des Auftraggebers vom 2026-11-11)
+{
+  const { page, at, ctx } = await session();
+  at('alice fuhrpark');
+  await login(page, 'alice@e2e.test', 'alice-Sehr-Sicher-9931!');
+  await go(page, '#/fleet');
+  check('Fuhrpark in der Navigation', /Fuhrpark/.test(await page.textContent('.sidebar')));
+  await page.selectOption('#f-team', { label: 'E2E Team' });
+  await settle(page);
+  await page.click('#view .tabs [data-tab=vehicles]');
+  await page.click('#f-group-new');
+  await page.fill('.modal.open [name=name]', 'Rumpo Espera');
+  await submit(page);
+  await page.click('#f-vehicle-new');
+  await page.selectOption('.modal.open [name=group_id]', { label: 'Rumpo Espera' });
+  await page.fill('.modal.open [name=plate]', '30 AB9FH');
+  await submit(page);
+  check('Fuhrpark: Fahrzeug in der Liste', /30 AB9FH/.test(await page.textContent('#f-vehicles')), (await page.textContent('#f-vehicles')).slice(0, 200));
+  at('alice fuhrpark runde');
+  await page.click('#view .tabs [data-tab=checks]');
+  await page.click('#f-check-new');
+  await page.waitForSelector('#f-detail [data-k=odometer_km]');
+  const row = await page.$('#f-detail tr:has-text("30 AB9FH")');
+  await (await row.$('[data-k=odometer_km]')).fill('2356');
+  await (await row.$('[data-k=accessories_complete]')).check();
+  await (await row.$('[data-k=note]')).fill('Sullivan');
+  await page.click('#f-save');
+  await page.waitForTimeout(400);
+  await page.click('#f-done');
+  await page.waitForTimeout(500);
+  check('Fuhrpark: Runde erledigt', /Erledigt/.test(await page.textContent('#f-detail')));
+  await page.click('#f-md');
+  await page.waitForSelector('.modal.open textarea');
+  const md = await page.$eval('.modal.open textarea', (t) => t.value);
+  check('Fuhrpark: Markdown im Dialog', /^Stand: /.test(md) && md.includes('### Rumpo Espera') && md.includes('|30 AB9FH|2356|') && md.includes('Sullivan'), md.slice(0, 300));
+  await page.screenshot({ path: `${out}/fuhrpark-markdown.png` });
+  await page.click('.modal.open [data-x]');
+  check('Fuhrpark ohne Fehlermeldung', !(await viewErr(page)));
+  await ctx.close();
+}
+
 // ---------- Mobil & Dunkel
 {
   const { page, at, ctx } = await session({ width: 390, height: 800 });
   at('mobil-login');
   await login(page, 'alice@e2e.test', 'alice-Sehr-Sicher-9931!');
-  for (const h of ['#/dashboard', '#/transactions', '#/work', '#/budgets', '#/spending', '#/recurring', '#/goals', '#/reports', '#/teams', '#/calendar', '#/notes', '#/todos', '#/sport-run', '#/assets-vehicles', '#/assets-properties', '#/casefiles?tab=people', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/settings', '#/impressum', '#/datenschutz']) {
+  for (const h of ['#/dashboard', '#/transactions', '#/work', '#/budgets', '#/spending', '#/recurring', '#/goals', '#/reports', '#/teams', '#/calendar', '#/notes', '#/todos', '#/sport-run', '#/assets-vehicles', '#/assets-properties', '#/casefiles?tab=people', '#/fleet', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/settings', '#/impressum', '#/datenschutz']) {
     at(`mobil ${h}`);
     await go(page, h);
     const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
