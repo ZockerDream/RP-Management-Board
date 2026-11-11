@@ -73,7 +73,7 @@
 [data-ui="v2"] .seg button { border-radius: 999px; }
 [data-ui="v2"] .seg button.on { background: var(--primary); color: var(--on-primary); box-shadow: none; }
 [data-ui="v2"] .btn { border-radius: var(--radius-sm); }
-[data-ui="v2"] .chart-tip { background: color-mix(in srgb, var(--solid) 92%, transparent); }
+[data-ui="v2"] .chart-tip { background: color-mix(in srgb, var(--solid) 92%, transparent); color: var(--text); border: 1px solid var(--border); }
 
 /* Bedienelemente direkt über dem Bild bekommen eine eigene Glasfläche */
 [data-ui="v2"] :is(.page-head, .tabs, .toolbar) :is(.seg, select, input, .btn.ghost, .icon-btn),

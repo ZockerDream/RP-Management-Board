@@ -1461,6 +1461,29 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.click('[data-reset]');
   await page.waitForSelector('[data-mod=categories]');
   check('V2: Standard wiederherstellen', await page.locator('[data-mod=categories]').count() === 1);
+  // Schrift im Diagramm-Tooltip immer in Kontrastfarbe zum Hintergrund (Wunsch vom 2026-11-11), hell und dunkel
+  at('v2 diagramm kontrast');
+  const themeOrig = await page.evaluate(() => document.documentElement.dataset.theme);
+  for (const theme of ['dark', 'light']) {
+    const ratio = await page.evaluate(async (t) => {
+      document.documentElement.dataset.theme = t;
+      const rect = document.querySelector('#d-cash svg rect[fill="transparent"]');
+      const box = rect.getBoundingClientRect();
+      rect.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: box.left + box.width * 0.9, clientY: box.top + box.height / 2 }));
+      await new Promise((r) => setTimeout(r, 200));
+      const tip = document.querySelector('#d-cash .chart-tip');
+      const rgb = (c) => {
+        const n = c.match(/[\d.]+/g).map(Number);
+        return c.startsWith('color(') ? n.slice(0, 3).map((v) => v * 255) : n.slice(0, 3);
+      };
+      const lum = (c) => { const [r, g, b] = rgb(c).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+      const style = getComputedStyle(tip);
+      const [a, b] = [lum(style.color), lum(style.backgroundColor)].sort((x, y) => y - x);
+      return (a + 0.05) / (b + 0.05);
+    }, theme);
+    check(`V2 ${theme}: Diagramm-Tooltip gut lesbar`, ratio >= 4.5, `Kontrast ${ratio.toFixed(2)}`);
+  }
+  await page.evaluate((t) => { document.documentElement.dataset.theme = t; }, themeOrig);
   at('v2 zurück auf v1');
   await go(page, '#/settings');
   await page.click('[data-tab=appearance]');
