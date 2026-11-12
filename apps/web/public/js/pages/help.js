@@ -51,7 +51,7 @@ const sections = [
   },
   {
     title: 'Sport: Strecken und Bestenliste',
-    text: 'Unter „Laufen“, „Schwimmen“ und „Biken“ sehen Mitglieder einer Organisation deren Strecken. Wer bei Sport „Lesen & Schreiben“ hat, legt Strecken mit Checkpoints und optionaler Distanz an und darf auch fremde Ergebnisse löschen. Über „Ergebnis eintragen“ erfasst jedes Mitglied Punkte, optional die Zeit im Format mm:ss und die erreichten Checkpoints. Die Bestenliste sortiert nach Punkten, bei Gleichstand nach der Zeit. Eigene Ergebnisse kannst du jederzeit löschen.',
+    text: 'Unter „Laufen“, „Schwimmen“ und „Biken“ sehen Mitglieder einer Organisation deren Strecken. Wer bei Sport „Lesen & Schreiben“ hat, legt Strecken mit Name, Checkpoints und Rundenanzahl an und darf auch fremde Ergebnisse löschen. Über „Ergebnis eintragen“ erfasst jedes Mitglied seine Zeit im Format MM:SS:hh (Minuten, Sekunden, Hundertstel, z. B. 12:34:56). Eine Zeit gilt nur, wenn du alle Checkpoints der Strecke erreicht hast. Die Bestenliste sortiert nach der schnellsten Zeit; Punkte gibt es nicht. Eigene Ergebnisse kannst du jederzeit löschen.',
   },
   {
     title: 'Notizblock',

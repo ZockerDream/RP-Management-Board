@@ -105,10 +105,10 @@ Schichten über Mitternacht: Ein Eintrag gehört immer zu genau einem Kalenderta
 
 ### 4.4 Sport
 ```
-sport_routes(id, team_id, sport_type[run|swim|bike], name, checkpoints, distance_km, notes, created_by)
-sport_scores(id, route_id, user_id, score, duration_seconds, checkpoints_reached, note, achieved_on)
+sport_routes(id, team_id, sport_type[run|swim|bike], name, checkpoints, laps, notes, created_by)
+sport_scores(id, route_id, user_id, duration_ms, note, achieved_on)
 ```
-Sortierung der Bestenliste: `score DESC, duration_seconds NULLS LAST, created_at`. Rechte über die Funktion `sport` der Organisation (Lesen: ansehen und eigene Ergebnisse, Lesen & Schreiben: Strecken und fremde Ergebnisse).
+Sortierung der Bestenliste: `duration_ms NULLS LAST, created_at`; `best_ms` ist die Zeit des Ersten. Format und Eingabe (MM:SS:hh, Millisekunden nur wenn gesetzt) stehen in `apps/web/public/js/sport-time.js` (Unit-Test `sport-time.test.js`), die Obergrenze von 24 Stunden steht zusätzlich in `routes/sport.js` (Migration 029 hat Punkte und Sekunden entfernt, 030 die erreichten Checkpoints, 031 die Distanz der Strecke zugunsten von `laps`). Rechte über die Funktion `sport` der Organisation (Lesen: ansehen und eigene Ergebnisse, Lesen & Schreiben: Strecken und fremde Ergebnisse).
 
 ### 4.5 Objekte
 ```
