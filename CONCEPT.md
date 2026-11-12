@@ -117,7 +117,7 @@ Arbeitszeit kann unabhängig von Projekten per Start-/Pause-/Stopp-Timer oder ma
 
 ## 5. Sport
 
-Getrennte Seiten für Laufen, Schwimmen und Biken. Eine Strecke gehört einer Organisation und hat Name, Checkpoints, optional Distanz und Notizen. Ergebnisse bestehen aus Punkten, optional Zeit (mm:ss oder h:mm:ss), erreichten Checkpoints, Datum und Notiz. Die Bestenliste sortiert nach Punkten absteigend, bei Gleichstand nach Zeit.
+Getrennte Seiten für Laufen, Schwimmen und Biken. Eine Strecke gehört einer Organisation und hat Name, Checkpoints, Rundenanzahl (mindestens 1; ersetzt seit Migration 031 die Distanz, alte Distanzen stehen in den Notizen) und Notizen. Ergebnisse bestehen aus der Zeit im Format MM:SS:hh (Minuten, Sekunden, Hundertstel; Pflicht, gespeichert in Millisekunden, höchstens 24 Stunden), Datum und Notiz. Punkte (Migration 029) und erreichte Checkpoints (Migration 030) gibt es nicht mehr (Wünsche des Auftraggebers vom 2026-11-12): Eine Zeit gilt nur mit allen Checkpoints der Strecke. Die Bestenliste sortiert nach der Zeit aufsteigend; „Bestzeit“ ist die Zeit des Ersten.
 
 | Recht bei Sport | Strecken | Ergebnisse |
 |---|---|---|

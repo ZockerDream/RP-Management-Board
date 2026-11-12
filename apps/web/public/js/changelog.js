@@ -6,6 +6,9 @@
 // Arten: new = Neu, changed = Geändert, fixed = Behoben, tech = Technik und Betrieb
 
 export const UNRELEASED = [
+  ['changed', 'Sport ohne Punkte: Ergebnisse sind Zeiten im Format MM:SS:hh (Minuten, Sekunden, Hundertstel), z. B. 12:34:56. Die Zeit ist Pflicht; „12:34.56“ geht auch, eine dritte Nachkommastelle (Millisekunden) wird angezeigt, wenn sie gesetzt ist. Das Feld „Erreichte Checkpoints“ entfällt: Eine Zeit gilt nur mit allen Checkpoints der Strecke. Die Bestenliste sortiert nach der schnellsten Zeit; „Bestzeit“ ersetzt „Bestwert“. Vorhandene Zeiten bleiben erhalten, Punkte und erreichte Checkpoints entfallen.'],
+  ['changed', 'Sportstrecken haben statt der Distanz eine Rundenanzahl: Name, Checkpoints und Runden, dazu wie bisher Notizen. Eine schon eingetragene Distanz steht jetzt in den Notizen der Strecke.'],
+  ['tech', 'Migrationen 029 bis 031: Sportergebnisse speichern die Zeit in Millisekunden (`duration_ms`), die Spalten für Punkte, Sekunden und erreichte Checkpoints entfallen; Strecken haben `laps` statt `distance_km`.'],
   ['fixed', 'Design V2: Die Schrift im Hinweisfeld der Diagramme (Maus über dem Cashflow) war dunkel auf dunklem Grund. Sie hat jetzt immer die Kontrastfarbe zum Hintergrund, hell oder dunkel je nach Modus.'],
 ];
 
