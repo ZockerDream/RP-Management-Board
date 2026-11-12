@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { $, esc, empty, fdatetime, tag, openForm, toast, confirmBox } from '../ui.js';
 import { writableTeams, visibilityField, scopeTag, noteTagHtml } from './common.js';
 import { markdownBlock } from '../markdown.js';
+import { state as appState } from '../app.js';
 
 // Tags legt das Server-Management an; ohne Tags gibt es weder Feld noch Knopf noch Filter
 const tagField = (tags, selected) => (tags.length
@@ -52,7 +53,12 @@ export async function render(view) {
     ${tags.length ? `<select id="n-tag" aria-label="Nach Tag filtern" style="max-width:200px"><option value="">Alle Tags</option><option value="none">Ohne Tag</option>${tags.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select>` : ''}</div>
     <div id="n-list"></div>`;
 
+  // Gleiche Reihenfolge wie GET /notes (offen vor archiviert, angeheftet zuerst), damit sofort angezeigte Änderungen
+  // schon richtig einsortiert sind; Anheften und Archivieren ändern updated_at nicht
+  const order = (a, b) => (Boolean(a.archived_at) - Boolean(b.archived_at)) || (Boolean(b.pinned) - Boolean(a.pinned))
+    || String(b.updated_at).localeCompare(String(a.updated_at)) || String(b.archived_at || '').localeCompare(String(a.archived_at || ''));
   function draw() {
+    notes.sort(order);
     const inState = notes.filter((note) => state === 'all' || Boolean(note.archived_at) === (state === 'archived'));
     const shown = inState.filter((note) => {
       if (scope !== 'all' && Boolean(note.team_id) !== (scope === 'team')) return false;
@@ -77,11 +83,27 @@ export async function render(view) {
     notes = await api.get('/notes');
     draw();
   }
+  // Kleine Schalter sofort anzeigen, dann speichern; bei Ablehnung zurückspringen (der Fehler geht an den Aufrufer).
+  // Danach still neu laden, damit Reihenfolge (angeheftet zuerst) und Zeitstempel vom Server kommen.
+  async function optimistic(item, changes, request) {
+    const before = Object.fromEntries(Object.keys(changes).map((key) => [key, item[key]]));
+    Object.assign(item, changes);
+    draw();
+    try {
+      await request();
+    } catch (error) {
+      Object.assign(item, before);
+      draw();
+      throw error;
+    }
+    load().catch(() => {});
+  }
 
   view.addEventListener('click', async (event) => {
     const target = event.target.closest('button');
     if (!target) return;
     const note = (key) => notes.find((item) => item.id === target.dataset[key]);
+    const me = appState.me;
     try {
       if (target.dataset.state) {
         state = target.dataset.state;
@@ -98,13 +120,16 @@ export async function render(view) {
       } else if (target.dataset.tags) {
         if (await tagsForm(note('tags'), tags)) await load();
       } else if (target.dataset.archive) {
-        const archived = !note('archive').archived_at;
-        await api.patch(`/notes/${target.dataset.archive}`, { archived });
+        const item = note('archive');
+        const archived = !item.archived_at;
+        // Archivieren löst das Anheften (wie auf dem Server)
+        await optimistic(item, archived ? { archived_at: new Date().toISOString(), archived_by_name: me?.name, pinned: false } : { archived_at: null, archived_by_name: null },
+          () => api.patch(`/notes/${item.id}`, { archived }));
         toast(archived ? 'Notiz archiviert' : 'Notiz wiederhergestellt');
-        await load();
       } else if (target.dataset.pin) {
-        await api.patch(`/notes/${target.dataset.pin}`, { pinned: !note('pin').pinned });
-        await load();
+        const item = note('pin');
+        const pinned = !item.pinned;
+        await optimistic(item, { pinned }, () => api.patch(`/notes/${item.id}`, { pinned }));
       } else if (target.dataset.del && await confirmBox('Notiz löschen', 'Diese Notiz wird endgültig gelöscht.')) {
         await api.del(`/notes/${target.dataset.del}`);
         await load();

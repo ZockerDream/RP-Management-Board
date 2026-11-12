@@ -80,7 +80,7 @@ export async function render(view) {
   const teamEntries = new Map();
   let timer = null;
   // Stundenzettel der Organisation: Zeiten aller sehen ab „Lesen“, bearbeiten und Projekte anlegen ab „Lesen & Schreiben“
-  const orgs = can('team:read') ? await api.get('/teams') : [];
+  const orgs = can('team:read') ? await api.get('/teams?brief=1') : [];
   const teams = orgs.filter((team) => team.levels.work >= 2);
   const projectTeams = orgs.filter((team) => team.levels.work >= 3);
   const teamWritable = () => (teams.find((team) => team.id === $('#work-team')?.value)?.levels.work ?? 0) >= 3;

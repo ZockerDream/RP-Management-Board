@@ -106,6 +106,13 @@ ok('bob Mitglied', await alice.post(`/teams/${team.id}/members`, { email: uB.ema
 ok('carol Leser', await alice.post(`/teams/${team.id}/members`, { email: uC.email, rank_id: rankReader }));
 const teams = ok('teams', await bob.get('/teams'));
 check('bob sieht Team', teams.some((t) => t.id === team.id), JSON.stringify(teams));
+const briefTeams = ok('teams kurz', await bob.get('/teams?brief=1'));
+const briefTeam = briefTeams.find((t) => t.id === team.id);
+check('Kurzliste: Rechte ohne Mitglieder', briefTeam && briefTeam.levels?.members >= 1 && !('members' in briefTeam) && !('ranks' in briefTeam), JSON.stringify(briefTeam));
+check('Kurzliste: gleiche Rechte wie die volle Liste', JSON.stringify(briefTeam.levels) === JSON.stringify(teams.find((t) => t.id === team.id).levels));
+check('Volle Liste: Mitglieder, Ränge und Gruppen', Array.isArray(teams.find((t) => t.id === team.id).members) && teams.find((t) => t.id === team.id).members.length === 3
+  && Array.isArray(teams.find((t) => t.id === team.id).ranks) && Array.isArray(teams.find((t) => t.id === team.id).invitations), JSON.stringify(teams.find((t) => t.id === team.id)).slice(0, 300));
+invalid('Kurzliste falscher Wert', await bob.get('/teams?brief=ja'));
 
 // ---------- Konten / Buchungen
 const solo = ok('konto nur Name+Typ (neues Formular)', await alice.post('/budgets', { name: 'Giro', type: 'solo' }));

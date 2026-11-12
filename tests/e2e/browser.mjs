@@ -252,6 +252,7 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await submit(page);
   check('Notiz im Team', /E2E Team/.test(await noteCard.textContent()));
   await noteCard.locator('[data-pin]').click();
+  check('Angeheftet sofort vorn (ohne auf den Server zu warten)', /UI Notiz/.test(await page.locator('#n-list .memo').first().textContent()));
   await page.waitForTimeout(400);
   check('Notiz angeheftet steht vorn', /UI Notiz/.test(await page.locator('#n-list .memo').first().textContent()) && /Angeheftet/.test(await noteCard.textContent()));
   await page.click('#n-scope [data-s=solo]');
@@ -388,13 +389,34 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.fill('.modal.open [name=note]', 'Mit <b onclick="x()">Notiz</b>');
   await submit(page);
   check('ToDo-Notiz: HTML mit Attributen bleibt Text', /<b onclick="x\(\)">Notiz<\/b>/.test(await todoRow.textContent()) && await todoRow.locator('[onclick]').count() === 0);
-  await todoRow.locator('[data-done]').check();
+  // Optimistische Anzeige: lehnt der Server ab, springt das ToDo zurück
+  const refuse = (route) => (route.request().method() === 'PATCH'
+    ? route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'forbidden', message: 'Test: abgelehnt' }) })
+    : route.continue());
+  await page.route('**/api/todos/*', refuse);
+  await todoRow.locator('[data-done]').click();
+  await page.locator('.toast', { hasText: 'Test: abgelehnt' }).first().waitFor({ timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  check('Abgelehnt: ToDo springt zurück', await todoRow.count() === 1 && !(await todoRow.locator('[data-done]').isChecked()));
+  await page.unroute('**/api/todos/*', refuse);
+  // Abhaken wirkt sofort, ohne auf den Server zu warten (Element wird neu gezeichnet, deshalb click statt check)
+  let releasePatch;
+  const slow = async (route) => {
+    if (route.request().method() !== 'PATCH') return route.continue();
+    await new Promise((resolve) => { releasePatch = resolve; });
+    return route.continue();
+  };
+  await page.route('**/api/todos/*', slow);
+  await todoRow.locator('[data-done]').click();
+  check('Abgehakt verschwindet sofort aus Offen', await todoRow.count() === 0);
+  releasePatch?.();
   await page.waitForTimeout(500);
-  check('Abgehakt verschwindet aus Offen', await todoRow.count() === 0);
+  await page.unroute('**/api/todos/*', slow);
+  check('Abgehakt bleibt aus Offen', await todoRow.count() === 0);
   await page.click('#t-status [data-status=done]');
   check('Erledigt zeigt es mit Name', /Erledigt .* von alice/.test(await todoRow.textContent()), await todoRow.textContent());
   await page.screenshot({ path: `${out}/alice-todos-done.png` });
-  await todoRow.locator('[data-done]').uncheck();
+  await todoRow.locator('[data-done]').click();
   await page.waitForTimeout(500);
   await page.click('#t-status [data-status=open]');
   check('Wieder offen', await todoRow.count() === 1);

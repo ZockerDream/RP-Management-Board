@@ -162,7 +162,7 @@ export async function render(view, params) {
   let tab = 'people';
   const MAIN_TABS = mainTabs();
   const filter = { status: '', type_id: '', priority: '', q: '' };
-  const orgs = can('team:read') ? await api.get('/teams') : [];
+  const orgs = can('team:read') ? await api.get('/teams?brief=1') : [];
   // Bereiche für Personenakten, Strafkatalog, Vorlagen und Fahndung: Organisationen mit Leserecht für Akten, dazu privat
   const areas = [...orgs.filter((o) => (o.levels.casefile ?? 0) >= 2).map((o) => ({ id: o.id, name: o.name, level: o.levels.casefile })), { id: '', name: 'Privat', level: 4 }];
   const ctx = { areas, area: areas[0].id, openFile: (id) => openFile(id), openPerson: (id, areaId) => openPerson(id, areaId), url: (hash) => history.replaceState(null, '', hash) };

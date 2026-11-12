@@ -62,6 +62,10 @@ node upgrade.mjs after                      # normal neu laden, nichts löschen
 
 `after` prüft alle neuen Seiten samt Titel und endet bei Fehlern mit Exit-Code 1. Für einen weiteren Lauf ein neues Browserprofil angeben: `node upgrade.mjs before /work/shots /work/profil2`.
 
+## Antwortzeiten (perf.mjs)
+
+Nach `api.mjs` misst `node tests/e2e/perf.mjs [ausgabe.json]` die Listen-Endpunkte als Alice (Median und p95 über `PERF_RUNS`, Vorgabe 30). `PERF_SEED=1` legt vorher 15 Organisationen mit Strecke und 30 Budgets an, damit Abfragen je Datensatz auffallen; das verändert die Daten, also danach nicht `browser.mjs` auf demselben Stack erwarten. Zum Vergleichen vorher und nachher je eine JSON-Datei schreiben.
+
 ## Ergebnisse von crawl.mjs
 
 Unter `crawl/` entstehen `findings.txt`, je Durchlauf eine Liste aller Aktionen und Bildschirmfotos: je Seite und Tab im sicheren Durchlauf und zu jeder Aktion, die etwas Neues gefunden hat (`…-fund-….png`). Am Ende jedes Durchlaufs steht, wie viele Aktionen er in welcher Zeit geschafft hat.

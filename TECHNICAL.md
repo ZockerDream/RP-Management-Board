@@ -296,6 +296,19 @@ Der Server liefert für `[from, to]` die Vereinigung aus eigenen Terminen und ab
 - **Updates:** `./scripts/update.sh`; Migrationen vorwärtskompatibel halten. Kein Cache-Löschen nötig, siehe Abschnitt 3.
 - **Tests:** `npm test` in `apps/api` (Unit). End-to-End immer in einem eigenen Compose-Projekt mit eigenen Volumes und eigenem `IMAGE_TAG`, nie gegen die produktive Instanz; siehe [tests/e2e/README.md](tests/e2e/README.md).
 
+### 9.1 Performance (2026-11-12)
+
+Gemessen mit `tests/e2e/perf.mjs` (Median über 30 Aufrufe auf `bm-check`, mit `PERF_SEED=1` zusätzlich 15 Organisationen und 30 Budgets): Fast alle Listen antworten in 3–8 ms. Die Ausreißer waren Abfragen je Datensatz (N+1):
+
+- `GET /teams` stellte sechs Abfragen je Organisation (Rechte, eigene Gruppen, Ränge, Gruppen, Mitglieder, Einladungen); jetzt sieben für alle zusammen, die Rechte per `unnest` über Organisationen × Funktionen. `GET /teams?brief=1` liefert nur Kopf und `levels` (zwei Abfragen) und ist für Auswahllisten gedacht (`orgsWithLevel` und die Seiten Konten, Kalender, Stundenzettel, Akten, Objekte, Sport); nur die Seite „Organisationen“ lädt die volle Liste.
+- `GET /spending-budgets` summierte je Budget einzeln; jetzt eine Abfrage über `unnest` der Zeiträume.
+- `actorScopeLevels` (`teams.js`) fragt `team_level` für alle Aktenarten und Doku-Kategorien in einer Abfrage.
+- `buildFeed` (Kalender) stellt seine elf unabhängigen Abfragen parallel; Feiertage berechnet `holidaysOf` einmal je Jahr und behält sie im Prozess.
+
+Migration 032 ergänzt Indizes auf Fremdschlüsseln, nach denen Listen, Rechteprüfungen und Löschkaskaden filtern (vor allem `team_members(user_id)` für „meine Organisationen“). Bei den heutigen Datenmengen liest PostgreSQL kleine Tabellen trotzdem ganz; die Indizes greifen beim Wachsen.
+
+Bewusst nicht (Entscheidung des Auftraggebers vom 2026-11-12): kein Redis und kein Cache für Rechte oder Geldbeträge, ein Cache dort könnte nach einer Rechteänderung alte Rechte liefern. Im Prozess zwischengespeichert sind nur Einstellungen (`allSettings`, 5 Sekunden, beim Speichern verworfen) und Feiertage. Optimistische Anzeige nur bei kleinen Schaltern: ToDo erledigt, Notiz anheften und archivieren, „Alle gelesen“ in der Glocke; lehnt der Server ab, springt die Anzeige zurück. Buchungen, Umbuchungen, Gehalt, Akten und Rechte warten auf den Server. Bilder in Galerien (Fahrzeuge, Akten) lädt `fillGallery` erst, wenn sie in die Nähe des sichtbaren Bereichs kommen (`IntersectionObserver`, 300 px Vorlauf).
+
 ## 10. Grenzen
 
 Eine Installation pro Organisation, `worker` einmal betreiben, ein Host. Offene Punkte stehen in [CONCEPT.md](CONCEPT.md), Abschnitt 14.
