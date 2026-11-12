@@ -33,16 +33,29 @@ export function galleryHtml(images, { writable = false, none = 'Noch keine Bilde
   </figure>`).join('')}</div>`;
 }
 
-// Vorschaubilder nachladen, sobald das Raster im DOM steht
+// Vorschaubilder erst laden, wenn sie in die Nähe des sichtbaren Bereichs kommen (bis zu 50 Bilder je Fahrzeug oder
+// Akte, jedes in voller Größe). Ohne IntersectionObserver lädt alles sofort.
 export function fillGallery(root, images, urlOf) {
+  const load = (image) => imageSrc(urlOf(image.id)).then((src) => {
+    const button = root.querySelector(`[data-img-open="${image.id}"]`);
+    if (button) button.innerHTML = `<img src="${src}" alt="${esc(image.caption || image.original_name)}" decoding="async">`;
+  }).catch(() => {
+    const button = root.querySelector(`[data-img-open="${image.id}"]`);
+    if (button) button.innerHTML = '<span class="muted">Nicht verfügbar</span>';
+  });
+  if (typeof IntersectionObserver !== 'function') { images.forEach(load); return; }
+  const byId = new Map(images.map((image) => [image.id, image]));
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      observer.unobserve(entry.target);
+      const image = byId.get(entry.target.dataset.imgOpen);
+      if (image) load(image);
+    }
+  }, { rootMargin: '300px 0px' });
   for (const image of images) {
-    imageSrc(urlOf(image.id)).then((src) => {
-      const button = root.querySelector(`[data-img-open="${image.id}"]`);
-      if (button) button.innerHTML = `<img src="${src}" alt="${esc(image.caption || image.original_name)}">`;
-    }).catch(() => {
-      const button = root.querySelector(`[data-img-open="${image.id}"]`);
-      if (button) button.innerHTML = '<span class="muted">Nicht verfügbar</span>';
-    });
+    const button = root.querySelector(`[data-img-open="${image.id}"]`);
+    if (button) observer.observe(button); else load(image);
   }
 }
 

@@ -34,18 +34,24 @@ export default async function routes(app) {
        WHERE s.owner_user_id=$1 ORDER BY s.created_at`,
       [req.user.id],
     );
-    return Promise.all(rows.map(async (row) => {
-      const [from, to] = periodRange(row);
-      const used = (await one(
-        `SELECT COALESCE(sum(amount),0) s FROM transactions
-         WHERE type='expense' AND booked_at BETWEEN $1 AND $2
-           AND budget_id = ANY($3::uuid[]) AND ($4::uuid IS NULL OR budget_id=$4)
-           AND ($5::uuid IS NULL OR category_id=$5)`,
-        [from, to, ids, row.budget_id, row.category_id],
-      )).s;
+    if (!rows.length) return rows;
+    // Verbrauch aller Budgets in einer Abfrage (vorher eine je Budget); Zeitraum je Budget aus periodRange
+    const periods = rows.map((row) => periodRange(row));
+    const sums = await many(
+      `SELECT x.id, COALESCE((SELECT sum(t.amount) FROM transactions t
+           WHERE t.type='expense' AND t.booked_at BETWEEN x.from_date AND x.to_date
+             AND t.budget_id = ANY($4::uuid[]) AND (x.budget_id IS NULL OR t.budget_id=x.budget_id)
+             AND (x.category_id IS NULL OR t.category_id=x.category_id)), 0) s
+       FROM unnest($1::uuid[], $2::date[], $3::date[], $5::uuid[], $6::uuid[]) AS x(id, from_date, to_date, budget_id, category_id)`,
+      [rows.map((row) => row.id), periods.map((p) => p[0]), periods.map((p) => p[1]), ids, rows.map((row) => row.budget_id), rows.map((row) => row.category_id)],
+    );
+    const used = new Map(sums.map((x) => [x.id, x.s]));
+    return rows.map((row, i) => {
+      const [from, to] = periods[i];
+      const spent = used.get(row.id) ?? '0';
       const limit = Number(row.limit_amount);
-      return { ...row, used, remaining: (limit - Number(used)).toFixed(2), pct: Math.round((Number(used) / limit) * 1000) / 10, period_from: from, period_to: to };
-    }));
+      return { ...row, used: spent, remaining: (limit - Number(spent)).toFixed(2), pct: Math.round((Number(spent) / limit) * 1000) / 10, period_from: from, period_to: to };
+    });
   });
 
   app.post('/spending-budgets', authz('budget:update'), async (req) => {

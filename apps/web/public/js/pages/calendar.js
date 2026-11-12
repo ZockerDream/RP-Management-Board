@@ -23,7 +23,7 @@ const MODAL = `<div class="modal" id="m-event"><div class="card"><div class="car
 </div></div>`;
 
 export async function render(view) {
-  const teams = can('team:read') ? await api.get('/teams') : [];
+  const teams = can('team:read') ? await api.get('/teams?brief=1') : [];
   view.innerHTML = `<div id="cal">
   <div class="page-head"><div><h1>Kalender</h1><p>Zahlungen, Services, Schlüssel-Fristen, Termine der Organisation und private Termine</p></div>
     <div class="actions">${can('calendar:create') ? '<button class="btn" id="cal-new">Neuer Termin</button>' : ''}</div></div>

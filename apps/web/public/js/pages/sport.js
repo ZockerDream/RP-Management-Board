@@ -17,7 +17,7 @@ export async function render(view, sportType = 'run') {
     <div class="actions"><button class="btn" id="route-new">Strecke anlegen</button></div></div><div id="sport-body"></div>`;
 
   async function load() {
-    [routes, teams] = await Promise.all([api.get(`/sport/routes?sport_type=${sportType}`), api.get('/teams').catch(() => [])]);
+    [routes, teams] = await Promise.all([api.get(`/sport/routes?sport_type=${sportType}`), api.get('/teams?brief=1').catch(() => [])]);
     teams = teams.filter((team) => team.levels.sport >= 3);
     $('#route-new').hidden = !teams.length;
     $('#sport-body').innerHTML = routes.length ? routes.map((route) => {

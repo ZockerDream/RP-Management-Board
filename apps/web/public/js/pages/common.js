@@ -68,7 +68,7 @@ export const payrollAccountHint = (options, currency) => (options.some((o) => o.
 
 // Solo oder Organisation: Organisationen, in denen die Person in dieser Funktion mindestens `min` hat
 // (anlegen meist ab „Lesen & Schreiben“ = 3); die aktuelle Organisation bleibt beim Bearbeiten immer wählbar
-export const orgsWithLevel = async (module, min = 3) => (can('team:read') ? (await api.get('/teams')).filter((team) => (team.levels?.[module] ?? 0) >= min) : []);
+export const orgsWithLevel = async (module, min = 3) => (can('team:read') ? (await api.get('/teams?brief=1')).filter((team) => (team.levels?.[module] ?? 0) >= min) : []);
 export const writableTeams = orgsWithLevel;
 export function visibilityField(teams, item) {
   const options = [{ v: '', l: 'Solo (nur für mich)' }, ...teams.map((team) => ({ v: team.id, l: `Organisation: ${team.name}` }))];

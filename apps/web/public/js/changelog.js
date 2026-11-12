@@ -6,6 +6,10 @@
 // Arten: new = Neu, changed = Geändert, fixed = Behoben, tech = Technik und Betrieb
 
 export const UNRELEASED = [
+  ['changed', 'Schneller: Die Liste der Organisationen lädt mit einer festen Zahl von Abfragen statt mehrerer je Organisation, Seiten mit Auswahl einer Organisation laden nur noch Name und Rechte. Budgets, Kalender und Feiertage antworten schneller.'],
+  ['changed', 'ToDo abhaken, Notiz anheften oder archivieren und „Alle gelesen“ in der Glocke wirken sofort, ohne auf den Server zu warten. Lehnt der Server ab, springt die Anzeige zurück und eine Meldung erscheint.'],
+  ['changed', 'Bilder zu Fahrzeugen und Akten laden erst, wenn sie in den sichtbaren Bereich kommen.'],
+  ['tech', 'Migration 032: Indizes für häufige Abfragen (u. a. Mitgliedschaften nach Benutzer, Termine, Daueraufträge, Sparziele, Umbuchungen je Konto). Neu: `GET /teams?brief=1` und das Messskript `tests/e2e/perf.mjs`.'],
 ];
 
 export const CHANGELOG = [

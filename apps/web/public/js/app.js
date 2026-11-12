@@ -442,12 +442,18 @@ document.addEventListener('click', async (e) => {
     $('#bell').setAttribute('aria-expanded', 'false');
   }
   if (e.target.closest('#notification-read')) {
+    // Sofort als gelesen zeigen, dann speichern; bei einem Fehler zeigt loadBell wieder den Stand des Servers
+    const count = $('#bell-n');
+    count.hidden = true;
+    $('#notification-read').hidden = true;
+    $('#bell').setAttribute('aria-label', 'Benachrichtigungen');
+    document.querySelectorAll('#notification-items .notification-item.unread').forEach((item) => item.classList.remove('unread'));
     try {
       await api.post('/notifications/read');
-      await loadBell();
     } catch (error) {
       toast(error.message, true);
     }
+    await loadBell();
     return;
   }
   if (e.target.closest('[data-action=logout]')) logout();

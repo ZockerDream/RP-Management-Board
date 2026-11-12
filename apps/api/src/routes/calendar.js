@@ -18,6 +18,15 @@ const body = z.object({
 });
 
 const hd = new Holidays(process.env.HOLIDAY_COUNTRY || 'DE', process.env.HOLIDAY_REGION || undefined);
+// Feiertage hängen nur vom Jahr ab: einmal je Jahr berechnen und im Prozess behalten (date-holidays rechnet sonst bei
+// jedem Kalenderaufruf vier Jahre neu)
+const holidayCache = new Map();
+function holidaysOf(year) {
+  if (!holidayCache.has(year)) {
+    holidayCache.set(year, hd.getHolidays(year).filter((h) => ['public', 'bank'].includes(h.type)).map((h) => ({ date: h.date.slice(0, 10), name: h.name })));
+  }
+  return holidayCache.get(year);
+}
 
 const shape = (e) => ({
   id: `own:${e.id}`, source: 'own', type: e.type, title: e.title, date: e.date, start: e.start_time, end: e.end_time, allDay: e.all_day,
@@ -27,24 +36,49 @@ const ro = (id, type, title, d, extra = {}) => ({ id, source: type, type, title,
 
 export async function buildFeed(userId, from, to) {
   const out = [];
-  const own = await many(
-    `SELECT * FROM (SELECT e.*, CASE WHEN e.type='team' THEN team_level(e.team_id, $1, 'calendar') ELSE 4 END AS level FROM calendar_events e
-       WHERE (e.owner_id=$1 AND e.type='personal') OR e.type='team') x WHERE x.level >= 2`,
-    [userId],
-  );
+  // Alle Quellen unabhängig voneinander: parallel abfragen, danach in fester Reihenfolge zusammensetzen
+  const ids = await accessibleBudgetIds(userId);
+  const [own, imported, rules, vehicles, properties, keyDue, licenses, sessions, records, todos, goals] = await Promise.all([
+    many(
+      `SELECT * FROM (SELECT e.*, CASE WHEN e.type='team' THEN team_level(e.team_id, $1, 'calendar') ELSE 4 END AS level FROM calendar_events e
+         WHERE (e.owner_id=$1 AND e.type='personal') OR e.type='team') x WHERE x.level >= 2`,
+      [userId],
+    ),
+    many(
+      `SELECT provider, external_id, title, starts_at, ends_at, all_day FROM synced_calendar_events
+       WHERE user_id=$1 AND (
+         (all_day AND starts_at >= ($2::date::timestamp AT TIME ZONE 'UTC')
+           AND starts_at < (($3::date + 1)::timestamp AT TIME ZONE 'UTC'))
+         OR (NOT all_day AND starts_at >= ($2::date::timestamp AT TIME ZONE $4)
+           AND starts_at < (($3::date + 1)::timestamp AT TIME ZONE $4))
+       )`,
+      [userId, from, to, config.tz],
+    ),
+    many('SELECT * FROM recurring_rules WHERE active AND budget_id = ANY($1)', [ids]),
+    many(`SELECT v.id, v.plate, v.make_model, v.service_due, v.first_aid_kit_expires_on FROM vehicles v
+      WHERE ${visibleSql('v', 'vehicle')} AND v.status <> 'retired'`, [userId]),
+    many(`SELECT p.id, p.name, p.maintenance_due, p.maintenance_note FROM properties p WHERE ${visibleSql('p', 'property')} AND p.maintenance_due IS NOT NULL`, [userId]),
+    many(`SELECT a.id, a.due_at, k.label, pe.name person FROM key_assignments a JOIN keys k ON k.id=a.key_id
+      LEFT JOIN people pe ON pe.id=a.person_id
+      WHERE ${visibleSql('k', 'key')} AND a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at IS NOT NULL`, [userId]),
+    many(`SELECT l.id, l.valid_until, lt.name, pe.name person FROM licenses l JOIN license_types lt ON lt.id=l.type_id
+      LEFT JOIN people pe ON pe.id=l.person_id
+      WHERE ${visibleSql('lt', 'license')} AND l.status='valid' AND l.valid_until BETWEEN $2 AND $3`, [userId, from, to]),
+    many(`SELECT s.id, s.session_date, s.start_time, s.end_time, s.location, tr.name FROM training_sessions s JOIN trainings tr ON tr.id=s.training_id
+      WHERE ${visibleSql('tr', 'training', '$1', LEVEL.PARTICIPATE)} AND s.session_date BETWEEN $2 AND $3`, [userId, from, to]),
+    many(`SELECT r.id, r.valid_until, tr.name, COALESCE(u.name, pe.name) participant FROM training_records r JOIN trainings tr ON tr.id=r.training_id
+      LEFT JOIN users u ON u.id=r.user_id LEFT JOIN people pe ON pe.id=r.person_id
+      WHERE ${visibleSql('tr', 'training')} AND tr.active AND r.result='passed' AND r.valid_until BETWEEN $2 AND $3
+        AND NOT EXISTS (SELECT 1 FROM training_records n WHERE n.training_id=r.training_id AND n.result='passed'
+          AND COALESCE(n.user_id, n.person_id)=COALESCE(r.user_id, r.person_id) AND n.completed_on > r.completed_on)`, [userId, from, to]),
+    // Offene ToDos mit Deadline (solo und aus Organisationen, die man bei ToDos lesen darf); erledigte verschwinden
+    many(`SELECT td.id, td.title, td.due_date, t.name team_name FROM todos td LEFT JOIN teams t ON t.id=td.team_id
+      WHERE ${visibleSql('td', 'todos')} AND td.done_at IS NULL AND td.due_date BETWEEN $2 AND $3`, [userId, from, to]),
+    many('SELECT id, name, target_date FROM goals WHERE target_date IS NOT NULL AND budget_id = ANY($1)', [ids]),
+  ]);
+
   // Termine einer Organisation ohne Schreibrecht erscheinen gesperrt
   out.push(...own.map((e) => ({ ...shape(e), start: e.start_time, end: e.end_time, locked: e.level < LEVEL.WRITE })));
-
-  const imported = await many(
-    `SELECT provider, external_id, title, starts_at, ends_at, all_day FROM synced_calendar_events
-     WHERE user_id=$1 AND (
-       (all_day AND starts_at >= ($2::date::timestamp AT TIME ZONE 'UTC')
-         AND starts_at < (($3::date + 1)::timestamp AT TIME ZONE 'UTC'))
-       OR (NOT all_day AND starts_at >= ($2::date::timestamp AT TIME ZONE $4)
-         AND starts_at < (($3::date + 1)::timestamp AT TIME ZONE $4))
-     )`,
-    [userId, from, to, config.tz],
-  );
   const dateInZone = (value) => new Intl.DateTimeFormat('sv-SE', { timeZone: config.tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(value);
   out.push(...imported.map((event) => ({
     id: `sync:${event.provider}:${event.external_id}`, source: 'external', type: 'external',
@@ -53,9 +87,6 @@ export async function buildFeed(userId, from, to) {
     end: event.ends_at && !event.all_day ? new Intl.DateTimeFormat('en-GB', { timeZone: config.tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(event.ends_at) : null,
     allDay: event.all_day, repeat: 'none', amount: null, note: event.provider === 'google' ? 'Google Kalender' : 'Outlook', remind: 'none', locked: true,
   })));
-
-  const ids = await accessibleBudgetIds(userId);
-  const rules = await many('SELECT * FROM recurring_rules WHERE active AND budget_id = ANY($1)', [ids]);
   for (const r of rules) {
     const simple = r.interval === 1 && ['daily', 'weekly', 'monthly', 'yearly'].includes(r.frequency);
     const common = { amount: r.type === 'income' ? r.amount : `-${r.amount}`, note: '', locked: true, source: 'finance' };
@@ -68,51 +99,23 @@ export async function buildFeed(userId, from, to) {
       }
     }
   }
-  for (const v of await many(`SELECT v.id, v.plate, v.make_model, v.service_due, v.first_aid_kit_expires_on FROM vehicles v
-    WHERE ${visibleSql('v', 'vehicle')} AND v.status <> 'retired'`, [userId])) {
+  for (const v of vehicles) {
     if (v.service_due) out.push(ro(`veh:${v.id}:service`, 'vehicle', `Service: ${v.make_model}`, v.service_due, { note: v.plate }));
     if (v.first_aid_kit_expires_on) out.push(ro(`veh:${v.id}:kit`, 'vehicle', `Verbandskasten läuft ab: ${v.make_model}`, v.first_aid_kit_expires_on, { note: v.plate }));
   }
-  for (const p of await many(`SELECT p.id, p.name, p.maintenance_due, p.maintenance_note FROM properties p WHERE ${visibleSql('p', 'property')} AND p.maintenance_due IS NOT NULL`, [userId])) {
-    out.push(ro(`house:${p.id}`, 'house', `Wartung: ${p.name}`, p.maintenance_due, { note: p.maintenance_note }));
-  }
-  for (const a of await many(`SELECT a.id, a.due_at, k.label, pe.name person FROM key_assignments a JOIN keys k ON k.id=a.key_id
-    LEFT JOIN people pe ON pe.id=a.person_id
-    WHERE ${visibleSql('k', 'key')} AND a.returned_at IS NULL AND a.lost_at IS NULL AND a.due_at IS NOT NULL`, [userId])) {
-    out.push(ro(`key:${a.id}`, 'key', `Rückgabe: ${a.label}`, a.due_at, { note: a.person || '' }));
-  }
-  for (const l of await many(`SELECT l.id, l.valid_until, lt.name, pe.name person FROM licenses l JOIN license_types lt ON lt.id=l.type_id
-    LEFT JOIN people pe ON pe.id=l.person_id
-    WHERE ${visibleSql('lt', 'license')} AND l.status='valid' AND l.valid_until BETWEEN $2 AND $3`, [userId, from, to])) {
-    out.push(ro(`lic:${l.id}`, 'license', `Lizenz läuft ab: ${l.name}`, l.valid_until, { note: l.person || '' }));
-  }
-  for (const s of await many(`SELECT s.id, s.session_date, s.start_time, s.end_time, s.location, tr.name FROM training_sessions s JOIN trainings tr ON tr.id=s.training_id
-    WHERE ${visibleSql('tr', 'training', '$1', LEVEL.PARTICIPATE)} AND s.session_date BETWEEN $2 AND $3`, [userId, from, to])) {
+  for (const p of properties) out.push(ro(`house:${p.id}`, 'house', `Wartung: ${p.name}`, p.maintenance_due, { note: p.maintenance_note }));
+  for (const a of keyDue) out.push(ro(`key:${a.id}`, 'key', `Rückgabe: ${a.label}`, a.due_at, { note: a.person || '' }));
+  for (const l of licenses) out.push(ro(`lic:${l.id}`, 'license', `Lizenz läuft ab: ${l.name}`, l.valid_until, { note: l.person || '' }));
+  for (const s of sessions) {
     out.push(ro(`trs:${s.id}`, 'training', `Schulung: ${s.name}`, s.session_date, {
       start: s.start_time?.slice(0, 5) || null, end: s.end_time?.slice(0, 5) || null, allDay: !s.start_time, note: s.location,
     }));
   }
-  for (const r of await many(`SELECT r.id, r.valid_until, tr.name, COALESCE(u.name, pe.name) participant FROM training_records r JOIN trainings tr ON tr.id=r.training_id
-    LEFT JOIN users u ON u.id=r.user_id LEFT JOIN people pe ON pe.id=r.person_id
-    WHERE ${visibleSql('tr', 'training')} AND tr.active AND r.result='passed' AND r.valid_until BETWEEN $2 AND $3
-      AND NOT EXISTS (SELECT 1 FROM training_records n WHERE n.training_id=r.training_id AND n.result='passed'
-        AND COALESCE(n.user_id, n.person_id)=COALESCE(r.user_id, r.person_id) AND n.completed_on > r.completed_on)`, [userId, from, to])) {
-    out.push(ro(`trv:${r.id}`, 'training', `Schulung läuft ab: ${r.name}`, r.valid_until, { note: r.participant || '' }));
-  }
-  // Offene ToDos mit Deadline (solo und aus Organisationen, die man bei ToDos lesen darf); erledigte verschwinden
-  for (const t of await many(`SELECT td.id, td.title, td.due_date, t.name team_name FROM todos td LEFT JOIN teams t ON t.id=td.team_id
-    WHERE ${visibleSql('td', 'todos')} AND td.done_at IS NULL AND td.due_date BETWEEN $2 AND $3`, [userId, from, to])) {
-    out.push(ro(`todo:${t.id}`, 'todo', `ToDo: ${t.title}`, t.due_date, { note: t.team_name || 'Solo' }));
-  }
-  for (const g of await many('SELECT id, name, target_date FROM goals WHERE target_date IS NOT NULL AND budget_id = ANY($1)', [ids])) {
-    out.push(ro(`goal:${g.id}`, 'finance', `Sparziel: ${g.name}`, g.target_date));
-  }
+  for (const r of records) out.push(ro(`trv:${r.id}`, 'training', `Schulung läuft ab: ${r.name}`, r.valid_until, { note: r.participant || '' }));
+  for (const t of todos) out.push(ro(`todo:${t.id}`, 'todo', `ToDo: ${t.title}`, t.due_date, { note: t.team_name || 'Solo' }));
+  for (const g of goals) out.push(ro(`goal:${g.id}`, 'finance', `Sparziel: ${g.name}`, g.target_date));
   for (let y = Number(from.slice(0, 4)); y <= Number(to.slice(0, 4)); y++) {
-    for (const h of hd.getHolidays(y)) {
-      if (!['public', 'bank'].includes(h.type)) continue;
-      const d = h.date.slice(0, 10);
-      if (d >= from && d <= to) out.push(ro(`hol:${d}`, 'holiday', h.name, d));
-    }
+    for (const h of holidaysOf(y)) if (h.date >= from && h.date <= to) out.push(ro(`hol:${h.date}`, 'holiday', h.name, h.date));
   }
   return out;
 }

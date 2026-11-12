@@ -90,6 +90,8 @@ Node 22, Fastify 5, reines ESM-JavaScript, `zod`, `pg` mit handgeschriebenem SQL
 - **Tabellen auf dem Handy:** `labelTables` (`app.js`) macht jede `table.table` mit `<thead>` unter 640 px zu Karten. Eine Tabelle, die das nicht verträgt, bekommt die Klasse `no-stack`; Spalten ohne Überschrift (Aktionen) laufen über die ganze Breite.
 - **Wochenprognose:** Daueraufträge zählen ab `next_run` (davor ist gebucht), Festgehalt nur für Tage ohne `payroll_payments`; der Erfahrungswert lässt Buchungen mit `recurring_id` und das Festgehalt weg, sonst zählt beides doppelt. Regeln nur in `forecast.js`.
 
+- **Keine Abfragen je Datensatz (N+1):** Listen holen Zusatzdaten mit `= ANY($1::uuid[])` bzw. `unnest` für alle Zeilen auf einmal (Vorbild `GET /teams`, `GET /spending-budgets`), unabhängige Abfragen laufen mit `Promise.all`. Auswahllisten nehmen `GET /teams?brief=1` (nur Kopf und `levels`); die volle Liste mit Mitgliedern, Rängen, Gruppen und Einladungen braucht nur die Seite „Organisationen“. Vorher und nachher mit `tests/e2e/perf.mjs` messen.
+- **Kein Redis, keine Caches für Rechte oder Geld (Entscheidung des Auftraggebers vom 2026-11-12):** Im Prozess zwischengespeichert sind nur Einstellungen (5 s, beim Speichern verworfen) und Feiertage. Optimistische Anzeige nur bei kleinen Schaltern (ToDo erledigt, Notiz anheften/archivieren, Glocke „Alle gelesen“) mit Rücksprung bei Fehler; Buchungen, Umbuchungen, Gehalt, Akten und Rechte warten auf den Server.
 - **Fuhrpark-Runden sind Kopien:** `fleet_check_items` übernimmt Gruppe, Kennzeichen, Modell und Sortierung beim Anlegen der Runde; Änderungen an Fahrzeugen wirken nur auf neue Runden. Kennzeichen sind je Organisation nur unter aktiven Fahrzeugen eindeutig (23505 wird abgefangen).
 - **Umbuchungen nur über `bookTransfer`** (`routes/transfers.js`): Beide Buchungen entstehen in einer Transaktion, die Annahme setzt den Status mit `WHERE status='pending'` (gleichzeitige Annahme bucht genau einmal). Buchungen mit `source='transfer'` lehnen PATCH/DELETE ab; `DELETE /budgets/:id` zieht offene Umbuchungen zurück.
 - **Akten-PDF nutzt `loadCaseFileDetail`** (`casefile-detail.js`), dieselbe Datensammlung wie `GET /case-files/:id`. Neue Teile einer Akte dort und in `pdfSections`/`caseFilePdf` (`casefile-pdf.js`) aufnehmen. `casefile-pdf.js` lädt `markdown.js` aus `STATIC_DIR`; Schriften kommen aus `fonts-dejavu-*` im Image, ohne sie fällt es auf Helvetica zurück (nur Latin-1).
@@ -106,6 +108,7 @@ Nie gegen die laufende Instanz `budget-manager` (8088) testen, dort liegen die D
 | `api.mjs` | Alle API-Bereiche, Rollen, IDOR, ungültige Eingaben, ToDo-Job im Worker-Container; jede 5xx-Antwort ist ein Fehler |
 | `auth.mjs` | Refresh-Rotation, 2FA, Recovery-Codes, Passwort, Reset, Einladung |
 | `browser.mjs` | Geführte Abläufe im Browser, Mobilbreite, Konsole; Screenshot-Scanning mit gerenderten Bank-Apps über die echte Texterkennung |
+| `perf.mjs` | Antwortzeiten der Listen-Endpunkte (Median, p95), mit `PERF_SEED=1` mit Zusatzdaten |
 | `crawl.mjs` | Klickt jede Aktionsart auf jeder Seite als Viewer, Owner, Admin, danach destruktiv; je Durchlauf mehrere Browser (`CRAWL_WORKERS`), nur bestimmte Rollen mit `CRAWL_ROLES` |
 | `upgrade.mjs` | Update von einem alten Stand im selben Browserprofil, ohne Cache-Löschen |
 

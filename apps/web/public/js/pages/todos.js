@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { $, esc, empty, fdate, fdatetime, tag, todayStr, openForm, confirmBox, toast } from '../ui.js';
 import { writableTeams, visibilityField, scopeTag } from './common.js';
 import { markdownBlock } from '../markdown.js';
+import { state } from '../app.js';
 
 const dueOf = (todo) => (todo?.due_date ? String(todo.due_date).slice(0, 10) : '');
 const tomorrowStr = () => {
@@ -109,10 +110,19 @@ export async function render(view) {
   view.addEventListener('change', async (event) => {
     const box = event.target.closest('[data-done]');
     if (!box) return;
+    // Sofort anzeigen, dann speichern; lehnt der Server ab, springt das ToDo zurück
+    const todo = todos.find((item) => item.id === box.dataset.done);
+    if (!todo) return;
+    const before = { done_at: todo.done_at, done_by_name: todo.done_by_name };
+    Object.assign(todo, box.checked ? { done_at: new Date().toISOString(), done_by_name: state.me?.name } : { done_at: null, done_by_name: null });
+    draw();
     try {
-      await api.patch(`/todos/${box.dataset.done}`, { done: box.checked });
+      await api.patch(`/todos/${todo.id}`, { done: Boolean(todo.done_at) });
     } catch (error) {
+      Object.assign(todo, before);
+      draw();
       toast(error.message, true);
+      return;
     }
     await load().catch((error) => toast(error.message, true));
   });

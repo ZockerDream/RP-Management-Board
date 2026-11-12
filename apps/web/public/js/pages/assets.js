@@ -54,7 +54,7 @@ const costIntervalText = (interval, count) => interval === 'custom'
 const save = (path, o, body) => (o ? api.patch(`/${path}/${o.id}`, body) : api.post(`/${path}`, body));
 // Organisationen, in denen die Person diese Objektart anlegen und ändern darf
 async function ownershipFields(o, module) {
-  const teams = can('team:read') ? (await api.get('/teams')).filter((team) => team.levels[module] >= 3) : [];
+  const teams = can('team:read') ? (await api.get('/teams?brief=1')).filter((team) => team.levels[module] >= 3) : [];
   if (o?.team_id && !teams.some((team) => team.id === o.team_id)) teams.push({ id: o.team_id, name: o.team_name || 'Organisation' });
   return [
     { name: 'scope', label: 'Sichtbarkeit', type: 'select', options: [{ v: 'personal', l: 'Privat' }, ...(teams.length ? [{ v: 'team', l: 'Organisation' }] : [])], value: o?.team_id ? 'team' : 'personal' },

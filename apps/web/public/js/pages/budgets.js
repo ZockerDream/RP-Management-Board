@@ -9,7 +9,7 @@ const rateText = (rate) => Number(rate).toLocaleString('de-DE', { maximumFractio
 const interestText = (b) => `${rateText(b.interest_rate)} % ${INTEREST_PERIODS.find((p) => p.v === b.interest_period)?.l || ''}`;
 
 async function budgetForm(b) {
-  const teams = !b && can('team:read') ? (await api.get('/teams')).filter((t) => t.levels.budget >= 3) : [];
+  const teams = !b && can('team:read') ? (await api.get('/teams?brief=1')).filter((t) => t.levels.budget >= 3) : [];
   const currency = b?.currency || state.me.currency || 'EUR';
   const fields = [
     { name: 'name', label: 'Name', value: b?.name, required: true, full: true },

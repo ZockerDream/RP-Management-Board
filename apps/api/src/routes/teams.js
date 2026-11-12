@@ -61,9 +61,13 @@ function resolveRows(rows, scopes) {
 }
 async function actorScopeLevels(actor, scopes) {
   const out = { ...actor.levels };
-  for (const [m, list] of Object.entries(scopes)) {
-    for (const s of list) out[`${m}:${s.id}`] = (await one('SELECT team_level($1,$2,$3,$4) AS level', [actor.teamId, actor.userId, m, s.id])).level;
-  }
+  const pairs = Object.entries(scopes).flatMap(([m, list]) => list.map((s) => [m, s.id]));
+  if (!pairs.length) return out;
+  const rows = await many(
+    'SELECT p.module, p.scope, team_level($1, $2, p.module, p.scope) AS level FROM unnest($3::text[], $4::uuid[]) AS p(module, scope)',
+    [actor.teamId, actor.userId, pairs.map((p) => p[0]), pairs.map((p) => p[1])],
+  );
+  for (const r of rows) out[`${r.module}:${r.scope}`] = r.level;
   return out;
 }
 // Niemand gibt mehr, als er selbst hat: jede gestiegene Stufe muss innerhalb der eigenen liegen
@@ -110,7 +114,10 @@ function assertManageable(actor, target) {
 export default async function routes(app) {
   app.get('/teams/catalog', authz('team:read'), async () => ({ modules: ORG_MODULES, levels: LEVEL_LABELS }));
 
+  // Feste Zahl von Abfragen für alle Organisationen zusammen (vorher sechs je Organisation).
+  // ?brief=1 liefert nur Kopf und Rechte – das reicht den Auswahllisten der anderen Seiten.
   app.get('/teams', authz('team:read'), async (req) => {
+    const { brief } = z.object({ brief: z.enum(['0', '1']).optional() }).parse(req.query);
     const teams = await many(
       `SELECT t.id, t.name, t.status, t.owner_id, tm.is_owner, tm.rank_id, r.name rank_name, r.position rank_position,
          (SELECT count(*)::int FROM budgets b WHERE b.team_id=t.id) budgets
@@ -118,32 +125,51 @@ export default async function routes(app) {
        ORDER BY t.status, t.name`,
       [req.user.id],
     );
-    for (const t of teams) {
-      const actor = { userId: req.user.id, owner: t.is_owner, position: t.rank_position ?? -Infinity };
-      t.levels = await levelsFor(req.user.id, t.id);
-      const see = t.is_owner || t.levels.members >= LEVEL.READ;
-      const manage = t.is_owner || t.levels.members >= LEVEL.WRITE;
-      t.group_ids = (await many('SELECT group_id FROM team_group_members WHERE team_id=$1 AND user_id=$2', [t.id, req.user.id])).map((g) => g.group_id);
-      t.ranks = see ? (await many(
-        'SELECT r.id, r.name, r.position, (SELECT count(*)::int FROM team_members tm WHERE tm.rank_id=r.id) members FROM team_ranks r WHERE r.team_id=$1 ORDER BY r.position DESC',
-        [t.id],
-      )).map((r) => ({ ...r, manageable: belowActor(actor, r.position) })) : [];
-      t.groups = see ? await many(
-        `SELECT g.id, g.name, g.description, COALESCE(array_agg(gm.user_id) FILTER (WHERE gm.user_id IS NOT NULL), '{}') member_ids
-         FROM team_groups g LEFT JOIN team_group_members gm ON gm.group_id=g.id WHERE g.team_id=$1 GROUP BY g.id ORDER BY g.name`,
-        [t.id],
-      ) : [];
-      t.members = see ? (await many(
-        `SELECT u.id, u.name, u.email, u.gravatar_enabled, tm.is_owner, tm.rank_id, r.name rank_name, r.position rank_position,
+    if (!teams.length) return teams;
+    const ids = teams.map((t) => t.id);
+    const levels = await many(
+      'SELECT t.id, m.key, team_level(t.id, $1, m.key) AS level FROM unnest($2::uuid[]) AS t(id) CROSS JOIN unnest($3::text[]) AS m(key)',
+      [req.user.id, ids, MODULE_KEYS],
+    );
+    for (const t of teams) t.levels = Object.fromEntries(levels.filter((l) => l.id === t.id).map((l) => [l.key, l.level]));
+    if (brief === '1') return teams;
+
+    const see = teams.filter((t) => t.is_owner || t.levels.members >= LEVEL.READ).map((t) => t.id);
+    const manage = teams.filter((t) => t.is_owner || t.levels.members >= LEVEL.WRITE).map((t) => t.id);
+    const [ownGroups, ranks, groups, members, invitations] = await Promise.all([
+      many('SELECT team_id, group_id FROM team_group_members WHERE team_id = ANY($1::uuid[]) AND user_id=$2', [ids, req.user.id]),
+      see.length ? many(
+        `SELECT r.team_id, r.id, r.name, r.position, (SELECT count(*)::int FROM team_members tm WHERE tm.rank_id=r.id) members
+         FROM team_ranks r WHERE r.team_id = ANY($1::uuid[]) ORDER BY r.position DESC`,
+        [see],
+      ) : [],
+      see.length ? many(
+        `SELECT g.team_id, g.id, g.name, g.description, COALESCE(array_agg(gm.user_id) FILTER (WHERE gm.user_id IS NOT NULL), '{}') member_ids
+         FROM team_groups g LEFT JOIN team_group_members gm ON gm.group_id=g.id WHERE g.team_id = ANY($1::uuid[]) GROUP BY g.id ORDER BY g.name`,
+        [see],
+      ) : [],
+      see.length ? many(
+        `SELECT tm.team_id, u.id, u.name, u.email, u.gravatar_enabled, tm.is_owner, tm.rank_id, r.name rank_name, r.position rank_position,
            COALESCE((SELECT array_agg(gm.group_id) FROM team_group_members gm WHERE gm.team_id=tm.team_id AND gm.user_id=tm.user_id), '{}') group_ids
          FROM team_members tm JOIN users u ON u.id=tm.user_id LEFT JOIN team_ranks r ON r.id=tm.rank_id
-         WHERE tm.team_id=$1 ORDER BY tm.is_owner DESC, r.position DESC NULLS LAST, u.name`,
-        [t.id],
-      )).map((m) => ({ ...m, manageable: manage && m.id !== req.user.id && (t.is_owner || (!m.is_owner && belowActor(actor, m.rank_position))) })) : [];
-      t.invitations = manage ? await many(
-        'SELECT i.id, i.email, i.rank_id, r.name rank_name, i.expires_at FROM invitations i LEFT JOIN team_ranks r ON r.id=i.rank_id WHERE i.team_id=$1 AND i.accepted_at IS NULL AND i.expires_at>now()',
-        [t.id],
-      ) : [];
+         WHERE tm.team_id = ANY($1::uuid[]) ORDER BY tm.is_owner DESC, r.position DESC NULLS LAST, u.name`,
+        [see],
+      ) : [],
+      manage.length ? many(
+        `SELECT i.team_id, i.id, i.email, i.rank_id, r.name rank_name, i.expires_at FROM invitations i LEFT JOIN team_ranks r ON r.id=i.rank_id
+         WHERE i.team_id = ANY($1::uuid[]) AND i.accepted_at IS NULL AND i.expires_at>now()`,
+        [manage],
+      ) : [],
+    ]);
+    const of = (rows, teamId) => rows.filter((row) => row.team_id === teamId).map(({ team_id: _, ...row }) => row);
+    for (const t of teams) {
+      const actor = { userId: req.user.id, owner: t.is_owner, position: t.rank_position ?? -Infinity };
+      const canManage = manage.includes(t.id);
+      t.group_ids = ownGroups.filter((g) => g.team_id === t.id).map((g) => g.group_id);
+      t.ranks = of(ranks, t.id).map((r) => ({ ...r, manageable: belowActor(actor, r.position) }));
+      t.groups = of(groups, t.id);
+      t.members = of(members, t.id).map((m) => ({ ...m, manageable: canManage && m.id !== req.user.id && (t.is_owner || (!m.is_owner && belowActor(actor, m.rank_position))) }));
+      t.invitations = of(invitations, t.id);
     }
     return teams;
   });
