@@ -30,7 +30,8 @@ export function toast(msg, bad = false) {
   const t = Object.assign(document.createElement('div'), { className: 'toast', textContent: msg });
   if (bad) t.style.background = 'var(--bad)';
   $('#toasts').append(t);
-  setTimeout(() => t.remove(), 4000);
+  // Lange Erklärungen bleiben länger stehen (bis 15 Sekunden)
+  setTimeout(() => t.remove(), Math.max(4000, Math.min(15000, String(msg).length * 60)));
 }
 
 export const tag = (cls, text) => `<span class="tag ${cls}">${esc(text)}</span>`;

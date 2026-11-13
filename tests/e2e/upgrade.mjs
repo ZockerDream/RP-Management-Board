@@ -6,6 +6,7 @@ const OUT = process.argv[3] || '/work/upgrade-shots';
 const PROFILE = process.argv[4] || '/work/upgrade-profile';
 // Teile, die nur der neue Code hat (je Release anpassen): Seite und Selektor
 const MARKERS = [['transactions', '#t-scan'], ['dashboard', '.dash-grid .dash-mod[data-mod=kpis]'], ['dashboard', '#gsearch'], ['speedcams', '#sc-cam-new'], ['music', '#m-player'], ['work', '#work-payslip']];
+// 1.4.1 hat keine neuen Seiten; die Prüfung oben deckt den Wechsel von 1.4.0 ab
 const ROUTES = { teams: 'Organisationen', notes: 'Notizblock', todos: 'ToDos', spending: 'Budgets', 'sport-run': 'Laufen', 'sport-swim': 'Schwimmen', 'sport-bike': 'Biken', 'assets-vehicles': 'Fahrzeuge', 'assets-properties': 'Häuser', 'assets-keys': 'Schlüssel', 'assets-manage': 'Verwaltung', casefiles: 'Akten', trainings: 'Schulungen', licenses: 'Lizenzen', docs: 'Dokumentationen', 'admin-users': 'User-Management', 'admin-server': 'Server-Management', 'admin-tickets': 'Tickets', changelog: 'Changelog', speedcams: 'Blitzer', music: 'Musik', board: 'Pinnwand', shifts: 'Dienstplan', dispatch: 'Einsätze & Funk', bolo: 'Fahndungsboard', fines: 'Bußgeldrechner', personnel: 'Personal', equipment: 'Lager', invoices: 'Rechnungen', cash: 'Kasse', datenschutz: 'Datenschutzerklärung', impressum: 'Impressum' };
 
 const ctx = await chromium.launchPersistentContext(PROFILE, { viewport: { width: 1400, height: 900 }, serviceWorkers: 'block' });

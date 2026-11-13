@@ -10,6 +10,12 @@ export const UNRELEASED = [
 
 export const CHANGELOG = [
   {
+    version: '1.4.1', date: '2026-11-13', migrations: '', title: 'Spotify-Anmeldung verständlich',
+    changes: [
+      ['fixed', 'Spotify-Anmeldung: Geht bei der Rückkehr von Spotify etwas schief (Adresse direkt geöffnet, Anmeldung abgelaufen, von Spotify abgelehnt), landest du wieder auf der Musikseite mit einer verständlichen Erklärung statt einer rohen Fehlermeldung wie „Zustand fehlt“. Lange Hinweise bleiben länger stehen.'],
+    ],
+  },
+  {
     version: '1.4.0', date: '2026-11-13', migrations: '033–041', title: 'Dienst, Rechnungen, Musik und Blitzer',
     changes: [
       ['new', 'Server-Management → Sicherheit & Einstellungen → „Funktionen“: Pinnwand, Dienstplan, Einsätze & Funk, Fahndungsboard, Bußgeldrechner, Bewerbungen, Personalakte, Abwesenheiten, Lager, Rechnungen, Kasse, Lohnzettel, Blitzer, Musik, Discord und die globale Suche lassen sich für alle ein- und ausschalten. Ausgeschaltet verschwinden sie aus Navigation und Seiten, die Schnittstelle lehnt sie ab; die Daten bleiben erhalten.'],
