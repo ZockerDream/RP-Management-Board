@@ -6,7 +6,7 @@ import { z } from 'zod';
 
 export const UI_VERSIONS = ['v1', 'v2'];
 export const BACKGROUNDS = ['dusk', 'night', 'forest', 'none', 'custom'];
-export const DASHBOARD_MODULES = ['kpis', 'forecast', 'cashflow', 'categories', 'budgets', 'transactions', 'timer', 'accounts', 'goals', 'todos', 'fleet', 'upcoming'];
+export const DASHBOARD_MODULES = ['kpis', 'forecast', 'cashflow', 'categories', 'budgets', 'transactions', 'timer', 'accounts', 'goals', 'todos', 'fleet', 'upcoming', 'music'];
 export const MODULE_SPANS = [4, 6, 8, 12];
 
 export const UI_DEFAULTS = Object.freeze({ background: 'dusk', blur: 22, opacity: 52, dim: 20, lite: true, dashboard: null });

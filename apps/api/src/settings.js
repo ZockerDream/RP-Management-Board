@@ -24,6 +24,10 @@ export const DEFAULTS = {
   'casefiles.penal_codes': true,
   'casefiles.report_templates': true,
   'casefiles.types': true,
+  // Spotify-App des Servers (nur die Client-ID, Anmeldung per PKCE); leer: SPOTIFY_CLIENT_ID aus der .env
+  'music.spotify_client_id': '',
+  // Client-Secret verschlüsselt (encrypt); nur für die Suche ohne Anmeldung (Client Credentials)
+  'music.spotify_client_secret': '',
 };
 
 let cache = null;

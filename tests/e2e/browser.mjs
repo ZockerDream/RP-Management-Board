@@ -9,7 +9,8 @@ const check = (name, ok, extra = '') => { if (ok) passed++; else { fails.push(`$
 
 const browser = await chromium.launch();
 async function session(viewport = { width: 1400, height: 900 }) {
-  const ctx = await browser.newContext({ viewport, serviceWorkers: 'block' });
+  // de-DE wie bei echten Benutzern; ohne meldet Headless-Chromium „en-US@posix“, daran stürzt der eingebettete Spotify-Player ab
+  const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'de-DE' });
   const page = await ctx.newPage();
   let where = 'start';
   page.on('console', (m) => { if (m.type() === 'error' && !/gravatar|status of 4\d\d/i.test(m.text())) problems.push(`[${where}] console: ${m.text().slice(0, 220)}`); });
@@ -78,7 +79,7 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
     await until(page, () => location.hash === '#/casefiles?tab=people' && !!document.querySelector('#pf-q')).catch(() => {});
     check(`Alter Link ${old} führt zu den Personenakten`, (await page.evaluate(() => location.hash)) === '#/casefiles?tab=people' && !!(await page.$('#pf-q')), await page.evaluate(() => location.hash));
   }
-  for (const want of ['#/changelog', '#/notes', '#/todos', '#/spending', '#/sport-run', '#/sport-swim', '#/sport-bike', '#/assets-vehicles', '#/assets-properties', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/datenschutz', '#/impressum']) check(`Nav ${want}`, navs.includes(want));
+  for (const want of ['#/changelog', '#/notes', '#/todos', '#/spending', '#/sport-run', '#/sport-swim', '#/sport-bike', '#/assets-vehicles', '#/assets-properties', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/datenschutz', '#/impressum', '#/music', '#/speedcams']) check(`Nav ${want}`, navs.includes(want));
   for (const h of navs) {
     at(`alice ${h}`);
     await go(page, h);
@@ -1370,17 +1371,104 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await ctx.close();
 }
 
+// ---------- Musik vom Server und Blitzer (Wunsch des Auftraggebers vom 2026-11-13)
+{
+  const { page, at, ctx } = await session();
+  at('alice musik');
+  await login(page, 'alice@e2e.test', 'alice-Sehr-Sicher-9931!');
+  await go(page, '#/music');
+  // Eingebetteter Player: Link einfügen spielt sofort; Empfehlungen (in api.mjs vom Admin angelegt) für alle sichtbar
+  await page.fill('#m-emb-q', 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=abc');
+  await page.click('[data-m=emb-go]');
+  await page.waitForSelector('#m-emb iframe.sp-embed');
+  check('Link spielt im eingebetteten Player', (await page.getAttribute('#m-emb iframe', 'src')).startsWith('https://open.spotify.com/embed/playlist/37i9dQZF1DXcBWIGoYBM5M'));
+  await page.fill('#m-emb-q', 'Lofi Beats');
+  await page.click('[data-m=emb-go]');
+  await page.waitForTimeout(300);
+  check('Ohne Server-Secret erklärt die Seite die Suche', /kein Spotify-Link/.test(await page.textContent('#toasts, body')));
+  check('Empfehlungen für alle sichtbar, ohne Pflege-Knöpfe', !!(await page.$('#m-recs .rec iframe.sp-embed')) && /Top Hits/.test(await page.textContent('#m-recs')) && !(await page.$('[data-m=rec-new]')));
+  await page.screenshot({ path: `${out}/musik-spotify-player.png`, fullPage: true });
+  check('Spotify ohne Server-App bietet die eigene App an', /eigene App/.test(await page.textContent('#m-sp')) && !!(await page.$('#m-sp-own')), await page.textContent('#m-sp'));
+  await page.click('#view .tabs [data-tab=local]');
+  const hasTracks = await page.waitForSelector('.music-track[data-key^="s:"]', { timeout: 4000 }).catch(() => null);
+  if (hasTracks) {
+    const title = (await page.textContent('.music-track[data-key^="s:"] span')).trim();
+    await page.click('.music-track[data-key^="s:"]');
+    await until(page, (t) => document.querySelector('#m-local-now b')?.textContent === t, title);
+    await until(page, () => document.querySelector('[data-m=local-toggle]')?.getAttribute('aria-label') === 'Pause').catch(() => {});
+    check('Titel vom Server spielt', (await page.getAttribute('[data-m=local-toggle]', 'aria-label')) === 'Pause');
+    await page.screenshot({ path: `${out}/musik-server.png` });
+    await go(page, '#/dashboard');
+    await go(page, '#/music?tab=local');
+    await page.waitForSelector('#m-local-now b');
+    check('Wiedergabe läuft nach Seitenwechsel weiter', (await page.textContent('#m-local-now b')) === title && (await page.getAttribute('[data-m=local-toggle]', 'aria-label')) === 'Pause');
+    await page.click('[data-m=local-toggle]');
+    await until(page, () => document.querySelector('[data-m=local-toggle]')?.getAttribute('aria-label') === 'Abspielen');
+    check('Pause', true);
+  } else console.log('HINWEIS: Musikordner leer, Wiedergabe nicht geprüft');
+  // Hochladen über die Oberfläche, mehrere Dateien auf einmal
+  const wav = (() => { const n = 4000, b = Buffer.alloc(44 + n * 2); b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(8000, 24); b.writeUInt32LE(16000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(n * 2, 40); return b; })();
+  await page.click('[data-m=local-upload]');
+  await page.fill('.modal.open [name=folder]', 'Browser Upload');
+  await page.setInputFiles('.modal.open [name=files]', [{ name: 'Erster_Upload.wav', mimeType: 'audio/wav', buffer: wav }, { name: 'Zweiter_Upload.wav', mimeType: 'audio/wav', buffer: wav }]);
+  await page.click('.modal.open button[type=submit]');
+  await until(page, () => !document.querySelector('.modal.open form'), undefined, 15000);
+  await page.waitForSelector('.music-track:has-text("Zweiter Upload")');
+  check('Hochgeladene Titel in der Bibliothek', /Browser Upload/.test(await page.textContent('#m-local-list')) && !!(await page.$('.music-track:has-text("Erster Upload")')));
+  await page.click('.music-track:has-text("Erster Upload")');
+  await until(page, () => document.querySelector('#m-local-now b')?.textContent === 'Erster Upload');
+  check('Hochgeladener Titel spielt', true);
+  await page.screenshot({ path: `${out}/musik-upload.png`, fullPage: true });
+  await page.click('.music-row:has-text("Zweiter Upload") [data-file-del]');
+  await page.click('.modal.open button[type=submit]');
+  await until(page, () => !document.querySelector('.music-track[data-key]') || ![...document.querySelectorAll('.music-track')].some((b) => /Zweiter Upload/.test(b.textContent)));
+  check('Eigenen Titel löschen', true);
+
+  at('alice blitzer');
+  await go(page, '#/speedcams');
+  await page.click('#sc-cam-new');
+  await page.fill('.modal.open [name=name]', 'Browser Blitzer');
+  await page.fill('.modal.open [name=speed_limit]', '80');
+  await submit(page);
+  await page.click('#view .tabs [data-tab=cameras]');
+  check('Standort in der Liste', /Browser Blitzer/.test(await page.textContent('#sc-cams')));
+  await page.click('#view .tabs [data-tab=tickets]');
+  await page.click('#sc-new');
+  await page.selectOption('.modal.open [name=camera_id]', { label: 'Browser Blitzer (80 km/h)' });
+  check('Tempo kommt vom Standort', (await page.inputValue('.modal.open [name=speed_limit]')) === '80');
+  await page.fill('.modal.open [name=plate]', 'E2E-PF');
+  await until(page, () => /Halter: Max Muster/.test(document.querySelector('#st-lookup')?.textContent || ''));
+  check('Kennzeichen zeigt den Halter', true);
+  await page.fill('.modal.open [name=measured_kmh]', '111');
+  await page.fill('.modal.open [name=amount]', '199,90');
+  await submit(page);
+  const row = await page.waitForSelector('#sc-list tr:has-text("Browser Blitzer")');
+  check('Rechnung mit Halter und Überschreitung', /Max Muster/.test(await row.textContent()) && /\+28 km\/h/.test(await row.textContent()) && /199,90/.test(await row.textContent()), await row.textContent());
+  await (await row.$('[data-entry]')).click();
+  await page.selectOption('.modal.open [name=team_id]', { label: 'E2E Team' });
+  await submit(page);
+  await page.waitForSelector('#sc-list tr:has-text("Browser Blitzer") .tag.primary');
+  check('Akteneintrag erstellt', /In der Akte/.test(await page.textContent('#sc-list tr:has-text("Browser Blitzer")')));
+  await page.screenshot({ path: `${out}/blitzer.png` });
+  await page.click('#sc-list tr:has-text("Browser Blitzer") a[href^="#/casefiles?person="]');
+  await settle(page);
+  await page.waitForTimeout(500);
+  check('Eintrag in der Personenakte', /Blitzer-Rechnung/.test(await page.textContent('#view')));
+  await page.screenshot({ path: `${out}/blitzer-personenakte.png`, fullPage: true });
+  await ctx.close();
+}
+
 // ---------- Mobil & Dunkel
 {
   const { page, at, ctx } = await session({ width: 390, height: 800 });
   at('mobil-login');
   await login(page, 'alice@e2e.test', 'alice-Sehr-Sicher-9931!');
-  for (const h of ['#/dashboard', '#/transactions', '#/work', '#/budgets', '#/spending', '#/recurring', '#/goals', '#/reports', '#/teams', '#/calendar', '#/notes', '#/todos', '#/sport-run', '#/assets-vehicles', '#/assets-properties', '#/casefiles?tab=people', '#/fleet', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/settings', '#/impressum', '#/datenschutz']) {
+  for (const h of ['#/dashboard', '#/transactions', '#/work', '#/budgets', '#/spending', '#/recurring', '#/goals', '#/reports', '#/teams', '#/calendar', '#/notes', '#/todos', '#/sport-run', '#/assets-vehicles', '#/assets-properties', '#/casefiles?tab=people', '#/fleet', '#/speedcams', '#/music', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/settings', '#/impressum', '#/datenschutz']) {
     at(`mobil ${h}`);
     await go(page, h);
     const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     check(`Mobil ${h} kein horizontales Scrollen`, over <= 1, `${over}px`);
-    if (['#/sport-run', '#/spending', '#/datenschutz', '#/work', '#/notes', '#/todos', '#/bug-report'].includes(h)) await page.screenshot({ path: `${out}/mobil-${h.slice(2)}.png` });
+    if (['#/sport-run', '#/spending', '#/datenschutz', '#/work', '#/notes', '#/todos', '#/bug-report', '#/speedcams', '#/music'].includes(h)) await page.screenshot({ path: `${out}/mobil-${h.slice(2)}.png` });
   }
   at('mobil dashboard ansichten');
   await go(page, '#/dashboard');
@@ -1477,6 +1565,7 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.waitForSelector('.dash-grid');
   await settle(page);
   const after = await page.$$eval('.dash-mod', (n) => n.map((x) => x.dataset.mod).join());
+  check('V2: Dashboard-Modul Musik', after.includes('music') && /Musik/.test(await page.textContent('[data-mod=music]')), after);
   check('V2: Layout bleibt nach dem Neuladen', after === before && !after.includes('categories') && after.indexOf('timer') < after.indexOf('cashflow'), `${before} | ${after}`);
   await page.screenshot({ path: `${out}/v2-dashboard.png` });
   await page.click('#d-edit');

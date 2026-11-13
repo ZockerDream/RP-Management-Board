@@ -1737,6 +1737,171 @@ check('Ränge, Gruppen und Rechte sind weg', psql(`SELECT (SELECT count(*) FROM 
   try { runJob('interest.run'); check('Umbuchung: Zinsjob läuft', true); } catch (e) { check('Umbuchung: Zinsjob läuft', false, e.stderr?.toString()); }
 }
 
+// ---------- Musik (2026-11-13): Spotify ohne Einrichtung, Musik vom Server mit Schlüssel und Range
+const spInfo = ok('Spotify-Status', await alice.get('/music/spotify'));
+check('Spotify ohne Einrichtung nicht verbunden', spInfo.configured === false && spInfo.connected === false && spInfo.redirect_uri === 'http://127.0.0.1:18089/api/music/spotify/callback' && spInfo.redirect_problem === null, JSON.stringify(spInfo));
+invalid('Spotify verbinden ohne Einrichtung', await alice.get('/music/spotify/connect'));
+// Jeder meldet sich selbst an: App des Servers (Admin) oder eigene App (Benutzer), PKCE ohne Secret
+invalid('Spotify-App des Servers mit ungültiger Client-ID', await admin.put('/admin/settings', { 'music.spotify_client_id': 'kurz' }));
+ok('Spotify-App des Servers', await admin.put('/admin/settings', { 'music.spotify_client_id': 'a'.repeat(32) }));
+check('Server-App gilt für alle', (await bob.get('/music/spotify')).data.configured === true && (await bob.get('/music/spotify')).data.server_app === true);
+const spConnect = ok('Spotify-Anmeldung starten', await bob.get('/music/spotify/connect'));
+const spUrl = new URL(spConnect.url);
+check('Anmeldung per PKCE mit der Server-App', spUrl.origin === 'https://accounts.spotify.com' && spUrl.searchParams.get('client_id') === 'a'.repeat(32) && spUrl.searchParams.get('code_challenge_method') === 'S256' && spUrl.searchParams.get('code_challenge')?.length === 43 && spUrl.searchParams.get('redirect_uri') === spInfo.redirect_uri, spConnect.url);
+invalid('Eigene App mit ungültiger Client-ID', await alice.put('/music/spotify/app', { client_id: 'x y' }));
+ok('Eigene Spotify-App', await alice.put('/music/spotify/app', { client_id: 'b'.repeat(32) }));
+check('Eigene App wird verwendet', new URL((await alice.get('/music/spotify/connect')).data.url).searchParams.get('client_id') === 'b'.repeat(32));
+ok('Eigene App entfernen', await alice.put('/music/spotify/app', { client_id: null }));
+// Suche im eingebetteten Player: nur mit Secret der Server-App; das Secret verlässt den Server nie
+check('Suche ohne Secret nicht möglich', (await alice.get('/music/spotify/catalog?q=lofi')).status === 409);
+invalid('Secret mit Sonderzeichen', await admin.put('/admin/music/spotify', { client_id: 'a'.repeat(32), client_secret: 'x"; DROP' }));
+ok('Spotify-App mit Secret', await admin.put('/admin/music/spotify', { client_id: 'a'.repeat(32), client_secret: 'c'.repeat(32) }));
+const spSettings = ok('Einstellungen ohne Secret', await admin.get('/admin/settings'));
+check('Secret wird nie ausgeliefert', spSettings.spotify_secret_set === true && !('music.spotify_client_secret' in spSettings.values) && !JSON.stringify(spSettings).includes('c'.repeat(32)));
+check('Secret verschlüsselt gespeichert', !psql("SELECT value::text FROM settings WHERE key='music.spotify_client_secret'").includes('c'.repeat(32)));
+check('Suche verfügbar', (await carol.get('/music/spotify')).data.search === true);
+check('Falsche Zugangsdaten: Fehlermeldung statt Absturz', [409].includes((await carol.get('/music/spotify/catalog?q=lofi')).status));
+ok('Secret entfernen', await admin.put('/admin/music/spotify', { client_id: 'a'.repeat(32), client_secret: '' }));
+check('Ohne Secret keine Suche', (await carol.get('/music/spotify')).data.search === false);
+ok('Spotify-App des Servers entfernen', await admin.put('/admin/settings', { 'music.spotify_client_id': '' }));
+// Empfehlungen: pflegt nur music:update (Admin), sehen alle mit music:read
+denied('Benutzer pflegt keine Empfehlungen', await carol.post('/music/recommendations', { url: 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M' }), [403]);
+invalid('Empfehlung ohne Spotify-Link', await admin.post('/music/recommendations', { url: 'https://example.com/playlist/37i9dQZF1DXcBWIGoYBM5M' }));
+const rec1 = ok('Empfehlung mit Link', await admin.post('/music/recommendations', { url: 'https://open.spotify.com/intl-de/playlist/37i9dQZF1DXcBWIGoYBM5M?si=x', note: 'Für alle' }));
+check('Art und ID aus dem Link, Titel von Spotify oder Ersatz', rec1.kind === 'playlist' && rec1.spotify_id === '37i9dQZF1DXcBWIGoYBM5M' && rec1.title.length > 0, JSON.stringify(rec1));
+invalid('Gleiche Empfehlung doppelt', await admin.post('/music/recommendations', { url: 'spotify:playlist:37i9dQZF1DXcBWIGoYBM5M' }));
+const rec2 = ok('Zweite Empfehlung mit eigenem Titel', await admin.post('/music/recommendations', { url: 'spotify:album:4aawyAB9vmqN3uQ7FjRGTy', title: 'Album der Woche', size: 'large' }));
+check('Eigener Titel', rec2.title === 'Album der Woche');
+const recList = ok('Empfehlungen für alle', await carol.get('/music/recommendations'));
+check('Reihenfolge wie angelegt', recList.map((r) => r.id).join() === [rec1.id, rec2.id].join() && recList[1].size === 'large', JSON.stringify(recList));
+ok('Empfehlung nach vorn', await admin.post(`/music/recommendations/${rec2.id}/move`, { dir: 'up' }));
+check('Neue Reihenfolge', (await carol.get('/music/recommendations')).data.map((r) => r.id).join() === [rec2.id, rec1.id].join());
+denied('Benutzer verschiebt nicht', await carol.post(`/music/recommendations/${rec2.id}/move`, { dir: 'down' }), [403]);
+ok('Empfehlung ändern', await admin.patch(`/music/recommendations/${rec1.id}`, { title: 'Top Hits', note: '' }));
+check('Geändert', (await carol.get('/music/recommendations')).data.some((r) => r.id === rec1.id && r.title === 'Top Hits' && r.note === ''));
+denied('Benutzer löscht keine Empfehlung', await carol.del(`/music/recommendations/${rec1.id}`), [403]);
+ok('Empfehlung entfernen', await admin.del(`/music/recommendations/${rec2.id}`));
+check('CSP erlaubt nur den Spotify-Player als Frame', /frame-src https:\/\/open\.spotify\.com/.test((await fetch(`${BASE}/`)).headers.get('content-security-policy') || ''));
+check('Ohne App wieder nicht eingerichtet', (await alice.get('/music/spotify')).data.configured === false);
+check('Spotify steuern ohne Verbindung', (await alice.put('/music/spotify/player', { action: 'pause' })).status === 409);
+invalid('Unbekannte Spotify-Aktion', await alice.put('/music/spotify/player', { action: 'explode' }));
+invalid('Lautstärke über 100', await alice.put('/music/spotify/player', { action: 'volume', volume: 150 }));
+invalid('Spotify-Rückkehr mit fremdem state', await anon.get('/music/spotify/callback?state=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&code=x'));
+ok('Spotify trennen ohne Verbindung', await alice.del('/music/spotify'));
+denied('Musik ohne Anmeldung', await anon.get('/music/local'), [401]);
+const lib = ok('Musik vom Server', await alice.get('/music/local'));
+check('Bibliothek', lib.configured === true && Array.isArray(lib.tracks), JSON.stringify(lib).slice(0, 200));
+const musicKey = ok('Wiedergabe-Schlüssel', await alice.post('/music/local/token')).token;
+if (lib.tracks.length) {
+  const tr = lib.tracks[0];
+  const url = (p, t = musicKey) => `${BASE}/api/music/local/stream?${new URLSearchParams({ path: p, t })}`;
+  const full = await fetch(url(tr.path));
+  check('Titel streamen', full.status === 200 && /^audio\//.test(full.headers.get('content-type') || '') && Number(full.headers.get('content-length')) === tr.size, `${full.status} ${full.headers.get('content-type')}`);
+  await full.arrayBuffer();
+  const part = await fetch(url(tr.path), { headers: { range: 'bytes=0-99' } });
+  check('Titel mit Range', part.status === 206 && (await part.arrayBuffer()).byteLength === 100 && part.headers.get('content-range') === `bytes 0-99/${tr.size}`, `${part.status} ${part.headers.get('content-range')}`);
+  check('Range hinter dem Ende', (await fetch(url(tr.path), { headers: { range: `bytes=${tr.size}-` } })).status === 416);
+  check('Stream ohne Schlüssel', (await fetch(`${BASE}/api/music/local/stream?path=${encodeURIComponent(tr.path)}`)).status === 400);
+  check('Stream mit falschem Schlüssel', (await fetch(url(tr.path, 'x'.repeat(40)))).status === 401);
+  check('Stream mit Zugriffs-Token statt Musik-Schlüssel', (await fetch(url(tr.path, alice.token.t))).status === 401);
+  for (const p of ['../../etc/passwd', '/etc/passwd', '../../../app/src/main.js', 'Test Album/../../x.wav', 'nicht-da.mp3']) {
+    check(`Stream ${p} abgelehnt`, (await fetch(url(p))).status === 404);
+  }
+} else console.log('HINWEIS: Musikordner leer, Stream-Prüfungen übersprungen (MUSIC_DIR mit Testdateien setzen)');
+// Hochladen: Inhalt muss Audio sein; eigene Titel ändert und löscht der Hochladende, fremde nur mit music:delete (Admin)
+const wav = (() => { const n = 4000, b = Buffer.alloc(44 + n * 2); b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(8000, 24); b.writeUInt32LE(16000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(n * 2, 40); return b; })();
+const postMusic = async (who, content, name, folder) => {
+  const form = new FormData();
+  if (folder !== undefined) form.append('folder', folder);
+  form.append('file', new Blob([content], { type: 'audio/wav' }), name);
+  const res = await fetch(`${BASE}/api/music/files`, { method: 'POST', headers: { authorization: `Bearer ${who.token.t}` }, body: form });
+  if (res.status >= 500) fives.push(`POST /music/files -> ${res.status}`);
+  return { status: res.status, data: await res.json().catch(() => null) };
+};
+const up = ok('Musik hochladen', await postMusic(bob, wav, 'Mein_Lied.wav', 'E2E Album'));
+check('Titel aus dem Dateinamen, Ordner aus dem Feld', up.title === 'Mein Lied' && up.folder === 'E2E Album', JSON.stringify(up));
+invalid('HTML als Musik', await postMusic(bob, Buffer.from('<html><script>alert(1)</script></html>'), 'boese.mp3', 'X'));
+invalid('Leere Datei', await postMusic(bob, Buffer.alloc(0), 'leer.mp3', 'X'));
+check('Ohne Ordner landet es in „Hochgeladen“', (ok('Hochladen ohne Ordner', await postMusic(alice, wav, 'zweites.wav'))).folder === 'Hochgeladen');
+const libUp = ok('Bibliothek mit Uploads', await carol.get('/music/local'));
+const upRow = libUp.tracks.find((t) => t.id === up.id);
+check('Upload für alle sichtbar, ändern nur der Hochladende', upRow?.src === 'upload' && upRow.can_edit === false && upRow.uploaded_by_name && libUp.can_upload === true, JSON.stringify(upRow));
+const upStream = await fetch(`${BASE}/api/music/local/stream?${new URLSearchParams({ id: up.id, t: musicKey })}`);
+check('Hochgeladenen Titel streamen', upStream.status === 200 && upStream.headers.get('content-type') === 'audio/wav' && (await upStream.arrayBuffer()).byteLength === wav.length, `${upStream.status} ${upStream.headers.get('content-type')}`);
+check('Stream mit path und id zugleich abgelehnt', (await fetch(`${BASE}/api/music/local/stream?${new URLSearchParams({ id: up.id, path: 'a.mp3', t: musicKey })}`)).status === 400);
+denied('Fremder ändert den Titel nicht', await carol.patch(`/music/files/${up.id}`, { title: 'Weg' }), [403]);
+denied('Fremder löscht den Titel nicht', await carol.del(`/music/files/${up.id}`), [403]);
+ok('Eigenen Titel umbenennen', await bob.patch(`/music/files/${up.id}`, { title: 'Neuer Name', folder: 'E2E Album 2' }));
+check('Umbenannt', (await bob.get('/music/local')).data.tracks.some((t) => t.id === up.id && t.title === 'Neuer Name' && t.folder === 'E2E Album 2' && t.can_edit));
+const upKey = psql(`SELECT storage_key FROM music_files WHERE id='${up.id}'`);
+const musicFileExists = (k) => { try { execFileSync('docker', ['exec', `${project}-api-1`, 'test', '-f', `/data/uploads/music/${k}`]); return true; } catch { return false; } };
+check('Datei im Upload-Volume', musicFileExists(upKey));
+ok('Admin löscht fremden Titel', await admin.del(`/music/files/${up.id}`));
+check('Datei nach dem Löschen entfernt', !musicFileExists(upKey));
+check('Gelöschter Titel nicht mehr abspielbar', (await fetch(`${BASE}/api/music/local/stream?${new URLSearchParams({ id: up.id, t: musicKey })}`)).status === 404);
+check('Audit für Uploads', Number(psql("SELECT count(*) FROM audit_log WHERE action LIKE 'music.file_%'")) >= 3);
+
+// ---------- Blitzer (2026-11-13): systemweit über speedcam:*, Rechnung → Eintrag in der Personenakte
+const camNorth = ok('Blitzer-Standort anlegen', await alice.post('/speed-cameras', { name: 'E2E Highway Nord', location: 'Route 68', kind: 'fixed', speed_limit: 120 }));
+invalid('Standortname doppelt', await bob.post('/speed-cameras', { name: 'e2e highway nord', speed_limit: 50 }));
+invalid('Standort ohne Tempo', await bob.post('/speed-cameras', { name: 'Ohne' }));
+invalid('Standort mit 0 km/h', await bob.post('/speed-cameras', { name: 'Null', speed_limit: 0 }));
+const camMobile = ok('Mobiler Standort', await bob.post('/speed-cameras', { name: 'E2E Mobil', kind: 'mobile', speed_limit: 50 }));
+const lookupA = ok('Kennzeichen nachschlagen', await alice.get('/speed-tickets/lookup?plate=e2e-pf'));
+check('Fahrzeug und Halter zum Kennzeichen', lookupA.vehicle?.id === pfCar.id && lookupA.person?.id === orgPerson.id, JSON.stringify(lookupA));
+check('Fremdes privates Fahrzeug bleibt verborgen', (await dave.get('/speed-tickets/lookup?plate=E2E-PF')).data.vehicle === null);
+const measured = new Date(Date.now() - 3600_000).toISOString();
+const tk = ok('Blitzer-Rechnung', await alice.post('/speed-tickets', { camera_id: camNorth.id, measured_at: measured, plate: 'E2E-PF', measured_kmh: 150, tolerance_kmh: 3, amount: '250,50' }));
+check('Rechnungsnummer', /^B-\d{4}-\d{4,}$/.test(tk.number), tk.number);
+invalid('Rechnung mit ungültigem Betrag', await alice.post('/speed-tickets', { camera_id: camNorth.id, measured_at: measured, plate: 'X', measured_kmh: 80, amount: 'viel' }));
+invalid('Rechnung mit ungültigem Zeitpunkt', await alice.post('/speed-tickets', { camera_id: camNorth.id, measured_at: 'gestern', plate: 'X', measured_kmh: 80 }));
+invalid('Rechnung ohne Standort', await alice.post('/speed-tickets', { camera_id: '00000000-0000-0000-0000-000000000000', measured_at: measured, plate: 'X', measured_kmh: 80 }));
+const tkList = ok('Rechnungen auflisten', await carol.get('/speed-tickets?q=E2E-PF'));
+const tkRow = tkList.find((t) => t.id === tk.id);
+check('Halter automatisch, Tempo vom Standort, Überschreitung', tkRow?.person_id === orgPerson.id && tkRow.speed_limit === 120 && tkRow.over_kmh === 27 && tkRow.amount === '250.50' && tkRow.status === 'open', JSON.stringify(tkRow));
+const tkDave = ok('Rechnung eines anderen Benutzers', await dave.post('/speed-tickets', { camera_id: camMobile.id, measured_at: measured, plate: 'E2E-PF', measured_kmh: 70, amount: 30 }));
+const tkDaveRow = (await alice.get('/speed-tickets')).data.find((t) => t.id === tkDave.id);
+check('Ohne Sicht aufs Fahrzeug kein Halter', tkDaveRow && tkDaveRow.has_person === false, JSON.stringify(tkDaveRow));
+check('Filter Standort', (await alice.get(`/speed-tickets?camera_id=${camMobile.id}`)).data.every((t) => t.camera_id === camMobile.id));
+invalid('Akteneintrag ohne Halter', await dave.post(`/speed-tickets/${tkDave.id}/file-entry`, {}));
+denied('Leserin schreibt keinen Akteneintrag in die Organisation', await carol.post(`/speed-tickets/${tk.id}/file-entry`, { team_id: team.id }), [403]);
+denied('Fremder schreibt nicht in die Organisation', await dave.post(`/speed-tickets/${tk.id}/file-entry`, { team_id: team.id }), [403, 404]);
+const tkEntry = ok('Akteneintrag aus der Rechnung', await bob.post(`/speed-tickets/${tk.id}/file-entry`, { team_id: team.id }));
+invalid('Zweiter Akteneintrag', await bob.post(`/speed-tickets/${tk.id}/file-entry`, { team_id: team.id }));
+const tkPf = ok('Personenakte mit Blitzer-Eintrag', await carol.get(`/person-files/${orgPerson.id}?team_id=${team.id}`));
+const tkPfEntry = tkPf.own_entries?.find((e) => e.id === tkEntry.id);
+check('Eintrag „Blitzer“ mit Eckdaten', tkPfEntry?.kind === 'Blitzer' && tkPfEntry.body.includes(tk.number) && tkPfEntry.body.includes('E2E Highway Nord') && tkPfEntry.body.includes('27 km/h'), JSON.stringify(tkPfEntry));
+check('Rechnung zeigt den Akteneintrag', (await alice.get('/speed-tickets')).data.find((t) => t.id === tk.id)?.has_entry === true);
+ok('Rechnung bezahlt', await alice.patch(`/speed-tickets/${tk.id}`, { status: 'paid' }));
+invalid('Ungültiger Status', await alice.patch(`/speed-tickets/${tk.id}`, { status: 'weg' }));
+ok('Kennzeichen ändern sucht den Halter neu', await alice.patch(`/speed-tickets/${tkDave.id}`, { plate: 'E2E-PT' }));
+check('Neuer Halter aus dem Organisationsfahrzeug', (await alice.get('/speed-tickets')).data.find((t) => t.id === tkDave.id)?.person_id === orgPerson.id);
+const camPerson = ok('Person nur mit Blitzer-Rechnung', await alice.post('/people', { name: 'Rita Raser', kind: 'external' }));
+const camPersonTicket = ok('Halter von Hand', await alice.post('/speed-tickets', { camera_id: camNorth.id, measured_at: measured, plate: 'E2E-RR', person_id: camPerson.id, measured_kmh: 140, amount: 100 }));
+check('Halter von Hand gespeichert', (await alice.get('/speed-tickets?q=E2E-RR')).data[0]?.person_name === 'Rita Raser');
+const pdel = await alice.del(`/people/${camPerson.id}`);
+check('Person mit Blitzer-Rechnung lässt sich nicht löschen', pdel.status === 400 && /Blitzer-Rechnungen/.test(pdel.data?.message), JSON.stringify(pdel.data));
+ok('Rechnung der Person löschen', await alice.del(`/speed-tickets/${camPersonTicket.id}`));
+ok('Danach lässt sich die Person löschen', await alice.del(`/people/${camPerson.id}`));
+invalid('Standort mit Rechnungen nicht löschen', await alice.del(`/speed-cameras/${camNorth.id}`));
+ok('Standort abschalten', await alice.patch(`/speed-cameras/${camNorth.id}`, { active: false }));
+check('Abgeschaltet mit Rechnungszahl', (await alice.get('/speed-cameras')).data.some((c) => c.id === camNorth.id && !c.active && c.tickets === 1));
+ok('Rechnung löschen', await alice.del(`/speed-tickets/${tkDave.id}`));
+ok('Leeren Standort löschen', await alice.del(`/speed-cameras/${camMobile.id}`));
+check('Akteneintrag bleibt nach Löschen der Rechnung', (await carol.get(`/person-files/${orgPerson.id}?team_id=${team.id}`)).data.own_entries.some((e) => e.id === tkEntry.id));
+check('Audit für Blitzer', Number(psql("SELECT count(*) FROM audit_log WHERE action LIKE 'speedcam.%'")) >= 6);
+// Ohne speedcam:* und music:read kein Zugriff (Dave kurz nur Personen lesen)
+const noCamRole = ok('Rolle ohne Blitzer und Musik', await admin.post('/admin/roles', { name: 'Ohne Blitzer', description: '', permissions: ['person:read'], data_scope: 'own' }));
+const daveMusicKey = (await dave.post('/music/local/token')).data.token;
+ok('Dave ohne Blitzer', await admin.patch(`/admin/users/${uD.id}`, { role_ids: [noCamRole.id] }));
+denied('Blitzer ohne Recht', await dave.get('/speed-tickets'), [403]);
+denied('Standort ohne Recht', await dave.post('/speed-cameras', { name: 'X', speed_limit: 30 }), [403]);
+denied('Musik ohne Recht', await dave.get('/music/local'), [403]);
+denied('Hochladen ohne Recht', await postMusic(dave, wav, 'x.wav', 'X'), [403]);
+if (lib.tracks.length) check('Alter Musik-Schlüssel ohne Recht', (await fetch(`${BASE}/api/music/local/stream?${new URLSearchParams({ path: lib.tracks[0].path, t: daveMusicKey })}`)).status === 403);
+ok('Dave wieder User', await admin.patch(`/admin/users/${uD.id}`, { role_ids: [userRole.id] }));
+ok('Rolle löschen', await admin.del(`/admin/roles/${noCamRole.id}`));
+
 // ---------- Admin
 for (const p of ['/admin/overview', '/admin/users', '/admin/roles', '/admin/groups', '/admin/teams', '/admin/settings', '/admin/system', '/admin/audit?limit=10', '/admin/api-keys', '/admin/webhooks', '/admin/backups', '/admin/note-tags']) ok(`GET ${p}`, await admin.get(p));
 check('Audit-Export', (await admin.raw('/admin/audit/export.csv')).status === 200);

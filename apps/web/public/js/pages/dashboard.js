@@ -87,9 +87,11 @@ const MODULES = {
   todos: { title: 'ToDos', need: ['todos'], spans: [4, 6, 8, 12], v2: true },
   fleet: { title: 'Fuhrpark', need: ['vehicles'], spans: [4, 6, 8, 12], perm: 'vehicle:read' },
   upcoming: { title: 'Als Nächstes', need: ['events'], spans: [4, 6, 8, 12], perm: 'calendar:read' },
+  // Musik (2026-11-13): lädt selbst (music.js), läuft Server-Musik, zeigt sie die, sonst Spotify
+  music: { title: 'Musik', need: [], spans: [4, 6, 8, 12], v2: true, perm: 'music:read' },
 };
 const V1_LAYOUT = [['kpis', 12], ['forecast', 12], ['cashflow', 8], ['categories', 4], ['budgets', 4], ['transactions', 8], ['fleet', 6], ['upcoming', 6]];
-const V2_LAYOUT = [['kpis', 12], ['cashflow', 8], ['timer', 4], ['forecast', 8], ['accounts', 4], ['budgets', 4], ['transactions', 4], ['upcoming', 4], ['todos', 4], ['goals', 4], ['categories', 4], ['fleet', 12]];
+const V2_LAYOUT = [['kpis', 12], ['cashflow', 8], ['timer', 4], ['forecast', 8], ['accounts', 4], ['budgets', 4], ['transactions', 4], ['upcoming', 4], ['todos', 4], ['goals', 4], ['categories', 4], ['music', 4], ['fleet', 12]];
 const SPAN_LABELS = { 4: 'Schmal', 6: 'Halb', 8: 'Breit', 12: 'Ganze Breite' };
 
 const isV2 = () => state.me?.ui_version === 'v2';
@@ -253,6 +255,9 @@ export async function render(view, params) {
         const pct = Math.round((Number(g.saved) / Number(g.target_amount)) * 100);
         return `<div class="dash-goal"><div class="row between"><b>${esc(g.name)}</b><small class="muted">${eur0(g.saved)} / ${eur0(g.target_amount)}</small></div>${progress(pct)}<small class="muted">${esc(g.budget_name)}${g.target_date ? ` · bis ${fdate(g.target_date)}` : ''}</small></div>`;
       }).join('') : empty('Noch keine Sparziele.')}</div>`,
+    music() {
+      return '<div class="card" data-music-mini></div>';
+    },
     todos() {
       const today = todayStr();
       const due = (d) => (!d ? '' : d.slice(0, 10) < today ? `<span class="tag bad">überfällig · ${fdate(d)}</span>` : d.slice(0, 10) === today ? '<span class="tag warn">heute</span>' : `<span class="tag sys">${fdate(d)}</span>`);
@@ -283,6 +288,11 @@ export async function render(view, params) {
       <button type="button" class="mod-btn" data-hide aria-label="${esc(m.title)} ausblenden">${icon(ICONS.hide)}</button></div>`;
   }
 
+  function mountMusic() {
+    const el = $('[data-music-mini]', view);
+    if (el) import('./music.js').then((m) => m.mountMiniPlayer(el)).catch(() => {});
+  }
+
   function paint() {
     const { shown, hidden } = resolveLayout();
     const missing = shown.some(({ id }) => MODULES[id].need.some((key) => !loaded.has(key)));
@@ -295,6 +305,7 @@ export async function render(view, params) {
     $('#d-body', view).innerHTML = `<div class="dash-grid ${editing ? 'editing' : ''}">${shown.map(({ id, span }, index) => `<section class="dash-mod" data-mod="${id}" data-span="${span}" style="--span:${span}" ${editing ? 'draggable="true"' : ''} aria-label="${esc(MODULES[id].title)}">
       ${editing ? tools(id, span, index, shown.length) : ''}${BODY[id]()}</section>`).join('') || empty('Alle Module sind ausgeblendet. Unter „Anpassen“ kannst du sie wieder hinzufügen.')}</div>`;
     mountCharts();
+    mountMusic();
   }
 
   // Layout speichern: immer das ganze Objekt (PATCH /me prüft es vollständig)

@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { one, many, q, tx } from '../db.js';
 import { config } from '../config.js';
+import { spotifyRedirect, redirectProblem } from '../music.js';
+import { forgetAppToken } from './music.js';
 import { adminOnly, bad, notFound, forbidden, invalidatePermCache, ipAllowed, PERMISSION_CATALOG } from '../authz.js';
 import { hashPassword, encrypt, randomToken } from '../security.js';
 import { patchSchema } from '../validation.js';
@@ -271,18 +273,38 @@ export default async function routes(app) {
 
   // ---- Einstellungen
   app.get('/admin/settings', A('settings:read'), async (req) => ({
-    values: await allSettings(),
+    // Das Spotify-Secret nie ausliefern, nur ob es gesetzt ist
+    values: { ...(await allSettings()), 'music.spotify_client_secret': undefined },
+    spotify_secret_set: Boolean((await allSettings())['music.spotify_client_secret']),
     env: {
       smtp_configured: mailConfigured(), smtp_host: config.smtp.host, app_url: config.appUrl, hibp: config.hibpCheck, backup_encrypt: config.backupEncrypt, backup_retention_days: config.backupRetentionDays,
+      spotify_redirect_uri: spotifyRedirect(config.appUrl), spotify_redirect_problem: redirectProblem(spotifyRedirect(config.appUrl)), spotify_env_client: Boolean(config.oauth.spotifyClientId),
       trust_proxy: Boolean(config.trustProxy), proxy_not_trusted: !config.trustProxy && Boolean(req.headers['x-forwarded-for']),
     },
   }));
   app.put('/admin/settings', A('settings:update'), async (req) => {
     const b = z.record(z.string(), z.union([z.string().max(500), z.number(), z.boolean()])).parse(req.body);
     const allowlist = b['security.admin_ip_allowlist'];
+    const spotifyId = b['music.spotify_client_id'];
+    if (typeof spotifyId === 'string' && spotifyId.trim() && !/^[0-9a-zA-Z]{20,64}$/.test(spotifyId.trim())) throw bad('Spotify-Client-ID ungültig (32 Zeichen aus dem Spotify-Dashboard)');
+    if (typeof spotifyId === 'string') b['music.spotify_client_id'] = spotifyId.trim();
     if (typeof allowlist === 'string' && !ipAllowed(req.ip, allowlist)) throw bad(`Admin-IP-Allowlist muss deine aktuelle IP (${req.ip}) enthalten, sonst sperrst du dich aus`);
+    delete b['music.spotify_client_secret'];
     await setSettings(b);
     await audit(req, 'settings.updated', 'settings', null, { keys: Object.keys(b).filter((k) => k in DEFAULTS) });
+    return { ok: true };
+  });
+  // Spotify-App des Servers: Client-ID für alle Anmeldungen, Secret (verschlüsselt) nur für die Suche im Player
+  app.put('/admin/music/spotify', A('settings:update'), async (req) => {
+    const b = z.object({
+      client_id: z.string().trim().max(64).refine((v) => !v || /^[0-9a-zA-Z]{20,64}$/.test(v), 'Client-ID ungültig (32 Zeichen aus dem Spotify-Dashboard)'),
+      client_secret: z.string().trim().max(64).refine((v) => !v || /^[0-9a-zA-Z]{20,64}$/.test(v), 'Client-Secret ungültig').optional(),
+    }).parse(req.body);
+    const patch = { 'music.spotify_client_id': b.client_id };
+    if (b.client_secret !== undefined) patch['music.spotify_client_secret'] = b.client_secret ? encrypt(b.client_secret) : '';
+    await setSettings(patch);
+    forgetAppToken();
+    await audit(req, 'settings.updated', 'settings', null, { keys: Object.keys(patch) });
     return { ok: true };
   });
   app.post('/admin/settings/test-mail', A('settings:update'), async (req) => {

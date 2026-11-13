@@ -36,6 +36,8 @@ export const PERMISSION_CATALOG = [
   { resource: 'license', label: 'Lizenzen', actions: R },
   { resource: 'doc', label: 'Dokumentationen', actions: R },
   { resource: 'fleet', label: 'Fuhrpark', actions: R },
+  { resource: 'speedcam', label: 'Blitzer', actions: R },
+  { resource: 'music', label: 'Musik', actions: ['read', 'create', 'update', 'delete'] },
   { resource: 'apikey', label: 'API-Schlüssel', actions: ['read', 'create', 'delete'] },
   { resource: 'audit', label: 'Audit-Log', actions: ['read', 'export'] },
   { resource: 'settings', label: 'Einstellungen', actions: ['read', 'update'] },
@@ -44,7 +46,9 @@ export const PERMISSION_CATALOG = [
 export const ALL_PERMISSIONS = [...PERMISSION_CATALOG.flatMap((c) => c.actions.map((a) => `${c.resource}:${a}`)), 'admin:access'];
 
 const ADMIN_ONLY = /^(admin|user|role|group|audit|settings|backup):/;
-export const USER_ROLE_PERMISSIONS = ALL_PERMISSIONS.filter((p) => !ADMIN_ONLY.test(p));
+// music:delete löscht fremde hochgeladene Titel (eigene darf jeder löschen), music:update pflegt die Empfehlungen –
+// beides bleibt bei den Admins
+export const USER_ROLE_PERMISSIONS = ALL_PERMISSIONS.filter((p) => !ADMIN_ONLY.test(p) && p !== 'music:delete' && p !== 'music:update');
 
 const permCache = new Map();
 export function invalidatePermCache(userId) {

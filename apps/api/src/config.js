@@ -49,7 +49,10 @@ export const config = {
     googleClientSecret: env.GOOGLE_CLIENT_SECRET || '',
     microsoftClientId: env.MICROSOFT_CLIENT_ID || '',
     microsoftClientSecret: env.MICROSOFT_CLIENT_SECRET || '',
+    spotifyClientId: env.SPOTIFY_CLIENT_ID || '',
   },
+  musicDir: env.MUSIC_ROOT || '/data/music',
+  musicUploadBytes: Number(env.MUSIC_UPLOAD_MB || 50) * 1024 * 1024,
   githubIssues: {
     token: env.GITHUB_ISSUES_TOKEN || '',
     repository: env.GITHUB_ISSUES_REPOSITORY || 'ZockerDream/RP-Management-Board',

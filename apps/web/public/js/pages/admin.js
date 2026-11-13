@@ -207,9 +207,25 @@ export async function render(view, params, section) {
       ${can('backup:read') ? `<div class="card"><div class="card-head"><h2>Backups</h2>${can('backup:create') ? '<button class="btn" id="b-new">Backup jetzt erstellen</button>' : ''}</div>${b.length ? `<table class="table"><thead><tr><th>Datei</th><th>Größe</th><th>Status</th><th>Erstellt</th><th></th></tr></thead><tbody>${b.map((x) => `<tr><td>${esc(x.filename)}</td><td>${x.size ? fmtBytes(Number(x.size)) : '–'}</td><td><span class="tag ${x.status === 'ok' ? 'ok' : 'bad'}" title="${esc(x.error || '')}">${esc(x.status)}</span></td><td>${fdatetime(x.created_at)}</td><td style="white-space:nowrap">${x.status === 'ok' ? btn(`data-bdl="${x.id}" data-bn="${esc(x.filename)}"`, 'Download') : ''}${can('backup:delete') ? ` ${btn(`data-bdel="${x.id}"`, 'Löschen')}` : ''}</td></tr>`).join('')}</tbody></table>` : empty('Noch keine Backups. Tägliche Backups laufen automatisch.')}</div>` : ''}`;
     },
     async integr(el) {
-      const [w, k] = await Promise.all([api.get('/admin/webhooks'), can('apikey:read') ? api.get('/admin/api-keys') : []]);
-      el.innerHTML = `      <div class="card"><div class="card-head"><h2>Webhooks</h2>${can('settings:update') ? '<button class="btn ghost sm" id="w-new">Webhook hinzufügen</button>' : ''}</div>${w.length ? w.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.url)}</b><small>${esc(x.events.join(', '))}</small></div>${can('settings:update') ? btn(`data-wdel="${x.id}"`, 'Löschen') : ''}</div>`).join('') : empty('Keine Webhooks. Sie melden Konto-Limits (80 %, überschritten).')}</div>
+      const [w, k, st] = await Promise.all([api.get('/admin/webhooks'), can('apikey:read') ? api.get('/admin/api-keys') : [], api.get('/admin/settings')]);
+      const sp = st.values['music.spotify_client_id'] || '';
+      const spotifyCard = `<div class="card"><div class="card-head"><h2>Spotify (Musik)</h2>${sp || st.env.spotify_env_client ? '<span class="tag ok">Eingerichtet</span>' : '<span class="tag">Nicht eingerichtet</span>'}</div>
+        <p class="muted" style="margin-top:0">Jeder Benutzer meldet sich unter „Musik“ selbst mit seinem Spotify-Konto an. Dafür braucht es eine Spotify-App: Lege sie unter developer.spotify.com/dashboard an (Web API), trage dort die Redirect-URI ein und hier die Client-ID. Ein Client-Secret ist nicht nötig. Solange die App im Entwicklungsmodus ist, lässt Spotify nur Konten zu, die du dort unter „User Management“ freischaltest (höchstens 25); alternativ hinterlegt jeder Benutzer seine eigene App.</p>
+        <p>Redirect-URI: <code>${esc(st.env.spotify_redirect_uri)}</code></p>
+        ${st.env.spotify_redirect_problem ? `<p class="auth-error" role="alert">${esc(st.env.spotify_redirect_problem)}</p>` : ''}
+        <p class="muted">Mit Client-Secret können alle im Spotify-Player der Musikseite suchen, ohne sich anzumelden. Ohne Secret fügen sie Spotify-Links ein.</p>
+        ${can('settings:update') ? `<div class="toolbar" style="gap:8px;flex-wrap:wrap"><input id="sp-client" value="${esc(sp)}" placeholder="${st.env.spotify_env_client ? 'leer: Client-ID aus der .env' : 'Client-ID'}" aria-label="Spotify-Client-ID" style="max-width:300px" maxlength="64">
+          <input id="sp-secret" type="password" autocomplete="off" placeholder="${st.spotify_secret_set ? 'Client-Secret gesetzt – leer lassen zum Behalten' : 'Client-Secret (optional, für die Suche)'}" aria-label="Spotify-Client-Secret" style="max-width:300px" maxlength="64">
+          ${st.spotify_secret_set ? '<label class="row start" style="gap:6px"><input type="checkbox" id="sp-secret-clear"> Secret entfernen</label>' : ''}<button class="btn sm" id="sp-save">Speichern</button></div>` : `<p>Client-ID: <code>${esc(sp || (st.env.spotify_env_client ? 'aus der .env' : '–'))}</code> · Secret ${st.spotify_secret_set ? 'gesetzt' : 'nicht gesetzt'}</p>`}</div>`;
+      el.innerHTML = spotifyCard + `      <div class="card"><div class="card-head"><h2>Webhooks</h2>${can('settings:update') ? '<button class="btn ghost sm" id="w-new">Webhook hinzufügen</button>' : ''}</div>${w.length ? w.map((x) => `<div class="list-item"><div class="grow"><b>${esc(x.url)}</b><small>${esc(x.events.join(', '))}</small></div>${can('settings:update') ? btn(`data-wdel="${x.id}"`, 'Löschen') : ''}</div>`).join('') : empty('Keine Webhooks. Sie melden Konto-Limits (80 %, überschritten).')}</div>
       <div class="card"><div class="card-head"><h2>API-Schlüssel aller Benutzer</h2></div>${k.length ? `<table class="table"><thead><tr><th>Name</th><th>Besitzer</th><th>Präfix</th><th>Scope</th><th>Zuletzt genutzt</th><th></th></tr></thead><tbody>${k.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.owner)}</td><td><code>${esc(x.prefix)}…</code></td><td>${esc(x.scope)}</td><td>${fdatetime(x.last_used_at)}</td><td>${can('apikey:delete') ? btn(`data-kdel="${x.id}"`, 'Widerrufen') : ''}</td></tr>`).join('')}</tbody></table>` : empty('Keine aktiven API-Schlüssel.')}</div>`;
+      $('#sp-save', el)?.addEventListener('click', async () => {
+        const body = { client_id: $('#sp-client', el).value.trim() };
+        const secret = $('#sp-secret', el).value.trim();
+        if (secret) body.client_secret = secret;
+        else if ($('#sp-secret-clear', el)?.checked) body.client_secret = '';
+        try { await api.put('/admin/music/spotify', body); toast('Spotify-App gespeichert'); await P.integr(el); } catch (x) { toast(x.message, true); }
+      });
     },
     async notetags(el) {
       D.noteTags = await api.get('/admin/note-tags');

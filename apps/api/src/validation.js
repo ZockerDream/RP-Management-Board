@@ -36,6 +36,10 @@ const LABELS = {
   people: 'Personen', pinned: 'Angeheftet', q: 'Suche', result: 'Ergebnis', role: 'Rolle', session_date: 'Datum', session_id: 'Termin', sort: 'Reihenfolge',
   start_time: 'Beginn', state: 'Zustand', status_reason: 'Begründung', type_id: 'Art', user_id: 'Benutzer', valid_until: 'Gültig bis',
   validity_months: 'Gültigkeit',
+  // Blitzer
+  speed_limit: 'Erlaubt (km/h)', measured_kmh: 'Gemessen (km/h)', tolerance_kmh: 'Toleranz (km/h)', measured_at: 'Zeitpunkt', camera_id: 'Standort',
+  // Musik
+  volume: 'Lautstärke', position_ms: 'Position', device_id: 'Gerät', context_uri: 'Playlist', uri: 'Titel',
   // Organisationen
   is_owner: 'Inhaber', level: 'Recht', module: 'Funktion', move: 'Verschieben', rank_id: 'Rang', rank_ids: 'Ränge', restricted: 'Beschränkt',
   scope_id: 'Bereich', subject: 'Recht für', subject_id: 'Recht für', user_ids: 'Mitglieder',
