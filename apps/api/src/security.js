@@ -33,6 +33,8 @@ export function decrypt(b64) {
 export const signAccess = (user, sid) =>
   jwt.sign({ sub: user.id, sid, typ: 'access' }, config.jwtSecret, { expiresIn: config.accessTtlSec, algorithm: 'HS256' });
 export const signMfa = (userId) => jwt.sign({ sub: userId, typ: 'mfa' }, config.jwtSecret, { expiresIn: 300, algorithm: 'HS256' });
+// Kurzlebiger Schlüssel für <audio>: Das Element kann keinen Authorization-Header senden
+export const signMusic = (userId) => jwt.sign({ sub: userId, typ: 'music' }, config.jwtSecret, { expiresIn: 6 * 3600, algorithm: 'HS256' });
 export function verifyJwt(token, typ) {
   const p = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] });
   if (p.typ !== typ) throw new Error('falscher Token-Typ');

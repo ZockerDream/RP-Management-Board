@@ -1,6 +1,7 @@
 import { api, refresh, setToken, onLogout, hasToken } from './api.js';
 import { $, $$, esc, toast, setCurrency, bindPasswordToggles, passwordToggleButton, openForm } from './ui.js';
 import { md5 } from './md5.js';
+import { player } from './music-player.js';
 
 export const state = { me: null, perms: new Set(), mfaSetup: false, appName: 'RP-Management-Board' };
 export function applyAppName(name) {
@@ -40,6 +41,8 @@ const PAGES = {
   trainings: { perm: 'training:read', load: () => import('./pages/trainings.js') },
   licenses: { perm: 'license:read', load: () => import('./pages/licenses.js') },
   fleet: { perm: 'fleet:read', load: () => import('./pages/fleet.js') },
+  speedcams: { perm: 'speedcam:read', load: () => import('./pages/speedcams.js') },
+  music: { perm: 'music:read', load: () => import('./pages/music.js') },
   docs: { perm: 'doc:read', load: () => import('./pages/docs.js') },
   'assets-vehicles': { perm: 'vehicle:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'vehicles') })) },
   'assets-properties': { perm: 'property:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'properties') })) },
@@ -129,6 +132,8 @@ const NAV_ICONS = {
   teams: 'M9 11a4 4 0 1 0 0-8a4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.5a4 4 0 0 1 0 7M18 14a6 6 0 0 1 4 6v1', casefiles: 'M3 6h6l2 2h10v11H3z',
   trainings: 'M2 9l10-5 10 5-10 5zM6 11v5c3 2 9 2 12 0v-5', licenses: 'M3 5h18v14H3zM7 10a2 2 0 1 0 4 0a2 2 0 1 0-4 0M5.5 16c.5-2 5.5-2 7 0M14 10h4M14 14h3',
   fleet: 'M2 6h11v10H2zM13 9h4l4 4v3h-8M5 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0M15 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0',
+  speedcams: 'M3 7h12v10H3zM15 10l5-3v10l-5-3M9 12a2.5 2.5 0 1 0 0 .01M5 20h8',
+  music: 'M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0a3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0a3 3 0 0 1 6 0z',
   docs: 'M4 4h6a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H4zM20 4h-6a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h7z', 'admin-users': 'M9 11a4 4 0 1 0 0-8a4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.5a4 4 0 0 1 0 7M18 14a6 6 0 0 1 4 6v1',
   'admin-server': 'M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01', 'admin-tickets': 'M3 7h18v3a2 2 0 0 0 0 4v3H3v-3a2 2 0 0 0 0-4zM13 7v10',
   help: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18zM9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.7M12 17h.01', changelog: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01',
@@ -420,6 +425,7 @@ async function chooseDesign() {
 
 async function logout() {
   try { await api.post('/auth/logout'); } catch { /* ignorieren */ }
+  player.stop();
   setToken(null);
   state.me = null;
   applyUi(null);
@@ -427,7 +433,7 @@ async function logout() {
   route();
 }
 
-onLogout(() => { state.me = null; applyUi(null); route(); });
+onLogout(() => { player.stop(); state.me = null; applyUi(null); route(); });
 document.addEventListener('click', async (e) => {
   const popup = $('#notification-popover');
   if (e.target.closest('#bell')) {

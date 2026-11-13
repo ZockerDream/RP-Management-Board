@@ -10,6 +10,7 @@
 # Laufzeitdaten & Backups
 data/
 backups/
+music/
 logs/
 *.dump
 *.dump.enc

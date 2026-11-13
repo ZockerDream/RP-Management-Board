@@ -26,10 +26,13 @@ await app.register(helmet, {
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      imgSrc: ["'self'", 'data:', 'https://www.gravatar.com', 'https://secure.gravatar.com'],
+      // Spotify: Cover von i.scdn.co und Co., nur für Benutzer, die ihr Spotify-Konto verbunden haben
+      imgSrc: ["'self'", 'data:', 'https://www.gravatar.com', 'https://secure.gravatar.com', 'https://i.scdn.co', 'https://*.scdn.co', 'https://*.spotifycdn.com'],
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'"],
       connectSrc: ["'self'"],
+      // Eingebetteter Spotify-Player (Musik → Spotify)
+      frameSrc: ['https://open.spotify.com'],
       frameAncestors: ["'none'"],
       baseUri: ["'self'"],
       formAction: ["'self'"],
@@ -115,7 +118,7 @@ await waitForDb().catch((e) => {
 await migrate(app.log);
 await seed(app.log);
 
-const modules = ['auth', 'me', 'finance', 'teams', 'objects', 'vehicle-images', 'calendar', 'admin', 'attachments', 'work', 'integrations', 'spending', 'sport', 'notes', 'todos', 'casefiles', 'case-records', 'case-reports', 'person-files', 'licenses', 'trainings', 'training-exams', 'docs', 'fleet', 'transfers', 'public'];
+const modules = ['auth', 'me', 'finance', 'teams', 'objects', 'vehicle-images', 'calendar', 'admin', 'attachments', 'work', 'integrations', 'spending', 'sport', 'notes', 'todos', 'casefiles', 'case-records', 'case-reports', 'person-files', 'licenses', 'trainings', 'training-exams', 'docs', 'fleet', 'transfers', 'music', 'speedcams', 'public'];
 await app.register(
   async (api) => {
     guardRoutes(api);

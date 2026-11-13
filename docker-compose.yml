@@ -31,6 +31,8 @@ x-api-env: &api-env
   GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
   MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
   MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
+  SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
+  MUSIC_UPLOAD_MB: ${MUSIC_UPLOAD_MB:-50}
   GITHUB_ISSUES_TOKEN: ${GITHUB_ISSUES_TOKEN:-}
   GITHUB_ISSUES_REPOSITORY: ${GITHUB_ISSUES_REPOSITORY:-ZockerDream/RP-Management-Board}
   LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -86,6 +88,8 @@ services:
     volumes:
       - uploads:/data/uploads
       - backups:/data/backups
+      # Musik vom Server: Ordner auf dem Host, nur lesend; Dateien müssen für alle lesbar sein (Container-Benutzer node)
+      - ${MUSIC_DIR:-./music}:/data/music:ro
     networks: [backend, public]
     depends_on:
       db: { condition: service_healthy }
