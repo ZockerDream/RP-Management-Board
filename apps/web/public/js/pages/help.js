@@ -95,7 +95,7 @@ const sections = [
   },
   {
     title: 'Blitzer',
-    text: 'Unter „Organisation → Blitzer“ legst du im Tab „Standorte“ feste und mobile Blitzer mit erlaubtem Tempo an. „Neue Rechnung“ erfasst eine Messung: Standort (setzt das erlaubte Tempo), Zeitpunkt, Kennzeichen, gemessenes Tempo, Toleranz und Betrag. Kennst du ein Fahrzeug mit dem Kennzeichen, zeigt das Formular Fahrzeug und Halter und übernimmt den Halter automatisch; sonst wählst du ihn von Hand aus der Personenliste. Die Überschreitung ist gemessen minus Toleranz minus erlaubt. „Bezahlt“ setzt den Status, unter „Bearbeiten“ stornierst du. „Akteneintrag“ übernimmt die Rechnung als Eintrag „Blitzer“ in die Personenakte des Halters; du wählst, in welchem Bereich (privat oder eine Organisation mit „Lesen & Schreiben“ bei Akten). Jede Rechnung kommt höchstens einmal in die Akte. Blitzer gelten für das ganze System: Wer was darf, regeln die Rollenrechte „Blitzer“ in der Administration. Standorte mit Rechnungen lassen sich nur abschalten, nicht löschen.',
+    text: 'Unter „Organisation → Blitzer“ stehen die Standorte fester und mobiler Blitzer als Karten: Bild, Name, Ort, erlaubtes Tempo und Notiz. „Neuer Standort“ legt einen an, ein Bild (PNG oder JPEG) kannst du gleich mitgeben; unter „Bearbeiten“ ersetzt du das Bild, entfernst es oder schaltest den Standort ab. Ein Klick aufs Bild zeigt es groß. Oben suchst du und wählst zwischen „Aktiv“, „Abgeschaltet“ und „Alle“. Blitzer gelten für das ganze System: Wer was darf, regeln die Rollenrechte „Blitzer“ in der Administration.',
   },
   {
     title: 'Musik',
