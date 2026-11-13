@@ -11,7 +11,7 @@ import { checkPassword } from './auth.js';
 import { getSetting } from '../settings.js';
 import { audit } from '../audit.js';
 import { payrollRun } from '../jobs.js';
-import { currentCaseFeatures } from '../feature-guard.js';
+import { currentCaseFeatures, currentModules } from '../feature-guard.js';
 import { uiPrefsSchema, normalizeUiPrefs, UI_VERSIONS } from '../ui-prefs.js';
 import { receiveUpload, uploadPath, removeUpload } from '../uploads.js';
 import fs from 'node:fs';
@@ -30,7 +30,7 @@ export default async function routes(app) {
     const force = (await getSetting('security.force_2fa')) === true;
     return {
       user: publicUser(req.user), permissions: [...req.perms], roles: req.userRoles.map((r) => r.name), mfa_setup_required: force && !req.user.totp_enabled,
-      features: { casefiles: await currentCaseFeatures() },
+      features: { casefiles: await currentCaseFeatures(), modules: await currentModules() },
     };
   });
 

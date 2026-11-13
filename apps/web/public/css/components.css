@@ -583,3 +583,108 @@ button.list-item:hover { background: var(--surface-2); }
 .cam-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cam-body { padding: 16px 18px 18px; }
 .cam-limit { flex: none; width: 46px; height: 46px; border-radius: 50%; border: 5px solid #d92b2b; background: #fff; color: #111; display: grid; place-items: center; font-weight: 700; font-size: 15px; }
+
+/* ---------- Globale Suche ---------- */
+.gsearch { position: relative; flex: 1; min-width: 0; max-width: 460px; display: flex; align-items: center; }
+.gsearch > .i { position: absolute; left: 11px; width: 16px; height: 16px; color: var(--muted); pointer-events: none; }
+.gsearch input { width: 100%; padding-left: 34px; background: var(--surface-2); border-color: transparent; }
+.gsearch-res { position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 60; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px rgb(0 0 0 / .25); max-height: 70vh; overflow: auto; padding: 6px; }
+[data-ui="v2"] .gsearch-res { -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); }
+.gsearch-res a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--text); text-decoration: none; }
+.gsearch-res a:hover, .gsearch-res a.on { background: var(--surface-2); }
+.gsearch-res a .grow { min-width: 0; display: flex; flex-direction: column; }
+.gsearch-res b, .gsearch-res small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gsearch-res .tag { flex: none; min-width: 92px; justify-content: center; }
+@media (max-width: 640px) { .gsearch { max-width: none; } .gsearch input::placeholder { color: transparent; } .gsearch-res .tag { min-width: 0; } }
+
+/* ---------- Pinnwand ---------- */
+.notice.unread { border-left: 3px solid var(--primary); }
+.notice.pinned { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent); }
+.poll-opts { display: grid; gap: 6px; margin-top: 8px; }
+.poll-opt { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-weight: 400; color: var(--text); }
+.poll-opt input { width: auto; flex: none; margin: 0; }
+.poll-opt .grow { flex: 1; min-width: 0; text-align: left; }
+.poll-opt.mine { box-shadow: inset 0 0 0 1px var(--primary); }
+.poll-bar { flex: none; width: min(160px, 30%); height: 8px; border-radius: 99px; background: var(--border); overflow: hidden; }
+.poll-bar i { display: block; height: 100%; background: var(--primary); }
+.poll-n { flex: none; width: 2.5em; text-align: right; }
+.dc-events { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 6px 16px; margin-top: 6px; font-weight: 400; }
+
+/* ---------- Dienstplan ---------- */
+.shift-day { margin: 18px 0; }
+.shift-day h3 { font-size: 13px; font-weight: 600; margin-bottom: 8px; text-transform: capitalize; }
+.shift-day.today h3 { color: var(--primary); }
+.shift-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+.shift-card { padding: 14px 16px; border-left: 4px solid var(--primary); }
+.shift-card.shift-ok { border-left-color: var(--ok); }
+.shift-card.shift-warn { border-left-color: var(--warn); }
+.shift-card.shift-bad { border-left-color: var(--bad); }
+.shift-card.shift-neutral { border-left-color: var(--border); }
+.shift-card.mine { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 45%, transparent); }
+.shift-card.past { opacity: .6; }
+.shift-people { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.shift-person { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 99px; background: var(--surface-2); font-size: 13px; }
+.shift-person.me { box-shadow: inset 0 0 0 1px var(--primary); }
+.icon-x { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px; }
+.icon-x:hover { color: var(--bad); }
+
+/* ---------- Einsätze & Funk ---------- */
+.unit-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 12px; }
+.unit-card { padding: 14px 16px; border-top: 4px solid var(--border); }
+.unit-card.st1, .unit-card.st2 { border-top-color: var(--ok); }
+.unit-card.st3 { border-top-color: var(--warn); }
+.unit-card.st4 { border-top-color: var(--bad); }
+.unit-card.st5 { border-top-color: var(--primary); }
+.unit-card.inactive { opacity: .55; }
+.fms-now { flex: none; width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; font-weight: 700; background: var(--surface-2); }
+.fms-now.s1, .fms-now.s2 { background: var(--ok); color: #fff; }
+.fms-now.s3 { background: var(--warn); color: #111; }
+.fms-now.s4 { background: var(--bad); color: #fff; }
+.fms-now.s5 { background: var(--primary); color: #fff; }
+.fms { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-top: 10px; }
+.fms-btn { border: 1px solid var(--border); background: var(--surface-2); color: var(--text); border-radius: 6px; padding: 6px 0; font-weight: 700; cursor: pointer; }
+.fms-btn.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+.incident.closed { opacity: .65; }
+.incident-log { max-height: 260px; overflow: auto; display: grid; gap: 4px; font-size: 13px; }
+
+/* ---------- Fahndungsboard ---------- */
+.bolo:fullscreen { background: var(--bg); padding: 24px; overflow: auto; }
+.bolo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 14px; }
+.bolo-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; border-top: 5px solid var(--warn); }
+.bolo-card.k-arrest { border-top-color: var(--bad); }
+.bolo-card.expired { opacity: .6; }
+.bolo-kind { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 8px 12px; color: var(--muted); }
+.bolo-photo { aspect-ratio: 4 / 3; background: var(--surface-2); display: grid; place-items: center; overflow: hidden; }
+.bolo-photo img { width: 100%; height: 100%; object-fit: cover; }
+.bolo-body { padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.bolo-name { font-size: 18px; }
+.bolo-body p { margin: 0; }
+.bolo-plate { display: inline-block; background: #f4f4f4; color: #111; border: 2px solid #111; border-radius: 6px; padding: 6px 14px; font: 700 26px/1.1 ui-monospace, monospace; letter-spacing: .06em; }
+.bolo-plate.sm { font-size: 15px; padding: 2px 8px; align-self: flex-start; }
+
+/* ---------- Bußgeldrechner ---------- */
+.fines { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); gap: 18px; align-items: start; }
+@media (max-width: 860px) { .fines { grid-template-columns: minmax(0, 1fr); } }
+.fines-sum { position: sticky; top: 12px; }
+.fines-cat { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
+.fines-cat:first-child { margin-top: 0; }
+.fines-row { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; font-weight: 400; color: var(--text); cursor: pointer; }
+.fines-row:hover, .fines-row.on { background: var(--surface-2); }
+.fines-row > input[type=checkbox] { width: auto; flex: none; }
+.fines-row input[type=number] { width: 64px; flex: none; }
+.fines-row .grow { min-width: 0; display: flex; flex-direction: column; }
+.fines-total { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 14px 0; padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.fines-total div { display: flex; flex-direction: column; }
+.fines-total b { font-size: 17px; }
+
+/* ---------- Rechnungen und Kasse ---------- */
+.inv-items { display: grid; gap: 6px; }
+.inv-item { display: grid; grid-template-columns: minmax(0, 1fr) 70px 100px 24px; gap: 6px; align-items: center; }
+@media (max-width: 520px) { .inv-item { grid-template-columns: minmax(0, 1fr) 56px 80px 22px; } }
+.cash-balance { display: flex; flex-direction: column; }
+.cash-balance b { font-size: 28px; }
+.pos { color: var(--ok); }
+.neg { color: var(--bad); }
+
+/* Schalter in zwei Spalten (Server-Management → Funktionen) */
+.switch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); column-gap: 24px; }

@@ -17,6 +17,26 @@ const SECTIONS = {
   tickets: { title: 'Tickets', desc: 'Gemeldete Fehler und Anfragen', tabs: ['tickets'] },
 };
 
+// Schalter für die Funktionen ab 2026-11-13 (Reihenfolge wie in der Navigation)
+const MODULE_SWITCH_LIST = [
+  ['board', 'Pinnwand & Umfragen', 'Ankündigungen, „gelesen von“ und Umfragen'],
+  ['shifts', 'Dienstplan', 'Schichten, Tausch, Krankmeldung, „Im Dienst“'],
+  ['dispatch', 'Einsätze & Funk', 'Einheiten mit Status, Einsätze, Funkbuch'],
+  ['bolo', 'Fahndungsboard', 'Große Übersicht der Fahndungen; braucht Fallakten und Fahndung'],
+  ['fines', 'Bußgeldrechner', 'Braucht Fallakten und Strafkatalog'],
+  ['recruiting', 'Bewerbungen', 'Bewerber pflegen und annehmen'],
+  ['personnel', 'Personalakte', 'Beförderungen, Belobigungen, Verwarnungen'],
+  ['absences', 'Abwesenheiten', 'Urlaub, krank, inaktiv; auch im Dienstplan'],
+  ['equipment', 'Lager & Ausrüstung', 'Ausrüstung ausgeben und zurücknehmen'],
+  ['invoices', 'Rechnungen & Angebote', 'Rechnungen mit PDF, „bezahlt“ bucht die Einnahme'],
+  ['cash', 'Kasse', 'Bargeld auf einem Konto, Tagesabschluss'],
+  ['payslip', 'Lohnzettel', 'PDF auf dem Stundenzettel'],
+  ['speedcams', 'Blitzer', 'Blitzer-Standorte mit Bild'],
+  ['music', 'Musik', 'Spotify, Musik vom Server, Empfehlungen'],
+  ['discord', 'Discord', 'Nachrichten der Organisationen an Discord'],
+  ['search', 'Globale Suche', 'Suchfeld oben in der Leiste'],
+];
+
 export async function render(view, params, section) {
   const meta = SECTIONS[section] || SECTIONS.users;
   const ALL = [['overview', 'Übersicht', 'admin:access'], ['tickets', 'Tickets', 'admin:access'], ['users', 'Benutzer', 'user:read'], ['roles', 'Rollen & Rechte', 'role:read'], ['groups', 'Gruppen', 'group:read'], ['teams', 'Organisationen', 'team:read'],
@@ -179,6 +199,9 @@ export async function render(view, params, section) {
         ${sw('casefiles.files', 'Fallakten', 'Akten mit Verlauf, Berichten, Beweismitteln, Fahrzeugen und Anhängen')}
         <div id="s-case-parts">${sw('casefiles.wanted', 'Fahndung', 'Fahndungen und Fahndungsliste; nur mit Fallakten')}${sw('casefiles.report_templates', 'Berichtsvorlagen', 'Nur mit Fallakten; ohne Vorlagen bleiben Berichte möglich')}${sw('casefiles.types', 'Aktenarten', 'Nur mit Fallakten; vorhandene Akten behalten ihre Art und deren Rechte')}</div>
         ${sw('casefiles.penal_codes', 'Strafkatalog', 'Auch ohne Fallakten zum Nachschlagen; Anklagepunkte und Vorstrafen gibt es nur mit beidem')}
+        <div class="card-head" style="margin-top:20px"><h2>Funktionen</h2></div>
+        <p class="muted">Ausgeschaltete Funktionen verschwinden für alle Benutzer aus Navigation und Seiten, die Schnittstelle lehnt sie ab. Die Daten bleiben erhalten und sind nach dem Einschalten wieder da.</p>
+        <div class="switch-grid">${MODULE_SWITCH_LIST.map(([k, l, h]) => sw(`modules.${k}`, l, h)).join('')}</div>
         <div class="card-head" style="margin-top:20px"><h2>Aufbewahrung (Tage)</h2></div><div class="form">${num('retention.audit_days', 'Audit-Log', 1)}${num('retention.notifications_days', 'Benachrichtigungen', 1)}${num('retention.sessions_days', 'Abgelaufene Sitzungen', 1)}${num('retention.trash_days', 'Papierkorb', 1)}</div>
         ${ro ? '' : '<div class="modal-foot"><button class="btn ghost" type="button" id="s-mail">SMTP testen</button><button class="btn">Speichern</button></div>'}</fieldset></form>
         <div class="card"><div class="card-head"><h2>Umgebung (.env, schreibgeschützt)</h2></div><div class="stack">

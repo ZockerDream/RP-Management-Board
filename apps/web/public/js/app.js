@@ -12,6 +12,16 @@ export function applyAppName(name) {
 export const can = (p) => state.perms.has(p);
 // Schalter des Aktensystems aus Server-Management → Sicherheit & Einstellungen (files, wanted, codes, charges, templates, types)
 export const caseFeature = (key) => state.features?.casefiles?.[key] !== false;
+// Schalter der Funktionen ab 2026-11-13 (Server-Management → Sicherheit & Einstellungen → Funktionen)
+export const moduleOn = (key) => state.features?.modules?.[key] !== false;
+// Seite sichtbar? Recht und Schalter; Fahndungsboard und Bußgeldrechner brauchen zusätzlich die Teile der Akten
+const PAGE_SWITCH = {
+  board: () => moduleOn('board'), shifts: () => moduleOn('shifts'), dispatch: () => moduleOn('dispatch'),
+  bolo: () => moduleOn('bolo') && caseFeature('wanted'), fines: () => moduleOn('fines') && caseFeature('charges'),
+  personnel: () => moduleOn('recruiting') || moduleOn('personnel') || moduleOn('absences'), equipment: () => moduleOn('equipment'),
+  invoices: () => moduleOn('invoices'), cash: () => moduleOn('cash'), speedcams: () => moduleOn('speedcams'), music: () => moduleOn('music'),
+};
+const pageOn = (key) => (!PAGES[key]?.perm || can(PAGES[key].perm)) && (PAGE_SWITCH[key]?.() ?? true);
 
 const store = {
   get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
@@ -42,6 +52,15 @@ const PAGES = {
   licenses: { perm: 'license:read', load: () => import('./pages/licenses.js') },
   fleet: { perm: 'fleet:read', load: () => import('./pages/fleet.js') },
   speedcams: { perm: 'speedcam:read', load: () => import('./pages/speedcams.js') },
+  board: { perm: 'notice:read', load: () => import('./pages/board.js') },
+  personnel: { perm: null, load: () => import('./pages/personnel.js') },
+  shifts: { perm: 'shift:read', load: () => import('./pages/shifts.js') },
+  equipment: { perm: 'equipment:read', load: () => import('./pages/equipment.js') },
+  dispatch: { perm: 'dispatch:read', load: () => import('./pages/dispatch.js') },
+  invoices: { perm: 'invoice:read', load: () => import('./pages/invoices.js') },
+  cash: { perm: 'cash:read', load: () => import('./pages/cash.js') },
+  bolo: { perm: 'casefile:read', load: () => import('./pages/bolo.js') },
+  fines: { perm: 'casefile:read', load: () => import('./pages/fines.js') },
   music: { perm: 'music:read', load: () => import('./pages/music.js') },
   docs: { perm: 'doc:read', load: () => import('./pages/docs.js') },
   'assets-vehicles': { perm: 'vehicle:read', load: () => import('./pages/assets.js').then((m) => ({ render: (view, params) => m.render(view, params, 'vehicles') })) },
@@ -133,6 +152,10 @@ const NAV_ICONS = {
   trainings: 'M2 9l10-5 10 5-10 5zM6 11v5c3 2 9 2 12 0v-5', licenses: 'M3 5h18v14H3zM7 10a2 2 0 1 0 4 0a2 2 0 1 0-4 0M5.5 16c.5-2 5.5-2 7 0M14 10h4M14 14h3',
   fleet: 'M2 6h11v10H2zM13 9h4l4 4v3h-8M5 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0M15 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0',
   speedcams: 'M3 7h12v10H3zM15 10l5-3v10l-5-3M9 12a2.5 2.5 0 1 0 0 .01M5 20h8',
+  board: 'M4 4h16v12H8l-4 4zM8 9h8M8 12h5', shifts: 'M4 5h16v16H4zM4 10h16M9 3v4M15 3v4M8 14h3M13 14h3M8 17h3',
+  equipment: 'M3 7l9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10',
+  dispatch: 'M12 12a2 2 0 1 0 0 .01M8.5 15.5a5 5 0 0 1 0-7M15.5 8.5a5 5 0 0 1 0 7M5.6 18.4a9 9 0 0 1 0-12.8M18.4 5.6a9 9 0 0 1 0 12.8',
+  bolo: 'M4 4h16v16H4zM9 9a3 3 0 1 0 6 0a3 3 0 1 0-6 0M7 18c1-3 9-3 10 0', invoices: 'M6 2h9l5 5v15H6zM14 2v6h6M9 13h7M9 17h5', cash: 'M2 7h20v12H2zM2 11h20M6 15h3', fines: 'M5 3h14v18H5zM8 7h8M8 11h8M8 15h4', personnel: 'M8 7a4 4 0 1 0 8 0a4 4 0 1 0-8 0M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1',
   music: 'M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0a3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0a3 3 0 0 1 6 0z',
   docs: 'M4 4h6a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H4zM20 4h-6a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h7z', 'admin-users': 'M9 11a4 4 0 1 0 0-8a4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.5a4 4 0 0 1 0 7M18 14a6 6 0 0 1 4 6v1',
   'admin-server': 'M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01', 'admin-tickets': 'M3 7h18v3a2 2 0 0 0 0 4v3H3v-3a2 2 0 0 0 0-4zM13 7v10',
@@ -300,7 +323,7 @@ export async function route() {
   }
   authEl.classList.add('hidden');
   appEl.classList.remove('hidden');
-  const allowed = Object.keys(PAGES).filter((k) => !PAGES[k].perm || can(PAGES[k].perm));
+  const allowed = Object.keys(PAGES).filter(pageOn);
   const key = state.mfaSetup ? 'settings' : allowed.includes(page) ? page : allowed[0] || 'settings';
   if (key !== page) history.replaceState(null, '', `#/${key}`);
   $$('.nav').forEach((n) => n.classList.toggle('active', n.dataset.nav === key));
@@ -350,9 +373,11 @@ export async function reloadMe() {
   applyUi(r.user);
   renderAvatars();
   $$('.nav').forEach((n) => {
-    const p = PAGES[n.dataset.nav]?.perm;
-    n.classList.toggle('hidden', !!p && !can(p));
+    if (n.dataset.nav in PAGES) n.classList.toggle('hidden', !pageOn(n.dataset.nav));
   });
+  // Globale Suche ausblenden, wenn ausgeschaltet; Musik stoppen, wenn Musik aus ist
+  $('.gsearch')?.toggleAttribute('hidden', !moduleOn('search'));
+  if (!moduleOn('music')) player.stop();
   $$('[data-admin-only]').forEach((n) => n.classList.toggle('hidden', !can('admin:access')));
   // Abschnittsüberschrift ohne sichtbaren Eintrag ausblenden
   $$('.sidebar .nav-label').forEach((label) => {
@@ -431,6 +456,44 @@ async function logout() {
   applyUi(null);
   history.replaceState(null, '', '#/login');
   route();
+}
+
+/* ---------- Globale Suche (Wunsch vom 2026-11-13) ---------- */
+{
+  const input = $('#gsearch');
+  const box = $('#gsearch-res');
+  let seq = 0;
+  let active = -1;
+  const close = () => { box.hidden = true; input?.setAttribute('aria-expanded', 'false'); active = -1; };
+  const items = () => [...box.querySelectorAll('a')];
+  const mark = () => items().forEach((a, i) => a.classList.toggle('on', i === active));
+  const run = async () => {
+    const q = input.value.trim();
+    const mine = ++seq;
+    if (q.length < 2) { close(); return; }
+    try {
+      const { results } = await api.get(`/search?q=${encodeURIComponent(q)}`);
+      if (mine !== seq) return;
+      box.innerHTML = results.length ? results.map((r) => `<a href="${esc(r.link)}" role="option"><span class="tag">${esc(r.type)}</span><span class="grow"><b>${esc(r.label)}</b>${r.sub ? `<small class="muted">${esc(r.sub)}</small>` : ''}</span></a>`).join('')
+        : '<p class="muted" style="padding:10px 12px;margin:0">Nichts gefunden.</p>';
+      box.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+      active = -1;
+    } catch { close(); }
+  };
+  let timer;
+  input?.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 250); });
+  input?.addEventListener('focus', () => { if (box.innerHTML && input.value.trim().length >= 2) { box.hidden = false; } });
+  input?.addEventListener('keydown', (e) => {
+    const list = items();
+    if (e.key === 'ArrowDown' && list.length) { e.preventDefault(); active = (active + 1) % list.length; mark(); }
+    else if (e.key === 'ArrowUp' && list.length) { e.preventDefault(); active = (active - 1 + list.length) % list.length; mark(); }
+    else if (e.key === 'Enter' && list.length) { e.preventDefault(); location.hash = list[Math.max(0, active)].getAttribute('href'); close(); input.blur(); }
+    else if (e.key === 'Escape') { close(); input.blur(); }
+  });
+  box?.addEventListener('click', (e) => { if (e.target.closest('a')) { close(); input.value = ''; } });
+  document.addEventListener('click', (e) => { if (!e.target.closest('.gsearch')) close(); });
+  document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && input && !$('.app')?.classList.contains('hidden')) { e.preventDefault(); input.focus(); input.select(); } });
 }
 
 onLogout(() => { player.stop(); state.me = null; applyUi(null); route(); });

@@ -103,6 +103,14 @@ Node 22, Fastify 5, reines ESM-JavaScript, `zod`, `pg` mit handgeschriebenem SQL
 - **Hochgeladene Musik:** nur über `POST /music/files`, Inhalt per `sniffAudio`, Dateien unter `UPLOAD_DIR/music`; Löschen entfernt die Datei. `music:delete` (fremde Uploads löschen) ist absichtlich nicht in der Rolle „User“ (`USER_ROLE_PERMISSIONS` in `authz.js`).
 - **Spotify-Tokens bleiben auf dem Server:** Alles läuft über `/api/music/spotify/*` (`routes/music.js`); Cover kommen direkt von `i.scdn.co` bzw. `*.spotifycdn.com` (in der CSP unter `img-src`). Spotify verlangt für die Redirect-URI HTTPS (außer 127.0.0.1); ohne Premium antwortet die API mit 403 `premium_required`.
 - **Blitzer sind systemweit:** Keine Funktion in `ORG_MODULES`, Rechte nur `speedcam:*`. Das Bild eines Standorts liegt im Upload-Volume (`photo_key`); Ersetzen und Löschen des Standorts entfernen die Datei.
+- **Dienst-Funktionen (ab Migration 038) über `orgfeature.js`:** `teamFor(req, team, modul, need)` prüft Mitgliedschaft (404) und Stufe (403); `need = 0` heißt „Mitgliedschaft genügt“ (eigene Abwesenheit). `loadTeamRow(…, own)` zeigt Eigenes immer. Neue Dienst-Funktionen stehen schon in `ORG_MODULES`/`seed_team_ranks()` (Migration 038); weitere brauchen eine neue Migration wie dort.
+- **Discord nur über `discord()` aus `discord-send.js`:** nie abwarten, nie Fehler nach oben geben. Inhalte sind Daten Dritter: keine Gesundheitsangaben (krank → „abwesend“), keine privaten Akten, keine Erwähnungen (`allowed_mentions` leer, `clean`). Webhooks nur über `webhookOk`.
+- **Rang ändern nur mit den Helfern aus `routes/teams.js`** (`actorOf`, `needMembers`, `belowActor`, `assertSubjectWithin`, `assertManageable`) – auch in Bewerbungen und Personalakte; nie direkt `team_members.rank_id` setzen.
+- **Beim Tab-Wechsel nicht die Tab-Leiste neu zeichnen:** `browser.mjs` klickt alle Tabs nacheinander über gemerkte Elemente; eine neu gezeichnete Leiste macht sie ungültig („not attached to the DOM“).
+- **Status einer Einheit nur über `setStatus`** (`routes/dispatch.js`): schreibt das Funkbuch mit; eine Einheit hängt höchstens an einem laufenden Einsatz (`incident_units_open`).
+- **Rechnungen und Kasse buchen selbst:** Bezahlen und Kassenbuchungen schreiben `transactions` (Quellen `invoice`, `cash`, `income_kind` immer gesetzt – die Spalte ist NOT NULL, auch bei Ausgaben). Beträge nur über `src/invoices.js` (Cent), nie als Float.
+- **Neue Funktion = neuer Schalter:** Funktionen ab 2026-11-13 stehen in `MODULE_SWITCHES` (`features.js`) mit Routenregel in `MODULE_RULES`, Einstellung `modules.<key>` in `DEFAULTS` (`settings.js`), Eintrag in `MODULE_SWITCH_LIST` (`pages/admin.js`) und `PAGE_SWITCH` (`app.js`). Neue Routen einer solchen Funktion müssen von einer Regel erfasst werden (Unit-Test `features.test.js` ergänzen).
+- **Umfragen anonym:** `poll_votes` speichert trotzdem `user_id` (eine Stimme je Person); bei `anonymous` nie Namen ausliefern.
 - **Login-Limit in `api.mjs`:** Neue Testabschnitte dürfen keine weiteren Logins einbauen (10 pro Minute und IP, sonst scheitern spätere Abschnitte); vorhandene Benutzer wiederverwenden. Alices Konten nicht verändern, `browser.mjs` rechnet ihre Salden nach.
 
 ## Testen
@@ -128,7 +136,7 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 ### Allgemein
 - Einziger Einstieg ist `api` auf einem Port (UI und API, gleicher Ursprung). Kein mitgelieferter Reverse-Proxy; `db` nur im internen Netz.
 - App-Name zentral in den Einstellungen änderbar; wirkt in Seitenleiste, Login, Titel und Rechtsseiten.
-- Navigation: **Finanzen** (Dashboard, Transaktionen, Stundenzettel, Konten, Budgets, Daueraufträge, Sparziele, Berichte), **Zusammenarbeit** (Kalender, Notizblock, ToDos, Musik), **Sport** (Laufen, Schwimmen, Biken), **Object Management** (Fahrzeuge, Häuser, Schlüssel, Verwaltung; Personen über „Akten → Personenakten“), **Organisation** (Organisationen, Akten, Schulungen, Lizenzen, Fuhrpark, Blitzer, Dokumentationen), **Administration** (User-Management, Server-Management, Tickets – nur Admins; Hilfe, Changelog und Fehler melden für alle), dazu Impressum und Datenschutz.
+- Navigation: **Finanzen** (Dashboard, Transaktionen, Stundenzettel, Konten, Budgets, Daueraufträge, Sparziele, Berichte, Rechnungen, Kasse), **Zusammenarbeit** (Kalender, Notizblock, ToDos, Musik), **Sport** (Laufen, Schwimmen, Biken), **Object Management** (Fahrzeuge, Häuser, Schlüssel, Verwaltung; Personen über „Akten → Personenakten“), **Organisation** (Organisationen, Akten, Schulungen, Lizenzen, Fuhrpark, Blitzer, Dokumentationen), **Dienst** (Pinnwand, Dienstplan, Einsätze & Funk, Fahndungsboard, Bußgeldrechner, Personal, Lager), **Administration** (User-Management, Server-Management, Tickets – nur Admins; Hilfe, Changelog und Fehler melden für alle), dazu Impressum und Datenschutz.
 - **Changelog (Wunsch des Auftraggebers vom 2026-11-10):** Seite unter Administration mit allen Versionen seit 0.0.0, neueste oben als „Installiert“, Suche und Filter nach Art (Neu, Geändert, Behoben, Technik). Daten in `apps/web/public/js/changelog.js`; die Stände vor 1.0.0 sind nachträglich als 0.x nummeriert, weil es vorher keine Versionsnummern gab.
 - Alte Links (`#/assets?tab=…`, `#/admin`, QR-Codes) müssen weiter funktionieren.
 
@@ -153,6 +161,12 @@ Die Meldungen von `crawl.mjs` sind Hinweise, keine Urteile: Abgelehnte Testeinga
 ### Blitzer (Wünsche des Auftraggebers vom 2026-11-13, Migrationen 034 und 037)
 - Systemweit über die Rollenrechte `speedcam:*`. Standorte (fest/mobil, Ort, erlaubtes Tempo, aktiv, Notiz) mit je einem Bild, als Karten mit Suche und Filter.
 - **Keine Rechnungen:** Rechnungen mit Halter und Akteneintrag wurden am selben Tag auf Wunsch wieder entfernt; nicht wieder einbauen, ohne nachzufragen.
+
+### Dienst (Wünsche des Auftraggebers vom 2026-11-13, ab Migration 038)
+- Umsetzung aller vorgeschlagenen Module ausdrücklich gewünscht, in Blöcken: A Pinnwand mit Umfragen, Abwesenheiten, Discord, globale Suche (fertig); B Dienstplan, Bewerbungen, Personalakte, Lager (fertig); C Einsätze & Funk, Fahndungsboard, Bußgeldrechner (fertig); D Rechnungen/Angebote, Kasse, Lohnzettel-PDF (fertig).
+- Entscheidungen: Bewerbungen pflegen Mitglieder (niemand bewirbt sich selbst über die App); Rechnungen werden nur „bezahlt“ markiert (dann Einnahme gebucht); Einheiten für Funk und Einsätze sind frei angelegt (Rufname, Besatzung, optional Fuhrpark-Fahrzeug); eine Kasse ist ein Konto der Organisation, der Tagesabschluss bucht die Differenz.
+- Alle neuen Funktionen systemweit abschaltbar (Server-Management → Sicherheit & Einstellungen → Funktionen, Wunsch vom selben Tag).
+- Pinnwand: an alle oder Ränge samt höheren, „gelesen von“, Glocke; Umfragen anonym oder namentlich. Abwesenheiten: eigene immer, Leitung alle. Discord je Organisation mit wählbaren Ereignissen. Suche oben über alles Sichtbare.
 
 ### Budgets
 - Ausgabenlimit mit Name, Betrag, Zeitraum (Tag, Woche, Monat, Jahr), optional auf Konto und/oder Kategorie begrenzt. Zeigt Verbrauch, Rest und Überschreitung. Privat pro Benutzer; Ausgaben auf Konten einer Organisation zählen nur, wenn man sie lesen darf.

@@ -1450,6 +1450,140 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.click('#sc-state [data-s=off]');
   await page.waitForSelector('.cam-card:has-text("Browser Blitzer") .cam-photo.empty');
   check('Unter „Abgeschaltet“ ohne Bild', true);
+
+  // Pinnwand, Umfrage, Abwesenheit, Discord-Tab, globale Suche (2026-11-13)
+  at('alice pinnwand');
+  await go(page, '#/board');
+  await page.click('#b-new');
+  await page.fill('.modal.open [name=title]', 'Browser-Ankündigung');
+  await page.fill('.modal.open [name=body]', 'Bitte **alle** lesen');
+  await submit(page);
+  await page.waitForSelector('.notice:has-text("Browser-Ankündigung") strong');
+  check('Ankündigung mit Markdown', true);
+  await page.click('#view .tabs [data-tab=polls]');
+  await page.click('#b-poll-new');
+  await page.fill('.modal.open [name=question]', 'Browser-Umfrage?');
+  await page.fill('.modal.open [name=options]', 'Ja\nNein');
+  await submit(page);
+  await page.click('article:has-text("Browser-Umfrage?") .poll-opt:has-text("Ja") input');
+  await page.click('article:has-text("Browser-Umfrage?") [data-vote]');
+  await until(page, () => [...document.querySelectorAll('#b-polls article')].some((a) => a.textContent.includes('Browser-Umfrage?') && a.textContent.includes('1 Stimme')));
+  check('Abgestimmt, Ergebnis sichtbar', true);
+  await page.screenshot({ path: `${out}/pinnwand-umfrage.png`, fullPage: true });
+  at('alice personal');
+  await go(page, '#/personnel?tab=absences');
+  await page.click('#ab-new');
+  await page.selectOption('.modal.open [name=kind]', 'vacation');
+  await submit(page);
+  check('Abwesenheit gemeldet', /Urlaub/.test(await page.textContent('#pe-body')));
+  at('alice discord');
+  await go(page, '#/teams?tab=discord');
+  await page.waitForSelector('#dc-form');
+  check('Discord-Tab für die Inhaberin', /Webhook-URL/.test(await page.textContent('#t-panel')));
+  at('alice suche');
+  await page.fill('#gsearch', 'Muster');
+  await page.waitForSelector('#gsearch-res:not([hidden]) a');
+  check('Suche zeigt Treffer', /Person/.test(await page.textContent('#gsearch-res')));
+  await page.screenshot({ path: `${out}/suche.png` });
+  await page.press('#gsearch', 'Enter');
+  await until(page, () => location.hash.startsWith('#/casefiles?person='));
+  check('Enter öffnet den ersten Treffer', true);
+
+  // Dienstplan, Personal, Lager (Block B)
+  at('alice dienstplan');
+  await go(page, '#/shifts');
+  await page.click('#s-plan');
+  await submit(page);
+  await page.waitForSelector('.shift-card');
+  const joinBtn = await page.$('.shift-card:not(.past) [data-join]');
+  if (joinBtn) { await joinBtn.click(); await page.waitForSelector('.shift-card.mine'); }
+  check('Schichten geplant und eingetragen', !!(await page.$('.shift-card.mine')));
+  await page.screenshot({ path: `${out}/dienstplan.png`, fullPage: true });
+  await page.click('#s-tabs [data-tab=now]');
+  await until(page, () => /Eingestempelt/.test(document.querySelector('#s-body')?.textContent || ''));
+  check('Im Dienst', true);
+  at('alice personal');
+  await go(page, '#/personnel?tab=applications');
+  await page.waitForSelector('#ap-new');
+  await page.click('#ap-new');
+  await page.fill('.modal.open [name=name]', 'Browser Bewerber');
+  await submit(page);
+  check('Bewerbung angelegt', /Browser Bewerber/.test(await page.textContent('#pe-body')));
+  await page.click('#pe-tabs [data-tab=records]');
+  await page.waitForSelector('[data-pe-open]');
+  await page.click('tr:has-text("carol") [data-pe-open]');
+  await page.waitForSelector('.modal.open [name=kind]');
+  await page.selectOption('.modal.open [name=kind]', 'commendation');
+  await page.fill('.modal.open [name=title]', 'Browser-Belobigung');
+  await submit(page);
+  check('Belobigung eingetragen', true);
+  at('alice lager');
+  await go(page, '#/equipment');
+  await page.click('#eq-new');
+  await page.fill('.modal.open [name=name]', 'Schutzweste');
+  await page.fill('.modal.open [name=serial]', 'WEST-');
+  await page.fill('.modal.open [name=count]', '2');
+  await submit(page);
+  await page.click('tr:has-text("WEST-1") [data-issue]');
+  await page.selectOption('.modal.open [name=user_id]', { label: 'alice (Leitung)' });
+  await submit(page);
+  await page.waitForSelector('#eq-mine .list-item');
+  check('Eigene Ausrüstung oben', /Schutzweste/.test(await page.textContent('#eq-mine')));
+  await page.screenshot({ path: `${out}/lager.png`, fullPage: true });
+
+  // Einsätze & Funk, Fahndungsboard, Bußgeldrechner (Block C)
+  at('alice einsaetze');
+  await go(page, '#/dispatch?tab=units');
+  await page.click('#u-new');
+  await page.fill('.modal.open [name=callsign]', 'Browser-1');
+  await submit(page);
+  await page.click('.tabs [data-tab=board]');
+  await page.waitForSelector('.unit-card:has-text("Browser-1")');
+  await page.click('#d-new');
+  await page.fill('.modal.open [name=title]', 'Browser-Einsatz');
+  await page.click('.modal.open .stack label:has-text("Browser-1") input');
+  await submit(page);
+  await until(page, () => /Browser-Einsatz/.test(document.querySelector('#d-body')?.textContent || ''));
+  check('Browser-1 alarmiert', /Browser-Einsatz/.test(await page.textContent('.unit-card:has-text("Browser-1")')));
+  await page.click('.unit-card:has-text("Browser-1") .fms-btn.s4');
+  await until(page, () => document.querySelector('.unit-card.st4') !== null);
+  check('Status 4 gesetzt', true);
+  await page.screenshot({ path: `${out}/einsaetze.png`, fullPage: true });
+  at('alice bolo');
+  await go(page, '#/bolo');
+  check('Fahndungsboard', /aktive Fahndung/.test(await page.textContent('#bo-board')));
+  await page.screenshot({ path: `${out}/fahndungsboard.png`, fullPage: true });
+  at('alice bussgeld');
+  await go(page, '#/fines');
+  await page.selectOption('#fi-area', { label: 'E2E Team' });
+  await page.waitForTimeout(400);
+  const firstCode = await page.$('#fi-list [data-code]');
+  if (firstCode) { await page.click('#fi-list [data-code]'); await until(page, () => /Summe/.test(document.querySelector('#fi-sum')?.textContent || '') && !!document.querySelector('#fi-file')); }
+  check('Bußgeldrechner rechnet', !firstCode || /€/.test(await page.textContent('#fi-sum')));
+  await page.screenshot({ path: `${out}/bussgeld.png`, fullPage: true });
+
+  // Rechnungen, Kasse, Lohnzettel (Block D)
+  at('alice rechnungen');
+  await go(page, '#/invoices');
+  await page.click('#iv-new');
+  await page.fill('.modal.open [name=recipient_name]', 'Browser Kunde');
+  await page.fill('.modal.open .inv-item [data-k=text]', 'Ölwechsel');
+  await page.fill('.modal.open .inv-item [data-k=price]', '49,90');
+  await page.click('.modal.open [data-add-item]');
+  await page.fill('.modal.open .inv-item:nth-child(2) [data-k=text]', 'Filter');
+  await page.fill('.modal.open .inv-item:nth-child(2) [data-k=qty]', '2');
+  await page.fill('.modal.open .inv-item:nth-child(2) [data-k=price]', '5');
+  check('Summe im Formular', /59,90/.test(await page.textContent('.modal.open [data-inv-total]')));
+  await submit(page);
+  const invRowEl = await page.waitForSelector('#iv-body tr:has-text("Browser Kunde")');
+  check('Rechnung in der Liste', /59,90/.test(await invRowEl.textContent()));
+  await page.screenshot({ path: `${out}/rechnungen.png`, fullPage: true });
+  at('alice kasse');
+  await go(page, '#/cash');
+  check('Kasse ohne Kasse erklärt', /Kasse/.test(await page.textContent('#ca-body')));
+  at('alice lohnzettel');
+  await go(page, '#/work');
+  check('Lohnzettel-Knopf', !!(await page.$('#work-payslip')));
   await ctx.close();
 }
 
@@ -1458,12 +1592,12 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   const { page, at, ctx } = await session({ width: 390, height: 800 });
   at('mobil-login');
   await login(page, 'alice@e2e.test', 'alice-Sehr-Sicher-9931!');
-  for (const h of ['#/dashboard', '#/transactions', '#/work', '#/budgets', '#/spending', '#/recurring', '#/goals', '#/reports', '#/teams', '#/calendar', '#/notes', '#/todos', '#/sport-run', '#/assets-vehicles', '#/assets-properties', '#/casefiles?tab=people', '#/fleet', '#/speedcams', '#/music', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/settings', '#/impressum', '#/datenschutz']) {
+  for (const h of ['#/dashboard', '#/transactions', '#/work', '#/budgets', '#/spending', '#/recurring', '#/goals', '#/reports', '#/teams', '#/calendar', '#/notes', '#/todos', '#/sport-run', '#/assets-vehicles', '#/assets-properties', '#/casefiles?tab=people', '#/fleet', '#/speedcams', '#/music', '#/board', '#/shifts', '#/personnel', '#/equipment', '#/dispatch', '#/bolo', '#/fines', '#/invoices', '#/cash', '#/assets-keys', '#/assets-manage', '#/help', '#/bug-report', '#/settings', '#/impressum', '#/datenschutz']) {
     at(`mobil ${h}`);
     await go(page, h);
     const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     check(`Mobil ${h} kein horizontales Scrollen`, over <= 1, `${over}px`);
-    if (['#/sport-run', '#/spending', '#/datenschutz', '#/work', '#/notes', '#/todos', '#/bug-report', '#/speedcams', '#/music'].includes(h)) await page.screenshot({ path: `${out}/mobil-${h.slice(2)}.png` });
+    if (['#/sport-run', '#/spending', '#/datenschutz', '#/work', '#/notes', '#/todos', '#/bug-report', '#/speedcams', '#/music', '#/board'].includes(h)) await page.screenshot({ path: `${out}/mobil-${h.slice(2)}.png` });
   }
   at('mobil dashboard ansichten');
   await go(page, '#/dashboard');

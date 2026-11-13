@@ -25,6 +25,11 @@ export const DEFAULTS = {
   'casefiles.report_templates': true,
   'casefiles.types': true,
   // Spotify-App des Servers (nur die Client-ID, Anmeldung per PKCE); leer: SPOTIFY_CLIENT_ID aus der .env
+  // Neue Funktionen ab 2026-11-13 ein- und ausschalten (features.js, MODULE_SWITCHES)
+  'modules.board': true, 'modules.shifts': true, 'modules.dispatch': true, 'modules.bolo': true, 'modules.fines': true,
+  'modules.recruiting': true, 'modules.personnel': true, 'modules.absences': true, 'modules.equipment': true,
+  'modules.invoices': true, 'modules.cash': true, 'modules.payslip': true, 'modules.speedcams': true, 'modules.music': true,
+  'modules.discord': true, 'modules.search': true,
   'music.spotify_client_id': '',
   // Client-Secret verschlüsselt (encrypt); nur für die Suche ohne Anmeldung (Client Credentials)
   'music.spotify_client_secret': '',

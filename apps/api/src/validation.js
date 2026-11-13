@@ -38,6 +38,12 @@ const LABELS = {
   validity_months: 'Gültigkeit',
   // Blitzer
   speed_limit: 'Erlaubt (km/h)',
+  // Pinnwand, Umfragen, Abwesenheiten, Discord
+  rank_ids: 'Ränge', question: 'Frage', options: 'Antworten', multiple: 'Mehrere Antworten', anonymous: 'Anonym', closes_at: 'Ende', option_ids: 'Antwort',
+  starts_on: 'Von', ends_on: 'Bis', starts_at: 'Beginn', ends_at: 'Ende', slots: 'Plätze', template_ids: 'Vorlagen', starts: 'Beginn', ends: 'Ende',
+  callsign: 'Rufname', crew: 'Besatzung', fleet_vehicle_id: 'Fahrzeug', unit_ids: 'Einheiten', incident_id: 'Einsatz', case_file_id: 'Akte',
+  recipient_kind: 'Empfänger', recipient_name: 'Empfänger', recipient_address: 'Anschrift', recipient_person_id: 'Person', recipient_team_id: 'Organisation', paid_on: 'Bezahlt am', counted: 'Gezählt', qty: 'Menge', price: 'Preis',
+  contact: 'Kontakt', interview_at: 'Gespräch', decision: 'Entscheidung', serial: 'Seriennummer', due_on: 'Zurück bis', entry_date: 'Datum', webhook_url: 'Webhook-URL', min: 'Mindeststufe',
   // Musik
   volume: 'Lautstärke', position_ms: 'Position', device_id: 'Gerät', context_uri: 'Playlist', uri: 'Titel',
   // Organisationen

@@ -11,6 +11,8 @@ import { uuid, isoDate } from '../records.js';
 import { config } from '../config.js';
 import { dateInZone } from '../periods.js';
 import { fleetMarkdown } from '../fleet-markdown.js';
+import { discord } from '../discord-send.js';
+import { fdateDe } from '../lib-format.js';
 
 const groupFields = z.object({
   name: z.string().trim().min(1).max(100),
@@ -227,7 +229,10 @@ export default async function routes(app) {
       );
     });
     if (c.done) await audit(req, 'fleet_check.updated_after_done', 'fleet_check', c.id, { done: b.done ?? true });
-    else if (b.done) await audit(req, 'fleet_check.done', 'fleet_check', c.id);
+    else if (b.done) {
+      await audit(req, 'fleet_check.done', 'fleet_check', c.id);
+      discord(c.team_id, 'fleet', { title: `Fuhrpark-Runde vom ${fdateDe(b.checked_on ?? c.checked_on)} erledigt`, path: 'fleet', fields: [{ name: 'Von', value: req.user.name }] }, req.log);
+    }
     return { ok: true };
   });
   app.delete('/fleet/checks/:id', authz('fleet:delete'), async (req) => {

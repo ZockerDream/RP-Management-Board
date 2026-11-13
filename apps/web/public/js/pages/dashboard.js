@@ -2,7 +2,7 @@ import { api } from '../api.js';
 import { $, $$, esc, eur, eur0, fdate, empty, budgetTag, toast, progress, MONTH_NAMES, monthStart, monthEnd, todayStr } from '../ui.js';
 import { areaChart, donut, gauge } from '../charts.js';
 import { txForm } from './common.js';
-import { can, state } from '../app.js';
+import { moduleOn, can, state } from '../app.js';
 import { occursOn } from '../recurrence.js';
 
 const VIEWS = {
@@ -95,7 +95,7 @@ const V2_LAYOUT = [['kpis', 12], ['cashflow', 8], ['timer', 4], ['forecast', 8],
 const SPAN_LABELS = { 4: 'Schmal', 6: 'Halb', 8: 'Breit', 12: 'Ganze Breite' };
 
 const isV2 = () => state.me?.ui_version === 'v2';
-const usable = (id) => MODULES[id] && (!MODULES[id].perm || can(MODULES[id].perm)) && (isV2() || !MODULES[id].v2);
+const usable = (id) => MODULES[id] && (!MODULES[id].perm || can(MODULES[id].perm)) && (isV2() || !MODULES[id].v2) && (id !== 'music' || moduleOn('music'));
 
 // Gespeichertes Layout auf die heute verfügbaren Module abbilden: neue Module kommen ans Ende, fehlende Rechte blenden aus
 function resolveLayout() {

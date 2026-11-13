@@ -26,19 +26,19 @@ export async function createInvitation({ email, roleId, teamId, rankId, invitedB
 }
 
 // Wer handelt: Inhaber, Rangposition und Stufen in dieser Organisation
-async function actorOf(userId, teamId) {
+export async function actorOf(userId, teamId) {
   const m = await one(
     `SELECT tm.is_owner, tm.rank_id, r.position FROM team_members tm LEFT JOIN team_ranks r ON r.id=tm.rank_id
      WHERE tm.team_id=$1 AND tm.user_id=$2`, [teamId, userId]);
   if (!m) throw notFound('Organisation nicht gefunden');
   return { userId, teamId, owner: m.is_owner, rankId: m.rank_id, position: m.position ?? -Infinity, levels: await levelsFor(userId, teamId) };
 }
-function needMembers(actor, level) {
+export function needMembers(actor, level) {
   if (actor.owner || actor.levels.members >= level) return;
   throw forbidden(level >= LEVEL.MANAGE ? 'Ränge, Gruppen und Rechte darfst du in dieser Organisation nicht verwalten' : 'Mitglieder darfst du in dieser Organisation nicht verwalten');
 }
 const needOwner = (actor) => { if (!actor.owner) throw forbidden('Nur Inhaber der Organisation dürfen das'); };
-const belowActor = (actor, position) => actor.owner || (position ?? -Infinity) < actor.position;
+export const belowActor = (actor, position) => actor.owner || (position ?? -Infinity) < actor.position;
 
 // Aktenarten und Doku-Kategorien der Organisation, für die es eigene Rechte geben kann
 async function scopesOf(teamId) {
@@ -81,18 +81,18 @@ function assertWithin(actor, actorLevels, before, after) {
 }
 const subjectRows = (column, id) => many(`SELECT module, scope_id, level FROM team_permissions WHERE ${column}=$1`, [id]);
 // Rang oder Gruppe zuweisen: Sie dürfen nicht mehr Rechte bringen, als die handelnde Person selbst hat
-async function assertSubjectWithin(actor, column, id) {
+export async function assertSubjectWithin(actor, column, id) {
   if (actor.owner) return;
   const scopes = await scopesOf(actor.teamId);
   assertWithin(actor, await actorScopeLevels(actor, scopes), null, resolveRows(await subjectRows(column, id), scopes));
 }
 
-const rankOf = async (teamId, rankId) => {
+export const rankOf = async (teamId, rankId) => {
   const r = await one('SELECT * FROM team_ranks WHERE id=$1 AND team_id=$2', [rankId, teamId]);
   if (!r) throw bad('Rang gehört nicht zu dieser Organisation');
   return r;
 };
-const memberOf = async (teamId, userId) => {
+export const memberOf = async (teamId, userId) => {
   const m = await one(
     'SELECT tm.*, r.position, r.name rank_name FROM team_members tm LEFT JOIN team_ranks r ON r.id=tm.rank_id WHERE tm.team_id=$1 AND tm.user_id=$2',
     [teamId, userId],
@@ -105,7 +105,7 @@ async function assertLastOwner(teamId, userId) {
   if (!owners) throw bad('Die Organisation braucht mindestens einen Inhaber');
 }
 // Ein Mitglied verwalten: Inhaber jeden, sonst nur Nicht-Inhaber unter dem eigenen Rang
-function assertManageable(actor, target) {
+export function assertManageable(actor, target) {
   if (actor.owner) return;
   if (target.user_id === actor.userId) throw forbidden('Deinen eigenen Rang und deine Gruppen ändert jemand über dir');
   if (target.is_owner || !belowActor(actor, target.position)) throw forbidden('Du kannst nur Mitglieder unter deinem Rang verwalten');
