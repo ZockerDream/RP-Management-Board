@@ -237,7 +237,7 @@ Alle Dienst-Funktionen gehören einer Organisation; Rechte über eigene Funktion
 |---|---|
 | Profil | Name, Sprache, Währung, Zeitzone, erster Wochentag, Festgehalt pro Tag, Wochen-Sollzeit, Bonus, Konto für Gehaltsgutschrift, DSGVO-Export |
 | Sicherheit | 2FA per Authenticator-App (QR-Code, Wiederherstellungscodes), Passwort ändern |
-| Darstellung | Design V1 oder V2, Akzentfarbe, Modus (System, Hell, Dunkel), Gravatar (Standard aus, nur mit Einwilligung); in V2 Hintergrund (Vorlage oder eigenes Bild), Unschärfe, Deckkraft, Abdunkeln, Handy ohne Unschärfe |
+| Darstellung | Design V1, V2, V3 oder V4, Akzentfarbe, Modus (System, Hell, Dunkel), Gravatar (Standard aus, nur mit Einwilligung); in V2 und V4 Hintergrund (Vorlage oder eigenes Bild), Unschärfe, Deckkraft, Abdunkeln, Handy ohne Unschärfe |
 | Benachrichtigungen | In-App und E-Mail je Ereignisart |
 | Sitzungen | Aktive Sitzungen ansehen und beenden |
 | API & Kalender | API-Schlüssel, iCal-Abo, Google-/Microsoft-Verbindung |
@@ -255,7 +255,8 @@ Alle Dienst-Funktionen gehören einer Organisation; Rechte über eigene Funktion
 - Sechs Akzentfarben (Indigo, Smaragd, Ozean, Rosé, Bernstein, Mono), jeweils hell und dunkel; optional folgt der Modus dem System.
 - Bedienbar bis 390 px Breite. Unter 640 px werden Tabellen zu Karten (Spaltenüberschrift links in jeder Zeile), Formulare einspaltig, Kennzahlen zu zweit; der Kalender startet dort in der Agenda. Eingaben haben auf dem Handy 16 px Schrift, damit iOS nicht hineinzoomt.
 - **Design V2 „Glass“ (Wunsch des Auftraggebers vom 2026-11-11):** je Benutzer wählbar, V1 bleibt Standard und unverändert. Beim nächsten Login fragt ein Dialog einmal nach dem Design (Klick zeigt es sofort, „Übernehmen“ oder „Später“, danach nie wieder; wer schon V2 gewählt hat, bekommt ihn nicht). Alle Seiten zeigen Karten, Seitenleiste und Kopfleiste als Glas-Panels (durchscheinend mit Unschärfe) über einem festen Hintergrund; die Navigation hat Symbole. Hintergrund: Vorlagen Dämmerung, Nacht, Wald, ohne Bild oder ein eigenes Bild, das jeder Benutzer selbst hochlädt und nur selbst sieht. Regler für Unschärfe (0–40 px), Deckkraft der Panels (20–90 %) und Abdunkeln (0–70 %); auf Handys standardmäßig ohne Unschärfe. Dialoge und Popover sind kräftiger, damit Formulare lesbar bleiben.
-- **Dashboard in V2:** Module mit eigenem Standard (Kennzahlen; Cashflow + Stundenzettel; Prognose + Konten; Budgets, Buchungen, Termine; ToDos, Sparziele, Kategorien; Fuhrpark) und frei anpassbar: verschieben (Ziehen oder Pfeile), Breite 4/6/8/12 von 12 Spalten, ausblenden, wieder hinzufügen, auf Standard zurück. Gespeichert je Benutzer. V1 zeigt immer die feste Anordnung von früher, ohne die V2-Module.
+- **Designs V3 „Modern“ und V4 „Modern Glass“ (Wunsch des Auftraggebers vom 2026-11-13, Mockup freigegeben):** wählbar neben V1 und V2. Navigation oben statt Seitenleiste: Bereiche als Pillen mit gleitender aktiver Pille (vordere Kante 0,56 s, hintere 0,55 s, ohne Bewegung bei „weniger Bewegung“), Seiten des Bereichs als Chips; ein Bereich öffnet die zuletzt besuchte Seite. V3 hat schlichte Flächen ohne Bild, V4 das Format von V3 mit Glas und Hintergrund wie V2 (Bild, Regler). Der Design-Dialog erschien nach dem Update für alle einmal neu (Migration 042).
+- **Dashboard in V2 bis V4:** Module mit eigenem Standard (Kennzahlen; Cashflow + Stundenzettel; Prognose + Konten; Budgets, Buchungen, Termine; ToDos, Sparziele, Kategorien; Fuhrpark) und frei anpassbar: verschieben (Ziehen oder Pfeile), Breite 4/6/8/12 von 12 Spalten, ausblenden, wieder hinzufügen, auf Standard zurück. Gespeichert je Benutzer. V1 zeigt immer die feste Anordnung von früher, ohne die V2-Module.
 
 ## 13. Architektur
 

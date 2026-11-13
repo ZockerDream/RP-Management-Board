@@ -1642,7 +1642,7 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   at('design-dialog');
   await login(page, 'dave@e2e.test', 'dave-Sehr-Sicher-9931!', { keepChoice: true });
   await page.waitForSelector('.design-choice', { timeout: 5000 });
-  check('Design-Dialog beim ersten Login', await page.locator('.design-choice [data-version]').count() === 2);
+  check('Design-Dialog beim ersten Login mit vier Designs', await page.locator('.design-choice [data-version]').count() === 4);
   await page.click('.design-choice [data-version=v2]');
   check('Design-Dialog: Klick zeigt V2 sofort', await page.evaluate(() => document.documentElement.dataset.ui === 'v2'));
   await page.screenshot({ path: `${out}/design-dialog.png` });
@@ -1730,6 +1730,82 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await page.click('[data-version=v1]');
   await until(page, () => !document.documentElement.dataset.ui);
   check('Zurück auf V1 ohne Hintergrund', await page.evaluate(() => getComputedStyle(document.querySelector('#bg-layer')).display === 'none'));
+  await ctx.close();
+}
+
+// ---------- Designs V3 und V4: Navigation oben als Pillen (Wunsch des Auftraggebers vom 2026-11-13)
+{
+  const { page, at, ctx } = await session({ width: 1400, height: 900 });
+  at('v3 umschalten');
+  await login(page, 'bob@e2e.test', 'bob-Sehr-Sicher-9931!');
+  await go(page, '#/settings');
+  await page.click('[data-tab=appearance]');
+  await page.click('[data-version=v3]');
+  await until(page, () => document.documentElement.dataset.shell === 'top');
+  check('V3: Seitenleiste weg, Navigation oben', await page.evaluate(() => getComputedStyle(document.querySelector('.sidebar')).display === 'none' && getComputedStyle(document.querySelector('.topnav')).display !== 'none'));
+  check('V3: ohne Glas und Bild', await page.evaluate(() => !document.documentElement.dataset.ui && getComputedStyle(document.querySelector('#bg-layer')).display === 'none'));
+  check('V3: Dashboard-Karte in den Einstellungen', await page.locator('a[href="#/dashboard?edit=1"]').count() === 1);
+  at('v3 pillen');
+  await go(page, '#/dashboard');
+  await page.waitForSelector('.dash-grid');
+  const pillOn = () => page.evaluate(() => {
+    const pills = document.querySelector('#topnav-pills');
+    const on = pills.querySelector('button[aria-pressed=true]');
+    const clip = pills.querySelector('.topnav-pill').style.clipPath;
+    return { label: on?.textContent, clip, left: on ? on.offsetLeft : -1 };
+  });
+  const start = await pillOn();
+  check('V3: Bereich Finanzen aktiv', start.label === 'Finanzen' && /inset\(/.test(start.clip), JSON.stringify(start));
+  check('V3: Seiten des Bereichs als Chips', await page.locator('#topnav-pages a[aria-current=page][href="#/dashboard"]').count() === 1 && await page.locator('#topnav-pages a[href="#/transactions"]').count() === 1);
+  check('V3: Begrüßung im Dashboard', /Guten (Morgen|Tag|Abend)/.test(await page.textContent('.page-head h1')));
+  await page.screenshot({ path: `${out}/v3-dashboard.png` });
+  await page.click('#topnav-pills button:has-text("Organisation")');
+  await settle(page);
+  await page.waitForTimeout(700);
+  const org = await pillOn();
+  check('V3: Klick auf Bereich öffnet dessen erste Seite', /^#\/teams/.test(await page.evaluate(() => location.hash)) && org.label === 'Organisation', JSON.stringify(org));
+  const [, , , , l] = org.clip.match(/inset\(([\d.]+)px ([\d.]+)px ([\d.]+)px ([\d.]+)px/) || [];
+  check('V3: Pille steht auf dem neuen Bereich', Math.abs(Number(l) - org.left) < 1.5, `${org.clip} / ${org.left}`);
+  await page.click('#topnav-pages a[href="#/fleet"]');
+  await settle(page);
+  await page.click('#topnav-pills button:has-text("Finanzen")');
+  await settle(page);
+  await page.click('#topnav-pills button:has-text("Organisation")');
+  await settle(page);
+  check('V3: Bereich merkt sich die letzte Seite', /^#\/fleet/.test(await page.evaluate(() => location.hash)));
+  await page.screenshot({ path: `${out}/v3-organisation.png` });
+  await go(page, '#/settings');
+  check('V3: Seite ohne Bereich zeigt keine Pille', await page.evaluate(() => !document.querySelector('#topnav-pills button[aria-pressed=true]')));
+  at('v3 handy');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await go(page, '#/reports');
+  await page.waitForTimeout(400);
+  check('V3 Handy: kein waagrechtes Scrollen', await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), String(await page.evaluate(() => document.documentElement.scrollWidth)));
+  check('V3 Handy: Pillen scrollen, aktiver Bereich sichtbar', await page.evaluate(() => {
+    const on = document.querySelector('#topnav-pills button[aria-pressed=true]').getBoundingClientRect();
+    return on.left >= -1 && on.right <= innerWidth + 1;
+  }));
+  await page.screenshot({ path: `${out}/v3-handy.png`, fullPage: false });
+  await page.setViewportSize({ width: 1400, height: 900 });
+  at('v4 glas');
+  await go(page, '#/settings');
+  await page.click('[data-tab=appearance]');
+  await page.click('[data-version=v4]');
+  await page.waitForSelector('#ap-bg');
+  check('V4: Navigation oben mit Glas und Hintergrund', await page.evaluate(() => document.documentElement.dataset.shell === 'top' && document.documentElement.dataset.ui === 'v2'
+    && getComputedStyle(document.querySelector('#bg-layer')).display === 'block' && getComputedStyle(document.querySelector('.topnav-pills')).backdropFilter.includes('blur')));
+  await go(page, '#/dashboard');
+  await page.waitForSelector('.dash-grid');
+  await page.screenshot({ path: `${out}/v4-dashboard.png` });
+  await page.reload();
+  await page.waitForSelector('.app:not(.hidden) #view');
+  check('V4: gilt sofort nach dem Neuladen', await page.evaluate(() => document.documentElement.dataset.shell === 'top' && document.documentElement.dataset.ui === 'v2'));
+  at('v4 zurück auf v1');
+  await go(page, '#/settings');
+  await page.click('[data-tab=appearance]');
+  await page.click('[data-version=v1]');
+  await until(page, () => !document.documentElement.dataset.shell && !document.documentElement.dataset.ui);
+  check('Zurück auf V1 mit Seitenleiste', await page.evaluate(() => getComputedStyle(document.querySelector('.sidebar')).display !== 'none' && getComputedStyle(document.querySelector('.topnav')).display === 'none'));
   await ctx.close();
 }
 

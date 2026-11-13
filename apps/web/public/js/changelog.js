@@ -6,6 +6,10 @@
 // Arten: new = Neu, changed = Geändert, fixed = Behoben, tech = Technik und Betrieb
 
 export const UNRELEASED = [
+  ['new', 'Zwei neue Designs unter Einstellungen → Darstellung: V3 „Modern“ mit schlichten dunklen Flächen und V4 „Modern Glass“ im selben Format als Glas über deinem Hintergrund (Bild und Regler wie in V2). In beiden steht die Navigation oben: Die Bereiche sind Pillen, die aktive gleitet beim Wechsel hinüber, die Seiten des Bereichs stehen als Chips darunter; ein Bereich merkt sich die zuletzt geöffnete Seite.'],
+  ['changed', 'Der Design-Dialog erscheint nach dem Update für alle noch einmal, jetzt mit vier Designs. „Später“ behält dein bisheriges Design.'],
+  ['changed', 'Das anpassbare Dashboard gibt es jetzt in V2, V3 und V4; in V3 und V4 begrüßt es dich mit Namen.'],
+  ['tech', 'Migration 042: `users.ui_version` erlaubt `v3` und `v4`, `ui_choice_seen` für alle zurückgesetzt. Aussehen in `css/theme-v3.css` über `data-look="v3"` und `data-shell="top"` am Wurzelelement; V4 setzt zusätzlich `data-ui="v2"`. Die Navigation oben baut `buildTopnav` (`app.js`) aus der Seitenleiste.'],
 ];
 
 export const CHANGELOG = [

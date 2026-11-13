@@ -2,7 +2,7 @@ import { api } from '../api.js';
 import { $, $$, esc, eur, eur0, fdate, empty, budgetTag, toast, progress, MONTH_NAMES, monthStart, monthEnd, todayStr } from '../ui.js';
 import { areaChart, donut, gauge } from '../charts.js';
 import { txForm } from './common.js';
-import { moduleOn, can, state } from '../app.js';
+import { moduleOn, can, state, isModern } from '../app.js';
 import { occursOn } from '../recurrence.js';
 
 const VIEWS = {
@@ -94,7 +94,9 @@ const V1_LAYOUT = [['kpis', 12], ['forecast', 12], ['cashflow', 8], ['categories
 const V2_LAYOUT = [['kpis', 12], ['cashflow', 8], ['timer', 4], ['forecast', 8], ['accounts', 4], ['budgets', 4], ['transactions', 4], ['upcoming', 4], ['todos', 4], ['goals', 4], ['categories', 4], ['music', 4], ['fleet', 12]];
 const SPAN_LABELS = { 4: 'Schmal', 6: 'Halb', 8: 'Breit', 12: 'Ganze Breite' };
 
-const isV2 = () => state.me?.ui_version === 'v2';
+// Das anpassbare Dashboard mit den Zusatzmodulen gilt für alle Designs außer V1
+const isV2 = () => ['v2', 'v3', 'v4'].includes(state.me?.ui_version);
+const greeting = () => { const h = new Date().getHours(); return h < 11 ? 'Guten Morgen' : h < 18 ? 'Guten Tag' : 'Guten Abend'; };
 const usable = (id) => MODULES[id] && (!MODULES[id].perm || can(MODULES[id].perm)) && (isV2() || !MODULES[id].v2) && (id !== 'music' || moduleOn('music'));
 
 // Gespeichertes Layout auf die heute verfügbaren Module abbilden: neue Module kommen ans Ende, fehlende Rechte blenden aus
@@ -136,7 +138,7 @@ export async function render(view, params) {
   let loaded = new Set();
   const weekStart = Number(state.me.week_start ?? 1);
 
-  view.innerHTML = `<div class="page-head"><div><h1>Dashboard</h1><p>Willkommen zurück, ${esc(state.me.name)}</p></div>
+  view.innerHTML = `<div class="page-head"><div>${isModern() ? `<h1>${greeting()}, ${esc(state.me.name)}</h1><p>Dein Überblick</p>` : `<h1>Dashboard</h1><p>Willkommen zurück, ${esc(state.me.name)}</p>`}</div>
     <div class="actions"><div class="seg" id="d-scope"><button data-s="solo">Solo</button><button data-s="shared">Organisation</button><button data-s="all" class="on">Gesamt</button></div>
     <div class="seg" id="d-view">${[['day', 'Tag'], ['week', 'Woche'], ['month', 'Monat']].map(([value, label]) => `<button data-v="${value}" class="${value === mode ? 'on' : ''}">${label}</button>`).join('')}</div>
     <select id="d-range" style="width:170px" aria-label="Zeitraum">${periodOptions(mode, weekStart)}</select>

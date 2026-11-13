@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { $, $$, esc, fdatetime, empty, openForm, confirmBox, toast, showSecret, download } from '../ui.js';
-import { state, can, reloadMe, applyTheme, applyUi, renderAvatars } from '../app.js';
+import { state, can, reloadMe, applyTheme, applyUi, renderAvatars, isGlass, designOptions } from '../app.js';
 import { payrollAccountOptions, payrollAccountHint } from './common.js';
 
 const ACCENTS = [['indigo', 'Indigo'], ['emerald', 'Smaragd'], ['ocean', 'Ozean'], ['rose', 'Rose'], ['amber', 'Bernstein'], ['mono', 'Mono']];
@@ -76,13 +76,12 @@ export async function render(view) {
     },
     appearance(el) {
       const mode = u().theme || 'system', acc = u().accent || 'indigo';
-      const v2 = u().ui_version === 'v2';
+      const v2 = isGlass(u());
       const prefs = u().ui_prefs;
       const bgOn = (key) => (prefs.background === key || (key === 'dusk' && prefs.background === 'custom' && !u().has_background) ? 'on' : '');
       el.innerHTML = `<div class="card"><div class="card-head"><h2>Design</h2><small class="muted">Gilt nur für dich, auf allen Geräten</small></div>
         <div class="ui-versions" role="radiogroup" aria-label="Design-Version">
-          <button type="button" role="radio" aria-checked="${!v2}" class="ui-version ${v2 ? '' : 'on'}" data-version="v1"><span class="ui-pv v1" aria-hidden="true"><i></i><i></i><i></i><i></i></span><b>V1 · Klassisch</b><small class="muted">Ruhige, flache Flächen wie bisher</small></button>
-          <button type="button" role="radio" aria-checked="${v2}" class="ui-version ${v2 ? 'on' : ''}" data-version="v2"><span class="ui-pv v2" aria-hidden="true"><i></i><i></i><i></i><i></i></span><b>V2 · Glass <span class="tag primary">Neu</span></b><small class="muted">Glas-Panels über deinem Hintergrund, Dashboard frei anpassbar</small></button>
+          ${designOptions(u().ui_version || 'v1')}
         </div>
         <div class="setting"><span>Modus</span><div class="seg" id="ap-mode">${[['system', 'System'], ['light', 'Hell'], ['dark', 'Dunkel']].map(([v, l]) => `<button data-m="${v}" class="${v === mode ? 'on' : ''}">${l}</button>`).join('')}</div></div>
         <div class="setting"><span>Akzentfarbe</span><div class="chips" id="ap-acc">${ACCENTS.map(([v, l]) => `<button class="btn ghost sm" data-a="${v}" style="${v === acc ? 'outline:2px solid var(--primary)' : ''}">${l}</button>`).join('')}</div></div>
@@ -100,7 +99,9 @@ export async function render(view) {
           <label class="ui-slider"><span>Bild abdunkeln</span><input type="range" min="0" max="70" value="${prefs.dim}" data-pref="dim"><output>${prefs.dim} %</output></label>
         </div>
         <label class="setting"><span>Auf Handys ohne Unschärfe<small>Kräftige Flächen statt Glas, spart Akku und scrollt flüssiger</small></span><input type="checkbox" id="ap-lite" ${prefs.lite ? 'checked' : ''}></label>
-        <div class="row" style="justify-content:flex-start;gap:8px;margin-top:12px;flex-wrap:wrap"><a class="btn ghost sm" href="#/dashboard?edit=1">Dashboard anpassen</a>${prefs.dashboard ? '<button type="button" class="btn ghost sm" id="ap-dash-reset">Dashboard auf Standard</button>' : ''}<button type="button" class="btn ghost sm" id="ap-bg-reset">Hintergrund auf Standard</button></div></div>` : ''}`;
+        <div class="row" style="justify-content:flex-start;gap:8px;margin-top:12px;flex-wrap:wrap"><a class="btn ghost sm" href="#/dashboard?edit=1">Dashboard anpassen</a>${prefs.dashboard ? '<button type="button" class="btn ghost sm" id="ap-dash-reset">Dashboard auf Standard</button>' : ''}<button type="button" class="btn ghost sm" id="ap-bg-reset">Hintergrund auf Standard</button></div></div>` : ''}
+        ${u().ui_version === 'v3' ? `<div class="card"><div class="card-head"><h2>Dashboard</h2><small class="muted">Module verschieben, Breite wählen, ausblenden</small></div>
+        <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><a class="btn ghost sm" href="#/dashboard?edit=1">Dashboard anpassen</a>${prefs.dashboard ? '<button type="button" class="btn ghost sm" id="ap-dash-reset">Dashboard auf Standard</button>' : ''}</div></div>` : ''}`;
       // Speichern kann scheitern, etwa wenn die Sitzung gerade abgelaufen ist: dann Meldung statt unbehandeltem Fehler,
       // und die Anzeige springt auf den gespeicherten Stand zurück (nach dem Abmelden gibt es keinen mehr)
       const save = async (body, undo) => {
@@ -114,7 +115,11 @@ export async function render(view) {
         const b = e.target.closest('[data-version]');
         if (b && b.dataset.version !== u().ui_version && (await save({ ui_version: b.dataset.version }, () => applyUi(u())))) P.appearance(el);
       });
-      if (!v2) return;
+      if (!v2) {
+        // V3 hat kein Bild, aber dasselbe anpassbare Dashboard wie V2 und V4
+        $('#ap-dash-reset', el)?.addEventListener('click', async () => { if (await save({ ui_prefs: { ...prefs, dashboard: null } }, () => {})) P.appearance(el); });
+        return;
+      }
       // Live-Vorschau beim Schieben, gespeichert wird beim Loslassen
       const draft = { ...prefs };
       const savePrefs = async (next) => { applyUi({ ...u(), ui_prefs: next }); if (await save({ ui_prefs: next }, () => applyUi(u()))) P.appearance(el); };

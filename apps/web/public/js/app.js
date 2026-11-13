@@ -88,7 +88,20 @@ export function applyTheme(mode, accent) {
   store.set('bm-accent', accent);
 }
 
-/* ---------- Darstellung V2 ---------- */
+/* ---------- Darstellung V2 bis V4 ---------- */
+// V2 = Glas mit Seitenleiste, V3 = schlichte Flächen mit Navigation oben, V4 = Navigation oben mit dem Glas von V2.
+// Glas läuft immer über data-ui="v2" (theme-v2.css), das Format von V3 über data-look und data-shell (theme-v3.css).
+export const isGlass = (user = state.me) => user?.ui_version === 'v2' || user?.ui_version === 'v4';
+export const isModern = (user = state.me) => user?.ui_version === 'v3' || user?.ui_version === 'v4';
+export const DESIGNS = [
+  ['v1', 'V1 · Klassisch', 'Ruhige, flache Flächen mit Seitenleiste'],
+  ['v2', 'V2 · Glass', 'Glas-Panels über deinem Hintergrund, Seitenleiste, Dashboard frei anpassbar'],
+  ['v3', 'V3 · Modern <span class="tag primary">Neu</span>', 'Schlichte dunkle Flächen, Navigation oben als Pillen, Dashboard frei anpassbar'],
+  ['v4', 'V4 · Modern Glass <span class="tag primary">Neu</span>', 'Das Format von V3 als Glas über deinem Hintergrund'],
+];
+export const designOptions = (pick) => DESIGNS.map(([value, title, text]) => `<button type="button" role="radio" aria-checked="${pick === value}" class="ui-version ${pick === value ? 'on' : ''}" data-version="${value}">
+  <span class="ui-pv ${value}" aria-hidden="true"><i></i><i></i><i></i><i></i></span><b>${title}</b><small class="muted">${text}</small></button>`).join('');
+
 // Werte aus users.ui_prefs (Regeln in apps/api/src/ui-prefs.js). Die Einstellungen rufen das auch für die Live-Vorschau
 // mit noch nicht gespeicherten Werten auf.
 let backgroundShown = null;
@@ -96,13 +109,24 @@ let wantImage = false;
 export function applyUi(user) {
   const root = document.documentElement;
   const layer = $('#bg-layer');
-  wantImage = user?.ui_version === 'v2' && user.ui_prefs?.background === 'custom' && !!user.has_background;
-  if (user?.ui_version !== 'v2') {
+  const glass = isGlass(user);
+  const modern = isModern(user);
+  if (modern) {
+    root.dataset.look = 'v3';
+    root.dataset.shell = 'top';
+  } else {
+    delete root.dataset.look;
+    delete root.dataset.shell;
+  }
+  // Die Pille misst die Tabs; nach dem Umschalten stimmen die Maße erst im nächsten Bild
+  requestAnimationFrame(() => syncTopnav(true));
+  wantImage = glass && user.ui_prefs?.background === 'custom' && !!user.has_background;
+  if (!glass) {
     delete root.dataset.ui;
     delete root.dataset.bg;
     root.removeAttribute('data-ui-lite');
     layer?.classList.remove('has-image');
-    store.set('bm-ui', null);
+    store.set('bm-ui', modern ? { look: 'v3' } : null);
     return;
   }
   const p = user.ui_prefs || {};
@@ -113,7 +137,7 @@ export function applyUi(user) {
   root.style.setProperty('--v2-alpha', String((p.opacity ?? 52) / 100));
   root.style.setProperty('--v2-dim', String((p.dim ?? 20) / 100));
   root.toggleAttribute('data-ui-lite', p.lite !== false);
-  store.set('bm-ui', { bg, blur: p.blur ?? 22, opacity: p.opacity ?? 52, dim: p.dim ?? 20, lite: p.lite !== false });
+  store.set('bm-ui', { bg, blur: p.blur ?? 22, opacity: p.opacity ?? 52, dim: p.dim ?? 20, lite: p.lite !== false, ...(modern ? { look: 'v3' } : {}) });
   if (bg !== 'custom') {
     layer?.classList.remove('has-image');
     return;
@@ -167,6 +191,100 @@ $$('.sidebar .nav[data-nav]').forEach((n) => {
   const d = NAV_ICONS[n.dataset.nav];
   if (d) n.insertAdjacentHTML('afterbegin', `<svg class="nav-i" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`);
 });
+
+/* ---------- Navigation oben (Designs V3 und V4) ---------- */
+// Bereiche und Seiten kommen aus der Seitenleiste in index.html samt deren Sichtbarkeit (Rechte, Schalter); so gibt es
+// nur eine Quelle. Die aktive Pille ist ein einziges Element über den Tabs, sichtbar gemacht per clip-path: Die vordere
+// Kante läuft voraus (0,56 s), die hintere zieht nach (0,55 s), dadurch dehnt sich die Pille und zieht sich zusammen.
+let navSections = [];
+let navKey = '';
+let navShown = -2;
+let pillEdges = null;
+let pillFrame = 0;
+const lastInSection = new Map();
+
+function buildTopnav() {
+  const pills = $('#topnav-pills');
+  if (!pills) return;
+  navSections = [];
+  $$('.sidebar .nav-label').forEach((label) => {
+    const pages = [];
+    for (let n = label.nextElementSibling; n && !n.classList.contains('nav-label'); n = n.nextElementSibling) {
+      if (n.classList.contains('nav') && !n.classList.contains('hidden')) pages.push({ key: n.dataset.nav, label: n.textContent.trim() });
+    }
+    if (pages.length) navSections.push({ label: label.dataset.short || label.textContent.trim(), pages });
+  });
+  pills.innerHTML = `${navSections.map((s, i) => `<button type="button" data-sec="${i}">${esc(s.label)}</button>`).join('')}
+    <div class="topnav-pill" aria-hidden="true">${navSections.map((s) => `<span>${esc(s.label)}</span>`).join('')}</div>`;
+  navShown = -2;
+  pillEdges = null;
+  syncTopnav(true);
+}
+
+function paintPill() {
+  const pill = $('#topnav-pills .topnav-pill');
+  if (!pill) return;
+  const e = pillEdges;
+  pill.style.clipPath = e ? `inset(${e.t}px ${e.r}px ${e.b}px ${e.l}px round 99px)` : 'inset(0 100% 0 0 round 99px)';
+}
+
+function movePill(index, instant) {
+  const pills = $('#topnav-pills');
+  if (!pills || document.documentElement.dataset.shell !== 'top') return;
+  cancelAnimationFrame(pillFrame);
+  const tab = index < 0 ? null : pills.querySelectorAll('button')[index];
+  if (!tab) { pillEdges = null; paintPill(); return; }
+  const to = { t: tab.offsetTop, l: tab.offsetLeft, r: pills.clientWidth - tab.offsetLeft - tab.offsetWidth, b: pills.clientHeight - tab.offsetTop - tab.offsetHeight };
+  if (instant || !pillEdges || matchMedia('(prefers-reduced-motion: reduce)').matches) { pillEdges = to; paintPill(); return; }
+  const from = { ...pillEdges };
+  const [lead, trail] = to.l > from.l ? ['r', 'l'] : ['l', 'r'];
+  const out = (p) => 1 - (1 - p) ** 4;
+  const inOut = (p) => (p < 0.5 ? 8 * p ** 4 : 1 - (-2 * p + 2) ** 4 / 2);
+  const start = performance.now();
+  const step = (now) => {
+    const a = Math.min(1, (now - start) / 560);
+    const b = Math.min(1, (now - start) / 550);
+    pillEdges = { t: to.t, b: to.b, [lead]: from[lead] + (to[lead] - from[lead]) * out(a), [trail]: from[trail] + (to[trail] - from[trail]) * inOut(b) };
+    paintPill();
+    if (a < 1 || b < 1) pillFrame = requestAnimationFrame(step);
+  };
+  pillFrame = requestAnimationFrame(step);
+}
+
+function syncTopnav(instant = false) {
+  const pills = $('#topnav-pills');
+  const pages = $('#topnav-pages');
+  if (!pills || !pages) return;
+  const index = navSections.findIndex((s) => s.pages.some((p) => p.key === navKey));
+  if (index >= 0) lastInSection.set(index, navKey);
+  $$('button', pills).forEach((b, i) => b.setAttribute('aria-pressed', String(i === index)));
+  // Die Seiten-Chips nur neu zeichnen, wenn der Bereich wechselt; sonst bleibt jedes Element gültig
+  if (index !== navShown) {
+    navShown = index;
+    pages.innerHTML = index < 0 ? '' : navSections[index].pages.map((p) => `<a href="#/${p.key}" data-page="${p.key}">${NAV_ICONS[p.key] ? `<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="${NAV_ICONS[p.key]}"/></svg>` : ''}${esc(p.label)}</a>`).join('');
+  }
+  $$('a', pages).forEach((a) => {
+    const on = a.dataset.page === navKey;
+    a.classList.toggle('on', on);
+    if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  });
+  movePill(index, instant);
+  if (document.documentElement.dataset.shell === 'top' && index >= 0) {
+    const scroller = pills.parentElement;
+    const tab = pills.querySelectorAll('button')[index];
+    if (tab && scroller.scrollWidth > scroller.clientWidth) scroller.scrollTo({ left: Math.max(0, tab.offsetLeft - 24), behavior: instant ? 'auto' : 'smooth' });
+  }
+}
+$('#topnav-pills')?.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-sec]');
+  if (!b) return;
+  const index = Number(b.dataset.sec);
+  const section = navSections[index];
+  const last = lastInSection.get(index);
+  location.hash = `#/${section.pages.some((p) => p.key === last) ? last : section.pages[0].key}`;
+});
+window.addEventListener('resize', () => syncTopnav(true));
+document.fonts?.ready.then(() => syncTopnav(true));
 
 export function renderAvatars() {
   const u = state.me;
@@ -329,6 +447,8 @@ export async function route() {
   $$('.nav').forEach((n) => n.classList.toggle('active', n.dataset.nav === key));
   $$('.nav').forEach((n) => n.classList.toggle('on', n.dataset.nav === key));
   $$('.sidebar').forEach((s) => s.classList.remove('open'));
+  navKey = key;
+  syncTopnav();
   const old = $('#view');
   const view = old.cloneNode(false);
   old.replaceWith(view);
@@ -385,6 +505,7 @@ export async function reloadMe() {
     for (let n = label.nextElementSibling; n && !n.classList.contains('nav-label'); n = n.nextElementSibling) if (n.classList.contains('nav')) items.push(n);
     label.classList.toggle('hidden', items.length > 0 && items.every((n) => n.classList.contains('hidden')));
   });
+  buildTopnav();
 }
 
 async function boot() {
@@ -408,9 +529,7 @@ let choosing = false;
 async function chooseDesign() {
   if (choosing) return;
   choosing = true;
-  let pick = state.me.ui_version === 'v2' ? 'v2' : 'v1';
-  const option = (value, title, text) => `<button type="button" role="radio" aria-checked="${pick === value}" class="ui-version ${pick === value ? 'on' : ''}" data-version="${value}">
-    <span class="ui-pv ${value}" aria-hidden="true"><i></i><i></i><i></i><i></i></span><b>${title}</b><small class="muted">${text}</small></button>`;
+  let pick = state.me.ui_version || 'v1';
   const done = openForm({
     title: 'Wähle dein Design',
     submit: 'Übernehmen',
@@ -418,11 +537,8 @@ async function chooseDesign() {
     wide: true,
     fields: [{
       type: 'html',
-      html: `<div><p class="muted" style="margin:0 0 14px">Es gibt jetzt zwei Designs. Klick eins an, um es gleich zu sehen. Ändern kannst du das jederzeit unter Einstellungen → Darstellung.</p>
-        <div class="ui-versions" role="radiogroup" aria-label="Design">
-          ${option('v1', 'V1 · Klassisch', 'Ruhige, flache Flächen wie bisher')}
-          ${option('v2', 'V2 · Glass <span class="tag primary">Neu</span>', 'Glas-Panels über einem Hintergrund, eigenes Bild möglich, Dashboard frei anpassbar')}
-        </div></div>`,
+      html: `<div><p class="muted" style="margin:0 0 14px">Es gibt jetzt vier Designs, neu sind V3 und V4 mit der Navigation oben. Klick eins an, um es gleich zu sehen. Ändern kannst du das jederzeit unter Einstellungen → Darstellung.</p>
+        <div class="ui-versions" role="radiogroup" aria-label="Design">${designOptions(pick)}</div></div>`,
     }],
     onSubmit: async () => true,
   });
@@ -439,7 +555,7 @@ async function chooseDesign() {
   try {
     await api.patch('/me', accepted ? { ui_version: pick, ui_choice_seen: true } : { ui_choice_seen: true });
     await reloadMe();
-    if (accepted && pick === 'v2') toast('V2 aktiv – Hintergrund und Dashboard passt du unter Einstellungen → Darstellung an.');
+    if (accepted && pick !== 'v1') toast(`${pick.toUpperCase()} aktiv – ${pick === 'v3' ? 'das Dashboard' : 'Hintergrund und Dashboard'} passt du unter Einstellungen → Darstellung an.`);
   } catch (error) {
     applyUi(state.me);
     toast(error.message, true);

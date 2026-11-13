@@ -2304,7 +2304,8 @@ const uiPrefs = { background: 'night', blur: 10, opacity: 70, dim: 35, lite: fal
 const uiSaved = ok('Auf V2 wechseln mit eigenem Layout', await carol.patch('/me', { ui_version: 'v2', ui_prefs: uiPrefs }));
 check('V2 und Layout gespeichert', uiSaved.ui_version === 'v2' && JSON.stringify(uiSaved.ui_prefs) === JSON.stringify(uiPrefs), JSON.stringify(uiSaved.ui_prefs));
 check('Layout gilt nur für Carol', (await alice.get('/me')).data.user.ui_prefs.dashboard === null);
-invalid('Unbekannte Version abgelehnt', await carol.patch('/me', { ui_version: 'v3' }));
+invalid('Unbekannte Version abgelehnt', await carol.patch('/me', { ui_version: 'v5' }));
+check('V3 und V4 wählbar', (ok('Carol wählt V3', await carol.patch('/me', { ui_version: 'v3' }))).ui_version === 'v3' && (ok('Carol wählt V4', await carol.patch('/me', { ui_version: 'v4', ui_prefs: uiPrefs }))).ui_version === 'v4');
 invalid('Unvollständige Darstellung abgelehnt', await carol.patch('/me', { ui_prefs: { blur: 5 } }));
 invalid('Unschärfe außerhalb des Bereichs abgelehnt', await carol.patch('/me', { ui_prefs: { ...uiPrefs, blur: 99 } }));
 invalid('Unbekanntes Feld abgelehnt', await carol.patch('/me', { ui_prefs: { ...uiPrefs, css: 'body{}' } }));
