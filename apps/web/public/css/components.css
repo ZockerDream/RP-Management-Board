@@ -574,3 +574,12 @@ button.list-item:hover { background: var(--surface-2); }
 .rec.large { grid-column: 1 / -1; }
 .rec-head { display: flex; flex-direction: column; margin-bottom: 6px; min-width: 0; }
 .rec-head b, .rec-head small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Blitzer ---------- */
+.cam-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 16px; }
+.cam-card { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+.cam-photo { display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 10; border: 0; padding: 0; background: var(--surface-2); cursor: zoom-in; overflow: hidden; }
+.cam-photo.empty { cursor: default; }
+.cam-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-body { padding: 16px 18px 18px; }
+.cam-limit { flex: none; width: 46px; height: 46px; border-radius: 50%; border: 5px solid #d92b2b; background: #fff; color: #111; display: grid; place-items: center; font-weight: 700; font-size: 15px; }

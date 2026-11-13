@@ -30,7 +30,7 @@ Webanwendung zur Verwaltung persönlicher und geteilter Konten, kombiniert mit Z
 | | Lizenzen | Lizenzarten und Lizenzen von Personen mit Gültigkeit, Sperre und Entzug |
 | | Dokumentationen | Nachschlagewerke wie Gesetze und Funktionen in selbst angelegten Kategorien |
 | | Fuhrpark | Fahrzeuge der Organisation in Gruppen, Kontrollrunden mit „Erledigt“, Liste als Markdown (unabhängig von Object Management) |
-| | Blitzer | Systemweit: Standorte und Blitzer-Rechnungen, Halter aus dem Fahrzeug, Übernahme als Eintrag in die Personenakte (Abschnitt 9a) |
+| | Blitzer | Systemweit: Standorte fester und mobiler Blitzer mit Bild (Abschnitt 9a) |
 | Administration | User-Management | Benutzer, Rollen & Rechte, Gruppen, Organisationen (nur Admins) |
 | | Server-Management | Übersicht, Sicherheit & Einstellungen, System & Backups, Integrationen, Notiz-Tags, Audit-Log (nur Admins) |
 | | Tickets | Gemeldete Fehler (nur Admins) |
@@ -194,14 +194,12 @@ Alle vier gehören einer Person (Solo) oder einer Organisation; die Sichtbarkeit
   - *Test im Tool* (Migration 021, optional je Schulung): Ohne Test reichen Teilnahme und „bestanden“ durch den Ausbilder. Mit Test bestehen Benutzer nur über den Test, Personen ohne Zugang weiter von Hand. Einstellungen: Bestehensgrenze in Prozent der Punkte (Standard 70), optional Zeitlimit (1–600 Minuten) und Versuche je Person, Fragen und Antworten mischen (Standard an), Test erst nach Teilnahme an einem Termin (heute oder früher). Fragen mit einer oder mehreren richtigen Antworten (2–8 Antworten, 1–100 Punkte, Erklärung nur für Ausbilder); eine Frage zählt nur, wenn genau die richtigen Antworten gewählt sind, Teilpunkte gibt es nicht. Prozent werden abgerundet. Wer die Schulung sieht, startet den Test (auch mit „Teilnehmen“), solange er aktiv ist, Fragen hat, Versuche übrig sind und kein bestandener Nachweis länger als 30 Tage gilt. Ein Versuch hält Reihenfolge und Antworten fest; ein erneuter Start setzt den offenen Versuch fort. Abgabe nach Fristende plus 30 Sekunden Kulanz zählt als „Zeit abgelaufen“ (nicht bestanden); vergessene Versuche laufen beim nächsten Abruf ab. Das Ergebnis wird in die offene Teilnahme eingetragen (bevorzugt die eines vergangenen Termins), sonst entsteht ein Nachweis „Test im Tool“; bestanden mit Gültigkeit der Schulung. Sichtbar: eigene Versuche immer, alle Versuche mit Punkten ab „Lesen“, Antworten im Einzelnen und Zurücksetzen ab „Lesen & Schreiben“ (zurückgesetzte Versuche zählen nicht mehr, bleiben aber sichtbar), Fragen mit Lösung nur mit „Verwalten“.
 - **Dokumentationen:** Kategorien legen die Benutzer selbst an (z. B. Gesetze, Funktionen) und sortieren sie. Seiten mit Titel und Text in einfacher Formatierung (Überschriften, fett, kursiv, Listen, Zitate, Trennlinien, http(s)-Links), anheftbar, durchsuchbar über Titel und Text. Seiten lassen sich nur innerhalb ihres Bereichs verschieben; eine Kategorie lässt sich erst löschen, wenn sie leer ist. In einer Organisation kann jede Kategorie eigene Rechte haben, etwa eine interne Kategorie nur für die Leitung.
 
-## 9a. Blitzer (Wunsch des Auftraggebers vom 2026-11-13)
+## 9a. Blitzer (Wünsche des Auftraggebers vom 2026-11-13)
 
 Systemweit (ausdrücklich gewählt), keine Organisation: Rechte allein über die Rollenrechte `speedcam:read|create|update|delete`.
 
-- **Standorte:** Name (eindeutig), Ort, fest oder mobil, erlaubtes Tempo, aktiv. Mit Rechnungen nur abschaltbar.
-- **Blitzer-Rechnungen:** Nummer `B-Jahr-NNNN`, Standort, Zeitpunkt, Kennzeichen, gemessen, erlaubt (Kopie vom Standort, änderbar), Toleranz, Betrag (frei, kein Bußgeldkatalog), Status offen/bezahlt/storniert, Notiz. Überschreitung = gemessen − Toleranz − erlaubt, nie unter 0. Halter: von Hand aus der Personenliste (braucht `person:read`) oder automatisch der Besitzer des nicht ausgemusterten Fahrzeugs mit dem Kennzeichen, das der Erfassende sehen darf. Den Namen des Halters sehen nur Benutzer mit `person:read`.
-- **Akteneintrag:** Eine Rechnung mit Halter wird höchstens einmal als Eintrag „Blitzer“ (Tabelle mit den Eckdaten, Datum = Tag der Messung) in die Personenakte übernommen; Bereich wählbar wie in der Personenakte (privat oder Organisation mit „Lesen & Schreiben“ bei Akten), dazu `casefile:update` und `person:read`. Der Eintrag bleibt, wenn die Rechnung gelöscht wird.
-- Personen mit Blitzer-Rechnungen lassen sich nicht löschen.
+- **Standorte:** Name (eindeutig), Ort, fest oder mobil, erlaubtes Tempo, aktiv, Notiz und je ein Bild (PNG/JPEG, ersetzen und entfernen ab `speedcam:update`). Darstellung als Karten mit Suche und Filter Aktiv/Abgeschaltet/Alle.
+- **Keine Rechnungen mehr:** Die anfangs gebauten Blitzer-Rechnungen mit Halter und Akteneintrag hat der Auftraggeber am selben Tag wieder gestrichen (Migration 037 löscht `speed_tickets`).
 
 ## 10. Benutzer-Einstellungen
 
