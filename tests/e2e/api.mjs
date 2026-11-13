@@ -1786,7 +1786,10 @@ check('Ohne App wieder nicht eingerichtet', (await alice.get('/music/spotify')).
 check('Spotify steuern ohne Verbindung', (await alice.put('/music/spotify/player', { action: 'pause' })).status === 409);
 invalid('Unbekannte Spotify-Aktion', await alice.put('/music/spotify/player', { action: 'explode' }));
 invalid('Lautstärke über 100', await alice.put('/music/spotify/player', { action: 'volume', volume: 150 }));
-invalid('Spotify-Rückkehr mit fremdem state', await anon.get('/music/spotify/callback?state=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&code=x'));
+const spBack = async (qs) => (await fetch(`${BASE}/api/music/spotify/callback${qs}`, { redirect: 'manual' })).headers.get('location') || '';
+check('Spotify-Rückkehr mit fremdem state führt zur Musikseite', /#\/music\?spotify=error&reason=expired$/.test(await spBack('?state=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&code=x')));
+check('Spotify-Rückkehr ohne Parameter erklärt den Grund', /#\/music\?spotify=error&reason=missing$/.test(await spBack('')));
+check('Spotify-Rückkehr mit kaputtem state', /reason=state$/.test(await spBack('?state=kurz')));
 ok('Spotify trennen ohne Verbindung', await alice.del('/music/spotify'));
 denied('Musik ohne Anmeldung', await anon.get('/music/local'), [401]);
 const lib = ok('Musik vom Server', await alice.get('/music/local'));

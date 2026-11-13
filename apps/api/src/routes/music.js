@@ -187,16 +187,31 @@ export default async function routes(app) {
     return { url: `${ACCOUNTS}/authorize?${new URLSearchParams(params)}` };
   });
 
-  // Rückkehr von Spotify: ohne Anmeldung (Browser-Weiterleitung), abgesichert über den einmaligen state und PKCE
+  // Rückkehr von Spotify: ohne Anmeldung (Browser-Weiterleitung), abgesichert über den einmaligen state und PKCE.
+  // Jeder Fehler führt zurück auf die Musikseite mit einem Grund (reason), nie auf eine rohe JSON-Antwort; im Log stehen
+  // nur die Namen der angekommenen Parameter, damit ein Proxy, der die Abfrage abschneidet, auffällt.
   app.get('/music/spotify/callback', async (req, reply) => {
-    const query = z.object({ state: z.string().min(20).max(200), code: z.string().min(1).max(2000).optional(), error: z.string().max(200).optional() }).parse(req.query);
-    const state = await one("DELETE FROM oauth_states WHERE state_hash=$1 AND provider='spotify' AND expires_at>now() RETURNING user_id, code_verifier, client_id", [sha256(query.state)]);
-    if (!state || !state.code_verifier || !state.client_id) throw bad('Anmeldestatus ist ungültig oder abgelaufen, bitte erneut verbinden');
-    if (query.error || !query.code) return reply.redirect(`${config.appUrl}/#/music?spotify=denied`);
-    const token = await tokenRequest({
-      grant_type: 'authorization_code', code: query.code, redirect_uri: callbackUrl(), client_id: state.client_id, code_verifier: decrypt(state.code_verifier),
-    });
-    if (!token.refresh_token) throw bad('Spotify hat kein Refresh-Token geliefert, bitte erneut verbinden');
+    const back = (result, reason = '') => reply.redirect(`${config.appUrl}/#/music?spotify=${result}${reason ? `&reason=${reason}` : ''}`);
+    const raw = req.query || {};
+    const query = z.object({ state: z.string().min(20).max(200), code: z.string().min(1).max(2000).optional(), error: z.string().max(200).optional() }).safeParse(raw);
+    if (!query.success) {
+      req.log.warn({ params: Object.keys(raw) }, 'Spotify-Rückkehr ohne gültigen state');
+      return back('error', Object.keys(raw).length ? 'state' : 'missing');
+    }
+    const { state: stateParam, code, error } = query.data;
+    const state = await one("DELETE FROM oauth_states WHERE state_hash=$1 AND provider='spotify' AND expires_at>now() RETURNING user_id, code_verifier, client_id", [sha256(stateParam)]);
+    if (!state || !state.code_verifier || !state.client_id) return back('error', 'expired');
+    if (error || !code) return back('denied');
+    let token;
+    try {
+      token = await tokenRequest({
+        grant_type: 'authorization_code', code, redirect_uri: callbackUrl(), client_id: state.client_id, code_verifier: decrypt(state.code_verifier),
+      });
+    } catch (e) {
+      req.log.warn({ err: e.message }, 'Spotify lehnt den Code ab');
+      return back('error', 'token');
+    }
+    if (!token.refresh_token) return back('error', 'token');
     const me = await fetch(`${API}/me`, { headers: { authorization: `Bearer ${token.access_token}` }, signal: AbortSignal.timeout(15000) })
       .then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
     const account = String(me.display_name || me.id || 'Spotify').slice(0, 200);
@@ -207,7 +222,7 @@ export default async function routes(app) {
       [state.user_id, account, encrypt(token.access_token), encrypt(token.refresh_token), Math.max(60, Number(token.expires_in) || 3600), state.client_id],
     );
     await audit({ user: { id: state.user_id }, ip: req.ip, log: req.log }, 'music.spotify_connected', 'user', state.user_id, {});
-    return reply.redirect(`${config.appUrl}/#/music?spotify=connected`);
+    return back('connected');
   });
 
   app.delete('/music/spotify', read, async (req) => {

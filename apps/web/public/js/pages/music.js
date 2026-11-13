@@ -125,7 +125,15 @@ export async function render(view, params = new URLSearchParams()) {
     <div class="tab-panel ${initial === 'local' ? 'on' : ''}" data-panel="local"><div id="m-local"></div></div></div>`;
 
   if (params.get('spotify') === 'connected') toast('Spotify verbunden');
-  if (params.get('spotify') === 'denied') toast('Spotify-Verbindung abgebrochen', true);
+  if (params.get('spotify') === 'denied') toast('Spotify-Anmeldung abgebrochen', true);
+  // Rückkehr von Spotify mit Fehler: verständlicher Grund statt roher Meldung
+  const SPOTIFY_ERRORS = {
+    missing: 'Die Rückkehr von Spotify kam ohne Anmeldedaten an. Bitte immer über „Mit Spotify anmelden“ starten, nicht die Adresse …/api/music/spotify/callback direkt öffnen. Passiert es trotzdem, entfernt ein Reverse-Proxy vor der App den Teil nach dem „?“ – das muss der Betreiber korrigieren.',
+    state: 'Die Rückkehr von Spotify war unvollständig. Bitte erneut mit „Mit Spotify anmelden“ versuchen.',
+    expired: 'Die Anmeldung ist abgelaufen oder wurde schon benutzt (10 Minuten Zeit). Bitte erneut mit „Mit Spotify anmelden“ versuchen.',
+    token: 'Spotify hat die Anmeldung abgelehnt. Prüfe, ob die Redirect-URI in der Spotify-App genau stimmt und dein Spotify-Konto dort unter „User Management“ freigeschaltet ist.',
+  };
+  if (params.get('spotify') === 'error') toast(SPOTIFY_ERRORS[params.get('reason')] || 'Spotify-Anmeldung fehlgeschlagen, bitte erneut versuchen.', true);
 
   /* ----- Empfehlungen (kleines Dashboard) ----- */
   let recs = [];
