@@ -1,0 +1,130 @@
+/* Designs V3 „Modern“ und V4 „Modern Glass“ (Wunsch des Auftraggebers vom 2026-11-13, Mockup freigegeben).
+   V3: schlichte dunkle Flächen, Navigation oben als Pillen (Bereiche) und Chips (Seiten), große Zahlen, runde Knöpfe.
+   V4: dasselbe Format; Farben, Glas und Hintergrund kommen aus theme-v2.css (data-ui="v2").
+   Greift nur mit <html data-look="v3"> bzw. data-shell="top" (gesetzt von applyUi in app.js und theme.js); V1 und V2
+   bleiben unverändert. Muss nach theme-v2.css geladen werden: Bei gleicher Spezifität gewinnen die Regeln hier. */
+
+.topnav, .topbar-brand { display: none; }
+
+/* ---------- Farben V3 (ohne Glas; V4 nimmt die Glasfarben von V2) ---------- */
+[data-look="v3"] { --radius: 16px; --radius-sm: 12px; }
+/* Im Dunklen sind die Akzentfarben hell: Weiß darauf verfehlt den AA-Kontrast, deshalb dunkle Schrift (wie im Mockup) */
+[data-look="v3"][data-theme="dark"] { --on-primary: #0b0b12; }
+[data-look="v3"]:not([data-ui="v2"])[data-theme="dark"] {
+  --bg: #0b0b0d; --surface: rgb(255 255 255 / .045); --surface-2: rgb(255 255 255 / .08); --border: rgb(255 255 255 / .09);
+  --text: #f2f2f5; --muted: #a3a3ad; --solid: #151518; --shadow: 0 24px 64px rgb(0 0 0 / .55);
+}
+[data-look="v3"]:not([data-ui="v2"])[data-theme="light"] {
+  --bg: #f3f4f7; --surface: #ffffff; --surface-2: rgb(15 18 30 / .05); --border: rgb(15 18 30 / .1);
+  --text: #121318; --muted: #565967; --solid: #ffffff; --shadow: 0 24px 64px rgb(15 18 30 / .18);
+}
+[data-look="v3"]:not([data-ui="v2"])[data-theme="dark"] body {
+  background: radial-gradient(900px 380px at 18% -10%, color-mix(in srgb, var(--primary) 16%, transparent), transparent 70%),
+    radial-gradient(700px 320px at 88% -6%, rgb(45 212 191 / .1), transparent 70%), var(--bg);
+  background-attachment: fixed;
+}
+/* Durchscheinende Flächen taugen nicht für Dialoge und Aufklapper über dem Inhalt */
+[data-look="v3"]:not([data-ui="v2"]) :is(.modal .card, .notification-popover, .gsearch-res) { background: var(--solid); }
+[data-look="v3"]:not([data-ui="v2"]) select option { background: var(--solid); color: var(--text); }
+
+/* ---------- Gerüst: Navigation oben statt Seitenleiste ---------- */
+[data-shell="top"] .app { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0; }
+[data-shell="top"] .sidebar { display: none; }
+[data-shell="top"] .main { width: 100%; max-width: 1600px; margin: 0 auto; padding: 16px clamp(16px, 3vw, 32px) 0; }
+[data-shell="top"] .topbar {
+  position: static; flex-wrap: wrap; gap: 10px; padding: 0; margin: 0; border: 0; border-radius: 0;
+  background: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+[data-shell="top"] .topbar .icon-btn.menu-btn { display: none; }
+[data-shell="top"] .topbar-brand {
+  display: inline-flex; align-items: center; gap: 10px; margin-right: 6px; min-width: 0;
+  color: var(--text); text-decoration: none; font-weight: 650; font-size: 15px; letter-spacing: -.01em;
+}
+[data-shell="top"] .topbar-brand .brand-mark { width: 34px; height: 34px; }
+[data-shell="top"] .gsearch { max-width: 560px; margin: 0 auto; }
+[data-shell="top"] .gsearch input { height: 44px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); }
+[data-shell="top"] .spacer { display: none; }
+[data-shell="top"] .topbar .icon-btn { height: 44px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); padding: 0 16px; }
+[data-shell="top"] .topbar .notification-btn { width: 44px; padding: 0; }
+[data-shell="top"] .topbar .avatar { width: 44px; height: 44px; font-size: 13px; }
+[data-shell="top"] #view { padding: 26px 0 64px; }
+
+/* Bereiche als Pillen; die aktive Pille ist ein Element über allen Tabs (app.js, movePill) */
+[data-shell="top"] .topnav { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
+.topnav-scroll { overflow-x: auto; scrollbar-width: none; margin: -4px; padding: 4px; }
+.topnav-scroll::-webkit-scrollbar { display: none; }
+.topnav-pills { position: relative; display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); }
+.topnav-pills button {
+  display: inline-flex; align-items: center; padding: 11px 18px; border: 0; border-radius: 999px; background: transparent;
+  color: var(--muted); font: inherit; font-weight: 550; line-height: 20px; white-space: nowrap; cursor: pointer; transition: color .15s;
+}
+.topnav-pills button:hover { color: var(--text); }
+.topnav-pills button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.topnav-pill {
+  position: absolute; inset: 0; display: flex; gap: 4px; padding: 4px; border-radius: 999px; pointer-events: none;
+  background: var(--primary); clip-path: inset(0 100% 0 0 round 99px);
+}
+.topnav-pill span { display: inline-flex; align-items: center; padding: 11px 18px; color: var(--on-primary); font-weight: 550; line-height: 20px; white-space: nowrap; }
+
+/* Seiten des Bereichs als Chips */
+.topnav-pages { display: flex; flex-wrap: wrap; gap: 8px; }
+.topnav-pages a {
+  display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted); text-decoration: none;
+  font-size: 13px; font-weight: 550; white-space: nowrap; transition: background .15s, color .15s;
+}
+.topnav-pages a:hover { color: var(--text); }
+.topnav-pages a.on { color: var(--text); background: var(--surface-2); border-color: color-mix(in srgb, var(--text) 24%, transparent); }
+.topnav-pages a:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.topnav-pages svg.i { width: 16px; height: 16px; }
+
+/* ---------- Bausteine ---------- */
+[data-look="v3"] .btn { border-radius: 999px; padding: 9px 18px; }
+[data-look="v3"] .btn.sm { padding: 5px 13px; }
+[data-look="v3"] .seg { padding: 4px; gap: 2px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); }
+[data-look="v3"] .seg button { padding: 6px 14px; border-radius: 999px; }
+[data-look="v3"] .seg button.on { background: color-mix(in srgb, var(--text) 14%, transparent); color: var(--text); box-shadow: none; }
+[data-look="v3"] :is(.kpi .label, .table th) { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+[data-look="v3"] .kpi .value { font-weight: 600; letter-spacing: -.02em; }
+[data-look="v3"] .page-head h1 { font-size: 30px; font-weight: 600; letter-spacing: -.02em; }
+[data-look="v3"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), [data-look="v3"] select { border-radius: 12px; }
+[data-look="v3"] .toast { border-radius: 14px; }
+/* Tabs auf der Seite wie die Bereiche oben, in Karten weiter als Linie */
+[data-look="v3"] .tabs { width: fit-content; max-width: 100%; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); }
+[data-look="v3"] .tabs button { padding: 8px 16px; margin: 0; border-bottom: 0; border-radius: 999px; }
+[data-look="v3"] .tabs button.on { background: color-mix(in srgb, var(--text) 14%, transparent); color: var(--text); }
+[data-look="v3"] .card .tabs { width: auto; gap: 22px; padding: 0; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: none; }
+[data-look="v3"] .card .tabs button { padding: 10px 0; margin-bottom: -1px; border-radius: 0; border-bottom: 2px solid transparent; background: none; }
+[data-look="v3"] .card .tabs button.on { border-color: var(--primary); background: none; }
+
+/* ---------- V4: Glas auch für die neuen Teile ---------- */
+[data-ui="v2"][data-shell="top"] :is(.topnav-pills, .topnav-pages a, .gsearch input, .topbar .icon-btn, .topbar .avatar) {
+  background: var(--surface); border-color: var(--border);
+  -webkit-backdrop-filter: blur(var(--v2-blur)) saturate(160%); backdrop-filter: blur(var(--v2-blur)) saturate(160%);
+  box-shadow: inset 0 1px 0 var(--glass-hi);
+}
+/* Der aktive Chip braucht eine feste Fläche, sonst verschwindet er über kräftigen Bildern */
+[data-ui="v2"][data-shell="top"] .topnav-pages a.on { background: var(--solid); color: var(--text); border-color: var(--border); }
+[data-ui="v2"][data-shell="top"] .topbar-brand { color: var(--on-image); text-shadow: 0 1px 12px rgb(0 0 0 / .45); }
+
+/* ---------- Handy ---------- */
+@media (max-width: 900px) {
+  [data-shell="top"] .gsearch { order: 3; flex: 1 1 100%; max-width: none; margin: 0; }
+  [data-shell="top"] .topbar-brand { flex: 1 1 auto; }
+  [data-shell="top"] .topbar-brand span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  [data-ui="v2"][data-ui-lite][data-shell="top"] :is(.topnav-pills, .topnav-pages a, .gsearch input, .topbar .icon-btn, .topbar .avatar) {
+    -webkit-backdrop-filter: none; backdrop-filter: none; background: color-mix(in srgb, var(--solid) 88%, transparent);
+  }
+}
+@media (max-width: 640px) {
+  [data-shell="top"] .main { padding: 12px 16px 0; }
+  [data-shell="top"] #view { padding: 18px 0 48px; }
+  [data-shell="top"] .topbar [data-action=logout] { padding: 0 12px; }
+  .topnav-pages { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px; }
+  .topnav-pages::-webkit-scrollbar { display: none; }
+  .topnav-pages a { flex: none; }
+  [data-look="v3"] .page-head h1 { font-size: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .topnav-pills button, .topnav-pages a { transition: none; }
+}

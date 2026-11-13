@@ -6,12 +6,16 @@ const sections = [
     text: 'Oben im Dashboard wechselst du zwischen den Ansichten Tag, Woche und Monat und wählst daneben den Zeitraum. Einnahmen, Ausgaben, Sparquote und die Ausgaben nach Kategorie beziehen sich auf den gewählten Zeitraum; der Cashflow zeigt die letzten 14 Tage, 8 Wochen oder 6 Monate. Der Gesamtsaldo bleibt immer der heutige Stand. Die Woche beginnt mit dem Tag, den du im Profil als Wochenstart eingestellt hast. Deine Ansicht merkt sich der Browser.',
   },
   {
+    title: 'Designs V3 und V4: Navigation oben',
+    text: 'V3 „Modern“ hat schlichte dunkle Flächen (im hellen Modus helle), V4 „Modern Glass“ dasselbe Format als Glas über deinem Hintergrund – Bild, Unschärfe, Deckkraft und Abdunkeln stellst du wie in V2 unter Einstellungen → Darstellung ein. In beiden gibt es keine Seitenleiste: Oben stehen die Bereiche (Finanzen, Zusammenarbeit, Sport, Objekte, Organisation, Dienst, Administration) als Pillen, darunter die Seiten des gewählten Bereichs. Ein Klick auf einen Bereich öffnet die Seite, die du dort zuletzt offen hattest. Auf dem Handy wischst du die Pillen und Seiten seitlich. Die Suche (Strg+K), die Glocke und dein Profil stehen in der Kopfzeile.',
+  },
+  {
     title: 'Design V2 und eigener Hintergrund',
     text: 'Unter „Einstellungen → Darstellung → Design“ wählst du zwischen V1 (klassisch, flach) und V2 (Glas-Panels über einem Hintergrund). Beim ersten Login nach der Einführung fragt die App das einmal in einem Dialog ab. Die Wahl gilt nur für dich, auf allen Geräten, und lässt sich jederzeit zurückstellen. In V2 erscheint darunter „Hintergrund“: eine Vorlage anklicken oder mit „Bild hochladen“ ein eigenes Foto wählen (PNG, JPEG oder WebP). Das Bild wird im Browser auf höchstens 2560 Pixel verkleinert, auf dem Server gespeichert und ist nur für dich sichtbar; „Eigenes Bild löschen“ entfernt es wieder. Mit den Reglern stellst du Unschärfe, Deckkraft der Panels und Abdunkeln ein; ist dein Bild sehr hell, hilft Abdunkeln bei der Lesbarkeit. „Auf Handys ohne Unschärfe“ zeigt auf kleinen Bildschirmen kräftige Flächen statt Glas, das spart Akku.',
   },
   {
-    title: 'Dashboard anpassen (V2)',
-    text: 'In V2 hat das Dashboard oben rechts „Anpassen“. Dann trägt jedes Modul eine Leiste: Ziehen am Titel oder die Pfeile verschieben es, die Auswahl bestimmt die Breite (schmal, halb, breit, ganze Breite), das durchgestrichene Auge blendet es aus. Ausgeblendete Module stehen oben und lassen sich mit einem Klick wieder hinzufügen. Jede Änderung wird sofort gespeichert; „Standard wiederherstellen“ bringt die Grundanordnung zurück. Zusätzlich zu V1 gibt es die Module Stundenzettel (mit Ein- und Ausstempeln), Konten, Sparziele und ToDos (abhaken direkt im Dashboard). Module, für die dir das Recht fehlt, erscheinen nicht.',
+    title: 'Dashboard anpassen (V2 bis V4)',
+    text: 'In V2, V3 und V4 hat das Dashboard oben rechts „Anpassen“. Dann trägt jedes Modul eine Leiste: Ziehen am Titel oder die Pfeile verschieben es, die Auswahl bestimmt die Breite (schmal, halb, breit, ganze Breite), das durchgestrichene Auge blendet es aus. Ausgeblendete Module stehen oben und lassen sich mit einem Klick wieder hinzufügen. Jede Änderung wird sofort gespeichert; „Standard wiederherstellen“ bringt die Grundanordnung zurück. Zusätzlich zu V1 gibt es die Module Stundenzettel (mit Ein- und Ausstempeln), Konten, Sparziele und ToDos (abhaken direkt im Dashboard). Module, für die dir das Recht fehlt, erscheinen nicht.',
   },
   {
     title: 'Dashboard: Prognose für diese und nächste Woche',

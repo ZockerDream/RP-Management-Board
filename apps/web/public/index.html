@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="css/calendar.css">
 <link rel="stylesheet" href="css/auth.css">
 <link rel="stylesheet" href="css/theme-v2.css">
+<link rel="stylesheet" href="css/theme-v3.css">
 </head>
 <body>
 <div id="bg-layer" aria-hidden="true"><i class="bg-sun"></i><i class="bg-m1"></i><i class="bg-m2"></i><i class="bg-m3"></i><i class="bg-dim"></i></div>
@@ -43,7 +44,7 @@
     <a class="nav" data-nav="sport-run" href="#/sport-run">Laufen</a>
     <a class="nav" data-nav="sport-swim" href="#/sport-swim">Schwimmen</a>
     <a class="nav" data-nav="sport-bike" href="#/sport-bike">Biken</a>
-    <div class="nav-label">Object Management</div>
+    <div class="nav-label" data-short="Objekte">Object Management</div>
     <a class="nav" data-nav="assets-vehicles" href="#/assets-vehicles">Fahrzeuge</a>
     <a class="nav" data-nav="assets-properties" href="#/assets-properties">Häuser</a>
     <a class="nav" data-nav="assets-keys" href="#/assets-keys">Schlüssel</a>
@@ -82,6 +83,7 @@
   <div class="main">
     <header class="topbar">
       <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>Menü</button>
+      <a class="topbar-brand" href="#/dashboard"><svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="bmg3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#17171f"/><stop offset="1" stop-color="#08080b"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#bmg3)"/><rect x=".5" y=".5" width="31" height="31" rx="8.5" fill="none" stroke="#fff" stroke-opacity=".14"/><rect x="7" y="16" width="4.5" height="9" rx="2.25" fill="#fff" fill-opacity=".32"/><rect x="13.75" y="11" width="4.5" height="14" rx="2.25" fill="#fff" fill-opacity=".6"/><rect x="20.5" y="6" width="4.5" height="19" rx="2.25" fill="var(--primary)"/></svg><span data-app-name>RP-Management-Board</span></a>
       <div class="gsearch" role="search">
         <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14zM21 21l-5-5"/></svg>
         <input id="gsearch" type="search" placeholder="Überall suchen…  (Strg+K)" aria-label="Überall suchen" autocomplete="off" aria-controls="gsearch-res" aria-expanded="false">
@@ -101,6 +103,10 @@
       <a href="#/settings" style="text-decoration:none"><span class="avatar" data-me></span></a>
       <button class="icon-btn" type="button" data-action="logout">Abmelden</button>
     </header>
+    <nav class="topnav" aria-label="Bereiche">
+      <div class="topnav-scroll"><div class="topnav-pills" id="topnav-pills"></div></div>
+      <div class="topnav-pages" id="topnav-pages"></div>
+    </nav>
     <main id="view"></main>
   </div>
 </div>

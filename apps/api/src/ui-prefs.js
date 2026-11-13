@@ -4,7 +4,7 @@
 // kein gespeichertes Layout ungültig macht.
 import { z } from 'zod';
 
-export const UI_VERSIONS = ['v1', 'v2'];
+export const UI_VERSIONS = ['v1', 'v2', 'v3', 'v4'];
 export const BACKGROUNDS = ['dusk', 'night', 'forest', 'none', 'custom'];
 export const DASHBOARD_MODULES = ['kpis', 'forecast', 'cashflow', 'categories', 'budgets', 'transactions', 'timer', 'accounts', 'goals', 'todos', 'fleet', 'upcoming', 'music'];
 export const MODULE_SPANS = [4, 6, 8, 12];
