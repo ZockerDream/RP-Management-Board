@@ -32,6 +32,8 @@
     <a class="nav" data-nav="recurring" href="#/recurring">Daueraufträge</a>
     <a class="nav" data-nav="goals" href="#/goals">Sparziele</a>
     <a class="nav" data-nav="reports" href="#/reports">Berichte</a>
+    <a class="nav" data-nav="invoices" href="#/invoices">Rechnungen</a>
+    <a class="nav" data-nav="cash" href="#/cash">Kasse</a>
     <div class="nav-label">Zusammenarbeit</div>
     <a class="nav" data-nav="calendar" href="#/calendar">Kalender</a>
     <a class="nav" data-nav="notes" href="#/notes">Notizblock</a>
@@ -54,6 +56,14 @@
     <a class="nav" data-nav="fleet" href="#/fleet">Fuhrpark</a>
     <a class="nav" data-nav="speedcams" href="#/speedcams">Blitzer</a>
     <a class="nav" data-nav="docs" href="#/docs">Dokumentationen</a>
+    <div class="nav-label">Dienst</div>
+    <a class="nav" data-nav="board" href="#/board">Pinnwand</a>
+    <a class="nav" data-nav="shifts" href="#/shifts">Dienstplan</a>
+    <a class="nav" data-nav="dispatch" href="#/dispatch">Einsätze & Funk</a>
+    <a class="nav" data-nav="bolo" href="#/bolo">Fahndungsboard</a>
+    <a class="nav" data-nav="fines" href="#/fines">Bußgeldrechner</a>
+    <a class="nav" data-nav="personnel" href="#/personnel">Personal</a>
+    <a class="nav" data-nav="equipment" href="#/equipment">Lager</a>
     <div class="nav-label">Administration</div>
     <a class="nav" data-nav="admin-users" data-admin-only href="#/admin-users">User-Management</a>
     <a class="nav" data-nav="admin-server" data-admin-only href="#/admin-server">Server-Management</a>
@@ -72,6 +82,11 @@
   <div class="main">
     <header class="topbar">
       <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>Menü</button>
+      <div class="gsearch" role="search">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14zM21 21l-5-5"/></svg>
+        <input id="gsearch" type="search" placeholder="Überall suchen…  (Strg+K)" aria-label="Überall suchen" autocomplete="off" aria-controls="gsearch-res" aria-expanded="false">
+        <div id="gsearch-res" class="gsearch-res" role="listbox" hidden></div>
+      </div>
       <div class="spacer"></div>
       <div class="notification-wrap">
         <button type="button" class="icon-btn notification-btn" id="bell" aria-label="Benachrichtigungen" aria-expanded="false" aria-controls="notification-popover">

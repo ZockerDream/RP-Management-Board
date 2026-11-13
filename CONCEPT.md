@@ -17,6 +17,8 @@ Webanwendung zur Verwaltung persönlicher und geteilter Konten, kombiniert mit Z
 | | Daueraufträge | Wiederkehrende Ein- und Ausgaben |
 | | Sparziele | Ziele mit Fortschritt, persönlich oder auf einem Konto einer Organisation |
 | | Berichte | Auswertungen, Export, geplante Berichte |
+| | Rechnungen | Rechnungen und Angebote einer Organisation mit PDF, „bezahlt“ bucht die Einnahme (Abschnitt 9b) |
+| | Kasse | Bargeld auf einem Konto der Organisation, Tagesabschluss mit Differenzbuchung (Abschnitt 9b) |
 | Zusammenarbeit | Kalender | Monat, Woche, Tag, Agenda |
 | | Notizblock | Notizen solo oder in einer Organisation, anheften, durchsuchen |
 | | ToDos | Aufgaben solo oder in einer Organisation, Deadline mit Benachrichtigung |
@@ -31,6 +33,14 @@ Webanwendung zur Verwaltung persönlicher und geteilter Konten, kombiniert mit Z
 | | Dokumentationen | Nachschlagewerke wie Gesetze und Funktionen in selbst angelegten Kategorien |
 | | Fuhrpark | Fahrzeuge der Organisation in Gruppen, Kontrollrunden mit „Erledigt“, Liste als Markdown (unabhängig von Object Management) |
 | | Blitzer | Systemweit: Standorte fester und mobiler Blitzer mit Bild (Abschnitt 9a) |
+| Dienst | Pinnwand | Ankündigungen an alle oder an Ränge mit „gelesen von“, Umfragen (Abschnitt 9b) |
+| | Dienstplan | Schichten aus Vorlagen, eintragen, tauschen, krank melden, „Im Dienst“ (Abschnitt 9b) |
+| | Personal | Bewerbungen, Personalakte, Abwesenheiten (Abschnitt 9b) |
+| | Lager | Ausrüstung mit Ausgabe und Rückgabe (Abschnitt 9b) |
+| | Einsätze & Funk | Lage mit Einheiten und Status 1–6, Einsätze, Funkbuch, Übernahme in Fallakten (Abschnitt 9b) |
+| | Fahndungsboard | Aktive Fahndungen groß mit Foto und Kennzeichen, Vollbild |
+| | Bußgeldrechner | Tatbestände ankreuzen, Summe, als Anklagepunkte in eine Akte |
+| Oben | Suche | Globale Suche über Personen, Akten, Fahrzeuge, Fuhrpark, Notizen, Dokumentationen, Ankündigungen, Blitzer (Strg+K) |
 | Administration | User-Management | Benutzer, Rollen & Rechte, Gruppen, Organisationen (nur Admins) |
 | | Server-Management | Übersicht, Sicherheit & Einstellungen, System & Backups, Integrationen, Notiz-Tags, Audit-Log (nur Admins) |
 | | Tickets | Gemeldete Fehler (nur Admins) |
@@ -200,6 +210,26 @@ Systemweit (ausdrücklich gewählt), keine Organisation: Rechte allein über die
 
 - **Standorte:** Name (eindeutig), Ort, fest oder mobil, erlaubtes Tempo, aktiv, Notiz und je ein Bild (PNG/JPEG, ersetzen und entfernen ab `speedcam:update`). Darstellung als Karten mit Suche und Filter Aktiv/Abgeschaltet/Alle.
 - **Keine Rechnungen mehr:** Die anfangs gebauten Blitzer-Rechnungen mit Halter und Akteneintrag hat der Auftraggeber am selben Tag wieder gestrichen (Migration 037 löscht `speed_tickets`).
+
+## 9b. Dienst: Pinnwand, Abwesenheiten, Discord, Suche (Wünsche des Auftraggebers vom 2026-11-13)
+
+Alle Dienst-Funktionen gehören einer Organisation; Rechte über eigene Funktionen in „Organisationen und Rechte“ (Migration 038) plus Katalogrechte. Standard für neue Organisationen (Leitung/Mitglied/Leser) und für bestehende (höchster Rang 4, sonst wie Mitglied): Pinnwand & Umfragen 4/2/2, Abwesenheiten 4/2/0, Dienstplan 4/2/2, Einsätze & Funk 4/3/2, Bewerbungen 4/0/0, Personalakte 4/0/0, Lager 4/2/2, Rechnungen 4/3/2, Kasse 4/3/2.
+
+- **Pinnwand:** Ankündigungen an alle oder an Ränge (ein Rang samt allen höheren), Markdown, anheften, Glocke für alle Empfänger, „gelesen von“ ab Stufe 3. Eigenes ändern ab 3, Fremdes ab 4.
+- **Umfragen:** 2–20 Antworten, eine oder mehrere, anonym (nur Zahlen) oder namentlich, optionales Ende, Stimme bis zum Ende änderbar; Ergebnis nach der eigenen Stimme, nach dem Ende oder für Schreibende.
+- **Abwesenheiten:** Urlaub, krank, inaktiv, sonstiges. Eigene meldet jedes Mitglied (Mitgliedschaft genügt), ab 2 alle sehen, ab 3 für andere eintragen und ändern, Fremdes löschen ab 4. Glocke an die Leitung (Stufe 3).
+- **Discord:** Webhook je Organisation (verschlüsselt, nur echte Discord-Webhooks), Ereignisse wählbar, Testnachricht; verwaltet mit „Mitglieder & Ränge: Verwalten“. Keine Erwähnungen, „krank“ nur als „abwesend“. Fahndungen nur aus Akten einer Organisation.
+- **Dienstplan:** Vorlagen je Organisation (beim ersten Öffnen Früh 6–14, Spät 14–22, Nacht 22–6), „Schichten planen“ für bis zu 31 Tage, keine doppelten Schichten je Vorlage und Zeit. Ab 2: eintragen (freier Platz), Tausch anbieten (bleibt eingeteilt bis zur Übernahme), übernehmen (genau einmal), krank melden (Platz frei, Glocke an die Planung, Discord nur „Platz frei“), austragen bis Beginn. Ab 3 planen und einteilen (auch über die Platzzahl), ab 4 löschen. Zeiten in der Zeitzone des Servers (`TZ`). „Im Dienst“: laufende Schichten und eingestempelte Mitglieder.
+- **Bewerbungen:** Mitglieder pflegen Bewerber (niemand bewirbt sich selbst), Status neu, Gespräch, zurückgezogen; Annehmen/Ablehnen ab 4. Mit verknüpftem Benutzerkonto wird die Person beim Annehmen Mitglied mit Rang (Regeln wie „Organisationen“: Mitglieder ab 3, nur Ränge unter dem eigenen) und bekommt „Eingestellt“ in der Personalakte. Entschiedenes ist unveränderlich.
+- **Personalakte:** Einträge Eingestellt, Beförderung, Degradierung, Belobigung, Verwarnung, Vermerk, Ausgeschieden; Rang vorher/nachher als Text. Beförderung/Degradierung mit Rang ändert ihn sofort (Regeln wie „Organisationen“, nie den eigenen). Eigene Akte sieht jedes Mitglied, ab 2 alle, ab 3 schreiben, ab 4 löschen.
+- **Lager:** Stücke mit Kategorie, Seriennummer (eindeutig je Organisation außer ausgemustert), Zustand im Lager/ausgegeben/Wartung/verloren/ausgemustert; Ausgabe an Mitglieder mit Rückgabedatum, höchstens eine offene Ausgabe je Stück, Verlauf. Eigene Ausrüstung sieht jedes Mitglied.
+- **Einsätze & Funk:** Einheiten frei angelegt (Rufname eindeutig je Organisation, Art, Besatzung aus Mitgliedern, optional Fuhrpark-Fahrzeug, im Dienst ja/nein); Status 1–6 nach FMS, setzen darf die Einsatzführung (3) und die eigene Besatzung (2). Einsätze `E-Jahr-NNNN` mit Stichwort, Art, Priorität, Ort, Lage; alarmieren setzt Status 3, freigeben und abschließen Status 1; eine Einheit ist höchstens in einem laufenden Einsatz. Verlauf und Funkbuch in `dispatch_log`. „In Fallakte“: Eintrag „Einsatz“ mit Einheiten und Verlauf in eine Akte der Organisation mit Schreibrecht (bestehend oder neu angelegt), Verknüpfung am Einsatz. Löschen nur abgeschlossene, ab 4.
+- **Fahndungsboard und Bußgeldrechner:** reine Ansichten über vorhandene Daten und Rechte (Fahndungen bzw. Strafkatalog und Anklagepunkte der Akten); keine eigenen Tabellen.
+- **Rechnungen und Angebote:** je Organisation, Empfänger Freitext, Person (global) oder Organisation, Name und Anschrift als Kopie; Positionen Menge × Preis in Cent, Summe serverseitig. Status Entwurf → offen → bezahlt oder storniert, Angebote offen → angenommen/abgelehnt, „Zur Rechnung“ legt einen Entwurf an. „Bezahlt“ nur markieren (Entscheidung des Auftraggebers): Einnahme auf einem Konto derselben Organisation mit Buchungsrecht, genau einmal, Quelle „invoice“. Bezahlte und offene Rechnungen werden nicht gelöscht, nur storniert (offene).
+- **Kasse:** „Kasse ist ein Konto“ (Entscheidung des Auftraggebers): Kasse = Konto der Organisation (je Konto höchstens eine). Bareinnahmen und -ausgaben sind normale Buchungen dort (Quelle „cash“); mit „Kasse: Lesen & Schreiben“ auch ohne eigenes Recht auf dem Konto. Tagesabschluss: erwartet = Kontostand bis heute, Differenz zur Zählung wird gebucht; gesperrt je Kasse, damit gleichzeitige Abschlüsse nicht doppelt buchen.
+- **Lohnzettel:** PDF der `payroll_payments` eines Monats; eigener immer, fremder mit „Stundenzettel: Lesen & Schreiben“ in einer gemeinsamen Organisation (Audit-Log).
+- **Schalter (Wunsch vom 2026-11-13):** Alle neuen Funktionen (Pinnwand & Umfragen, Dienstplan, Einsätze & Funk, Fahndungsboard, Bußgeldrechner, Bewerbungen, Personalakte, Abwesenheiten, Lager, Rechnungen, Kasse, Lohnzettel, Blitzer, Musik, Discord, globale Suche) sind systemweit unter *Server-Management → Sicherheit & Einstellungen → Funktionen* abschaltbar, wie die Teile der Akten: Navigation und Seite weg, API 403 `disabled`, Daten bleiben. Discord sendet ausgeschaltet nichts, der Dienstplan zeigt ohne Abwesenheiten keine Abwesenden, der Musikplayer stoppt. Fahndungsboard und Bußgeldrechner sind zusätzlich nur mit Fahndung bzw. Anklagepunkten der Akten sichtbar.
+- **Globale Suche:** ab 2 Zeichen, je Bereich höchstens 6 Treffer, jeweils mit denselben Rechten wie die Seiten.
 
 ## 10. Benutzer-Einstellungen
 

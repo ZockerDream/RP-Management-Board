@@ -7,6 +7,7 @@ import { one, many, q, tx } from '../db.js';
 import { authz, bad, forbidden } from '../authz.js';
 import { LEVEL, levelSql, needMessage } from '../org.js';
 import { audit } from '../audit.js';
+import { discord } from '../discord-send.js';
 import { patchSchema } from '../validation.js';
 import { today } from '../lib.js';
 import { uuid, isoDate, isoDateTime, assertPerson } from '../records.js';
@@ -307,6 +308,11 @@ export default async function routes(app) {
       return r;
     });
     await audit(req, 'warrant.issued', 'warrant', row.id, { kind: b.kind, case_file: file.id, person: b.person_id, plate: b.plate });
+    // Discord nur für Akten einer Organisation (private Akten bleiben privat)
+    if (file.team_id) {
+      const who = b.person_id ? (await one('SELECT name FROM people WHERE id=$1', [b.person_id]))?.name : '';
+      discord(file.team_id, 'warrant', { title: `Fahndung: ${who || b.plate}`, description: b.reason, path: 'bolo', fields: [{ name: 'Kennzeichen', value: b.plate || '' }, { name: 'Akte', value: file.file_number }] }, req.log);
+    }
     return row;
   });
   app.post('/warrants/:id/close', authz('casefile:update'), async (req) => {
@@ -319,6 +325,10 @@ export default async function routes(app) {
       await touch(client, file.id);
     });
     await audit(req, `warrant.${b.status === 'active' ? 'reopened' : b.status}`, 'warrant', row.id, { case_file: file.id });
+    if (file.team_id && !active) {
+      const who = row.person_id ? (await one('SELECT name FROM people WHERE id=$1', [row.person_id]))?.name : '';
+      discord(file.team_id, 'warrant', { title: `Fahndung erledigt: ${who || row.plate}`, description: b.status === 'executed' ? 'Vollstreckt' : 'Aufgehoben', path: 'bolo', fields: [{ name: 'Akte', value: file.file_number }] }, req.log);
+    }
     return { ok: true };
   });
   app.delete('/warrants/:id', authz('casefile:delete'), async (req) => {
@@ -336,7 +346,7 @@ export default async function routes(app) {
     if (f.team_id) { params.push(f.team_id); where.push(`c.team_id=$${params.length}`); }
     if (f.q) { params.push(`%${f.q}%`); where.push(`(pe.name ILIKE $${params.length} OR pe.aliases ILIKE $${params.length} OR w.plate ILIKE $${params.length} OR w.reason ILIKE $${params.length})`); }
     return many(
-      `SELECT w.*, pe.name person_name, pe.aliases person_aliases, c.file_number, c.title file_title, c.team_id, t.name team_name,
+      `SELECT w.*, pe.name person_name, pe.aliases person_aliases, (pe.photo_key IS NOT NULL) person_has_photo, c.file_number, c.title file_title, c.team_id, t.name team_name,
          (w.status='active' AND w.valid_until IS NOT NULL AND w.valid_until < CURRENT_DATE) expired, ${fileLevelSql('c')} AS level
        FROM warrants w JOIN case_files c ON c.id=w.case_file_id LEFT JOIN teams t ON t.id=c.team_id LEFT JOIN people pe ON pe.id=w.person_id
        WHERE ${where.join(' AND ')}

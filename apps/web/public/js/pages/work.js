@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { $, esc, empty, openForm, confirmBox, toast, todayStr } from '../ui.js';
-import { can, state, reloadMe } from '../app.js';
+import { moduleOn, can, state, reloadMe } from '../app.js';
 import { payrollAccountOptions, payrollAccountHint } from './common.js';
 import { renderInline } from '../markdown.js';
 
@@ -86,7 +86,7 @@ export async function render(view) {
   const teamWritable = () => (teams.find((team) => team.id === $('#work-team')?.value)?.levels.work ?? 0) >= 3;
   const today = todayStr();
   view.innerHTML = `<div class="page-head"><div><h1>Stundenzettel</h1><p>Ein- und ausstempeln, Pausen erfassen und Arbeitszeiten im Überblick behalten</p></div>
-    <div class="actions"><button class="btn ghost" id="work-export">CSV-Export</button><button class="btn ghost" id="work-pdf">Monats-PDF</button><button class="btn ghost" id="project-new">Projekt anlegen</button><button class="btn" id="work-new">Manuell erfassen</button></div></div>
+    <div class="actions"><button class="btn ghost" id="work-export">CSV-Export</button><button class="btn ghost" id="work-pdf">Monats-PDF</button>${moduleOn('payslip') ? '<button class="btn ghost" id="work-payslip">Lohnzettel</button>' : ''}<button class="btn ghost" id="project-new">Projekt anlegen</button><button class="btn" id="work-new">Manuell erfassen</button></div></div>
     <div class="card"><div class="card-head"><h2>Zeiterfassung</h2><span id="timer-state" class="tag">Inaktiv</span></div>
       <div class="toolbar" style="gap:8px;flex-wrap:wrap"><select id="timer-project"><option value="">Ohne Projekt</option></select>
       <input id="timer-note" maxlength="500" placeholder="Notiz (optional)" style="flex:1;min-width:180px">
@@ -283,6 +283,9 @@ export async function render(view) {
         await api.download(`/work-hours/export.csv?${new URLSearchParams({ from, to })}`, 'arbeitszeiten.csv');
       } else if (target.id === 'work-pdf') {
         await api.download(`/work-hours/monthly.pdf?${new URLSearchParams({ month: $('#work-date').value.slice(0, 7) })}`, `stundenzettel-${$('#work-date').value.slice(0, 7)}.pdf`);
+      } else if (target.id === 'work-payslip') {
+        const month = $('#work-date').value.slice(0, 7);
+        await api.download(`/work-hours/payslip.pdf?${new URLSearchParams({ month })}`, `lohnzettel-${month}.pdf`);
       } else if (target.id === 'timer-start') {
         await api.post('/work-hours/timer/start', { project_id: $('#timer-project').value || null, note: $('#timer-note').value });
         await loadTimer();

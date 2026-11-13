@@ -36,3 +36,27 @@ test('every case file route maps to the part it needs; person files map to none'
   };
   for (const [url, feature] of Object.entries(expect)) assert.equal(featureForRoute(url), feature, url);
 });
+
+test('neue Funktionen sind an, bis sie ausgeschaltet werden', async () => {
+  const { moduleFeatures, MODULE_SWITCHES } = await import('../src/features.js');
+  assert.ok(Object.values(moduleFeatures({})).every(Boolean));
+  const off = moduleFeatures({ 'modules.music': false, 'modules.cash': false });
+  assert.equal(off.music, false);
+  assert.equal(off.cash, false);
+  assert.equal(off.shifts, true);
+  assert.equal(Object.keys(MODULE_SWITCHES).length, 16);
+});
+
+test('Routen der neuen Funktionen gehören zu ihrem Schalter', async () => {
+  const { moduleForRoute } = await import('../src/features.js');
+  const expect = {
+    '/api/notices': 'board', '/api/polls/:id/vote': 'board', '/api/shifts': 'shifts', '/api/shift-assignments/:id/take': 'shifts', '/api/shift-templates/:id': 'shifts',
+    '/api/dispatch': 'dispatch', '/api/dispatch-units/:id/status': 'dispatch', '/api/incidents/:id/case-file': 'dispatch', '/api/dispatch-log': 'dispatch',
+    '/api/applications/:id/decide': 'recruiting', '/api/personnel/:userId': 'personnel', '/api/personnel-entries/:id': 'personnel', '/api/absences': 'absences',
+    '/api/equipment/:id/issue': 'equipment', '/api/invoices/:id/pdf': 'invoices', '/api/cash': 'cash', '/api/cash-registers/:id/close': 'cash',
+    '/api/work-hours/payslip.pdf': 'payslip', '/api/speed-cameras/:id/photo': 'speedcams', '/api/music/spotify/callback': 'music',
+    '/api/teams/:id/discord/test': 'discord', '/api/search': 'search',
+    '/api/teams/:id': null, '/api/work-hours': null, '/api/work-hours/monthly.pdf': null, '/api/org-teams': null, '/api/people': null,
+  };
+  for (const [url, feature] of Object.entries(expect)) assert.equal(moduleForRoute(url), feature, url);
+});

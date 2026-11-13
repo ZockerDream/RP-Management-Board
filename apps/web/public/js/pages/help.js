@@ -94,6 +94,58 @@ const sections = [
     text: 'Unter „Organisation → Fuhrpark“ pflegt das Team des Fuhrparks die Fahrzeuge der Organisation, unabhängig von Object Management. Im Tab „Fahrzeuge“ legst du Gruppen an (z. B. je Modell; „Spalte Fahrzeug“ für gemischte Gruppen) und darin Fahrzeuge mit Kennzeichen; ausgemusterte Fahrzeuge fehlen in neuen Runden. „Neue Runde“ übernimmt alle aktiven Fahrzeuge mit den Werten der letzten Runde; du trägst km-Stand, letzte Wartung, Verbandkasten, Zubehör und Notiz ein, speicherst und setzt am Ende „Erledigt“. Danach ändert die Runde nur, wer „Verwalten“ hat. „Als Markdown“ zeigt die fertige Liste zum Kopieren, z. B. für Discord. Rechte: „Lesen“ sieht alles, „Lesen & Schreiben“ erfasst, „Verwalten“ ändert erledigte Runden und löscht.',
   },
   {
+    title: 'Funktionen ein- und ausschalten',
+    text: 'Administratoren schalten unter „Server-Management → Sicherheit & Einstellungen → Funktionen“ einzelne Funktionen für alle aus: Pinnwand, Dienstplan, Einsätze & Funk, Fahndungsboard, Bußgeldrechner, Bewerbungen, Personalakte, Abwesenheiten, Lager, Rechnungen, Kasse, Lohnzettel, Blitzer, Musik, Discord und die globale Suche. Ausgeschaltetes verschwindet aus der Navigation und den Seiten, Discord bekommt keine Nachrichten mehr; alle Daten bleiben erhalten und sind nach dem Einschalten wieder da. Fahndungsboard und Bußgeldrechner brauchen außerdem die passenden Teile der Akten.',
+  },
+  {
+    title: 'Pinnwand und Umfragen',
+    text: 'Unter „Dienst → Pinnwand“ stehen die Ankündigungen deiner Organisation; Neues ist markiert, „Gelesen“ hakt es ab. Wer bei „Pinnwand & Umfragen“ mindestens „Lesen & Schreiben“ hat, schreibt Ankündigungen an alle oder nur an bestimmte Ränge (ein Rang gilt samt allen höheren), heftet sie oben an und sieht unter „Gelesen von“, wer sie schon gelesen hat. Alle Empfänger bekommen eine Glocke. Im Tab „Umfragen“ stimmst du ab; das Ergebnis siehst du nach deiner Stimme, bei anonymen Umfragen nur als Zahlen. Deine Stimme kannst du bis zum Ende ändern.',
+  },
+  {
+    title: 'Abwesenheiten',
+    text: 'Unter „Dienst → Personal → Abwesenheiten“ meldest du Urlaub, Krankheit, Inaktivität oder Sonstiges mit Zeitraum. Deine eigenen Abwesenheiten meldest, änderst und löschst du immer selbst. Mit „Lesen“ bei Abwesenheiten siehst du die aller Mitglieder, mit „Lesen & Schreiben“ trägst du auch für andere ein. Die Leitung bekommt bei jeder Meldung eine Glocke.',
+  },
+  {
+    title: 'Dienstplan',
+    text: 'Unter „Dienst → Dienstplan“ siehst du die Woche mit allen Schichten. „Eintragen“ nimmt einen freien Platz, „Tausch anbieten“ gibt deine Schicht frei (du bleibst eingeteilt, bis jemand „Übernehmen“ klickt; alle bekommen eine Glocke), „Krank melden“ macht deinen Platz frei und sagt der Planung Bescheid. Austragen geht bis zum Beginn. Mit „Lesen & Schreiben“ beim Dienstplan planst du: „Schichten planen“ legt aus Vorlagen (Tab „Vorlagen“, z. B. Früh, Spät, Nacht) alle Schichten eines Zeitraums an, „Einteilen“ setzt Mitglieder ein, Abwesende sind markiert. „Im Dienst“ zeigt laufende Schichten und wer gerade eingestempelt ist.',
+  },
+  {
+    title: 'Bewerbungen und Personalakte',
+    text: 'Unter „Dienst → Personal“ legen Mitglieder mit Recht bei „Bewerbungen“ Bewerber an: Name, Kontakt, Gesprächstermin, Text und Notizen; optional das Benutzerkonto der Person. „Annehmen“ (Recht „Verwalten“) macht ein verknüpftes Konto sofort zum Mitglied mit dem gewählten Rang. In der „Personalakte“ steht je Mitglied der Verlauf mit Beförderungen, Belobigungen, Verwarnungen und Vermerken; eine Beförderung mit Rang ändert ihn sofort (du vergibst nur Ränge unter deinem eigenen). Deine eigene Akte siehst du immer.',
+  },
+  {
+    title: 'Lager',
+    text: 'Unter „Dienst → Lager“ steht die Ausrüstung der Organisation. „Ausrüstung anlegen“ legt ein Stück oder mehrere an (Seriennummer als Präfix, z. B. FUNK- ergibt FUNK-1, FUNK-2 …). „Ausgeben“ gibt ein Stück an ein Mitglied, optional mit Rückgabedatum; „Zurücknehmen“ legt es zurück, in Wartung oder als verloren ab. „Verlauf“ zeigt, wer es wann hatte. Deine eigene Ausrüstung steht oben.',
+  },
+  {
+    title: 'Einsätze und Funk',
+    text: 'Unter „Dienst → Einsätze & Funk“ zeigt die „Lage“ alle Einheiten mit ihrem Status (1 frei über Funk, 2 frei auf Wache, 3 Einsatz übernommen, 4 am Einsatzort, 5 Sprechwunsch, 6 nicht einsatzbereit) und die laufenden Einsätze; sie aktualisiert sich alle 15 Sekunden. Die Besatzung setzt den Status ihrer Einheit mit den Knöpfen 1–6, die Einsatzführung („Lesen & Schreiben“) jeden. „Neuer Einsatz“ legt einen Einsatz an und alarmiert Einheiten (Status 3). Im Einsatz trägst du Lagemeldungen ein, alarmierst nach, gibst Einheiten frei und schließt ihn ab (Einheiten auf Status 1). „In Fallakte“ übernimmt Einheiten und Verlauf als Eintrag in eine Fallakte der Organisation. Das „Funkbuch“ listet alle Statuswechsel und Funksprüche. Einheiten mit Rufname, Besatzung und Fahrzeug aus dem Fuhrpark legt an, wer „Verwalten“ hat.',
+  },
+  {
+    title: 'Fahndungsboard und Bußgeldrechner',
+    text: 'Das „Fahndungsboard“ zeigt alle aktiven Fahndungen, die du sehen darfst, als große Karten mit Foto und Kennzeichen; „Vollbild“ eignet sich für einen zweiten Bildschirm, die Anzeige aktualisiert sich jede Minute. Im „Bußgeldrechner“ wählst du oben den Strafkatalog (privat oder einer Organisation), kreuzt Tatbestände an und stellst die Anzahl ein; rechts stehen Geldstrafe, Haft und Punkte. „Kopieren“ legt die Aufstellung in die Zwischenablage, „In Akte übertragen“ trägt sie als offene Anklagepunkte zu einer an der Akte beteiligten Person ein.',
+  },
+  {
+    title: 'Rechnungen und Angebote',
+    text: 'Unter „Finanzen → Rechnungen“ schreibt, wer bei „Rechnungen“ mindestens „Lesen & Schreiben“ hat, Rechnungen und Angebote für seine Organisation: Empfänger als Freitext, Person oder Organisation, Positionen mit Menge und Preis, Datum und Zahlungsziel. „PDF“ erzeugt den Beleg. „Bezahlt“ wählt ein Konto der Organisation und bucht die Einnahme (dafür brauchst du dort Buchungsrecht). Ein Angebot wird mit „Zur Rechnung“ zu einem Rechnungsentwurf mit denselben Positionen. Stornieren und Löschen darf, wer „Verwalten“ hat; bezahlte Rechnungen bleiben immer erhalten.',
+  },
+  {
+    title: 'Kasse',
+    text: 'Unter „Finanzen → Kasse“ verbindet die Leitung („Verwalten“) eine Kasse mit einem Konto der Organisation. Mit „Lesen & Schreiben“ bei „Kasse“ buchst du Bareinnahmen und -ausgaben (auch ohne eigenes Recht auf dem Konto) und machst am Ende den Tagesabschluss: Bargeld zählen, Summe eintragen – stimmt sie nicht mit dem Kontostand überein, bucht die App die Differenz als Kassenfehlbetrag oder -überschuss. Rechts siehst du die Buchungen eines Tages, unten alle Abschlüsse.',
+  },
+  {
+    title: 'Lohnzettel',
+    text: 'Auf dem Stundenzettel lädt „Lohnzettel“ für den gewählten Monat ein PDF mit allen Gehaltsbuchungen: je Tag Festgehalt, Bonusstunden und Bonus, dazu die Summen. Den Lohnzettel eines Mitglieds bekommt, wer in einer gemeinsamen Organisation beim Stundenzettel „Lesen & Schreiben“ hat.',
+  },
+  {
+    title: 'Discord',
+    text: 'Unter „Organisationen → Discord“ verbindet die Leitung (Recht „Verwalten“ bei Mitglieder & Ränge) die Organisation mit einem Discord-Kanal: In Discord unter Kanal bearbeiten → Integrationen → Webhooks einen Webhook anlegen, die URL kopieren und hier einfügen, dann die Ereignisse ankreuzen. „Testnachricht senden“ prüft die Verbindung. Erwähnungen wie @everyone löst die App nie aus; Abwesenheiten wegen Krankheit erscheinen nur als „abwesend“.',
+  },
+  {
+    title: 'Globale Suche',
+    text: 'Das Suchfeld oben (oder Strg+K) durchsucht ab zwei Zeichen Personen, Akten, Fahrzeuge, den Fuhrpark, Notizen, Dokumentationen, Ankündigungen und Blitzer gleichzeitig. Du findest nur, was du auch sonst sehen darfst. Mit den Pfeiltasten wählst du einen Treffer, Enter öffnet ihn.',
+  },
+  {
     title: 'Blitzer',
     text: 'Unter „Organisation → Blitzer“ stehen die Standorte fester und mobiler Blitzer als Karten: Bild, Name, Ort, erlaubtes Tempo und Notiz. „Neuer Standort“ legt einen an, ein Bild (PNG oder JPEG) kannst du gleich mitgeben; unter „Bearbeiten“ ersetzt du das Bild, entfernst es oder schaltest den Standort ab. Ein Klick aufs Bild zeigt es groß. Oben suchst du und wählst zwischen „Aktiv“, „Abgeschaltet“ und „Alle“. Blitzer gelten für das ganze System: Wer was darf, regeln die Rollenrechte „Blitzer“ in der Administration.',
   },

@@ -7,7 +7,7 @@ import { forbidden, notFound } from './authz.js';
 export const LEVEL = { NONE: 0, PARTICIPATE: 1, READ: 2, WRITE: 3, MANAGE: 4 };
 export const LEVEL_LABELS = ['Kein Zugriff', 'Teilnehmen', 'Lesen', 'Lesen & Schreiben', 'Verwalten'];
 
-// Muss zu seed_team_ranks() in der neuesten Migration passen (zuletzt 019). Personen sind global und fehlen hier absichtlich.
+// Muss zu seed_team_ranks() in der neuesten Migration passen (zuletzt 038). Personen sind global und fehlen hier absichtlich.
 // scope: Rechte zusätzlich pro Aktenart bzw. Doku-Kategorie
 export const ORG_MODULES = [
   { key: 'members', label: 'Mitglieder & Ränge', levels: [0, 2, 3, 4], hints: { 2: 'Mitgliederliste sehen', 3: 'Mitglieder einladen, entfernen, Ränge und Gruppen zuweisen', 4: 'Ränge, Gruppen und Rechte verwalten' } },
@@ -25,6 +25,16 @@ export const ORG_MODULES = [
   { key: 'license', label: 'Lizenzen', levels: [0, 2, 3, 4], hints: { 2: 'Lizenzen sehen', 3: 'Lizenzen ausstellen, ändern, verlängern, sperren', 4: 'Lizenzen löschen, Lizenzarten verwalten' } },
   { key: 'doc', label: 'Dokumentationen', scope: 'Kategorie', levels: [0, 2, 3, 4], hints: { 2: 'Seiten lesen', 3: 'Seiten schreiben und ändern', 4: 'Seiten löschen, Kategorien verwalten' } },
   { key: 'fleet', label: 'Fuhrpark', levels: [0, 2, 3, 4], hints: { 2: 'Fahrzeuge und Kontrollrunden sehen, Markdown', 3: 'Fahrzeuge und Gruppen pflegen, Runden erfassen und erledigt setzen', 4: 'Erledigte Runden ändern, löschen' } },
+  // Wünsche des Auftraggebers vom 2026-11-13 (Migration 038)
+  { key: 'notices', label: 'Pinnwand & Umfragen', levels: [0, 2, 3, 4], hints: { 2: 'Ankündigungen lesen, abstimmen', 3: 'Ankündigungen und Umfragen schreiben, „gelesen von“ sehen', 4: 'Fremde Ankündigungen und Umfragen ändern und löschen' } },
+  { key: 'shifts', label: 'Dienstplan', levels: [0, 2, 3, 4], hints: { 2: 'Plan sehen, sich eintragen, tauschen, krank melden', 3: 'Schichten planen und Mitglieder einteilen', 4: 'Schichten und Vorlagen löschen' } },
+  { key: 'absences', label: 'Abwesenheiten', levels: [0, 2, 3, 4], hints: { 2: 'Abwesenheiten aller sehen (eigene melden darf jedes Mitglied)', 3: 'Abwesenheiten für andere eintragen und ändern', 4: 'Fremde Abwesenheiten löschen' } },
+  { key: 'dispatch', label: 'Einsätze & Funk', levels: [0, 2, 3, 4], hints: { 2: 'Einsätze, Einheiten und Funkbuch sehen', 3: 'Einsätze führen, Status setzen, Funkbuch schreiben', 4: 'Einheiten verwalten, Einsätze löschen' } },
+  { key: 'recruiting', label: 'Bewerbungen', levels: [0, 2, 3, 4], hints: { 2: 'Bewerbungen sehen', 3: 'Bewerbungen anlegen und bearbeiten', 4: 'Annehmen, ablehnen und löschen' } },
+  { key: 'personnel', label: 'Personalakte', levels: [0, 2, 3, 4], hints: { 2: 'Personalakten aller sehen (die eigene sieht jedes Mitglied)', 3: 'Beförderungen, Belobigungen und Verwarnungen eintragen', 4: 'Einträge löschen' } },
+  { key: 'equipment', label: 'Lager & Ausrüstung', levels: [0, 2, 3, 4], hints: { 2: 'Lager sehen (eigene Ausrüstung sieht jedes Mitglied)', 3: 'Ausrüstung anlegen, ausgeben, zurücknehmen', 4: 'Ausrüstung löschen' } },
+  { key: 'invoices', label: 'Rechnungen', levels: [0, 2, 3, 4], hints: { 2: 'Rechnungen und Angebote sehen', 3: 'Schreiben, als bezahlt markieren (dazu Buchen auf dem Konto)', 4: 'Stornieren und löschen' } },
+  { key: 'cash', label: 'Kasse', levels: [0, 2, 3, 4], hints: { 2: 'Kassen und Abschlüsse sehen', 3: 'In der Kasse buchen, Tagesabschluss', 4: 'Kassen anlegen und löschen' } },
 ];
 const MODULES = new Map(ORG_MODULES.map((m) => [m.key, m]));
 export const MODULE_KEYS = ORG_MODULES.map((m) => m.key);

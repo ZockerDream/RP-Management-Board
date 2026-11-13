@@ -1,9 +1,9 @@
 // Organisationen (API: /teams): Mitglieder mit Rang und Gruppen, Rechte pro Funktion für Ränge, Gruppen und einzelne Mitglieder
 import { api } from '../api.js';
 import { $, esc, empty, openForm, confirmBox, toast, showSecret, tag } from '../ui.js';
-import { can, state } from '../app.js';
+import { can, state, moduleOn } from '../app.js';
 
-const TABS = [['overview', 'Übersicht'], ['members', 'Mitglieder'], ['ranks', 'Ränge'], ['groups', 'Gruppen'], ['rights', 'Rechte']];
+const TABS = [['overview', 'Übersicht'], ['members', 'Mitglieder'], ['ranks', 'Ränge'], ['groups', 'Gruppen'], ['rights', 'Rechte'], ['discord', 'Discord']];
 const SHORT = ['–', 'T', 'L', 'L+S', 'V'];
 const LEVEL_TAG = ['', 'warn', 'solo', 'shared', 'ok'];
 
@@ -29,12 +29,36 @@ export async function render(view, params) {
     if (!teams.find((t) => t.id === sel)) sel = teams[0]?.id;
     const t = current();
     if (!t) { $('#t-body').innerHTML = `<div class="card">${empty('Du bist noch in keiner Organisation.')}</div>`; return; }
-    const tabs = TABS.filter(([k]) => k === 'overview' || (k === 'rights' ? manageRights(t) : seeMembers(t)));
+    const tabs = TABS.filter(([k]) => (k !== 'discord' || moduleOn('discord')) && (k === 'overview' || (k === 'rights' || k === 'discord' ? manageRights(t) : seeMembers(t))));
     if (!tabs.some(([k]) => k === tab)) tab = 'overview';
     $('#t-body').innerHTML = `${teams.length > 1 ? `<div class="seg" id="t-sel" style="margin-bottom:16px">${teams.map((x) => `<button data-t="${x.id}" class="${x.id === sel ? 'on' : ''}">${esc(x.name)}</button>`).join('')}</div>` : ''}
       <div class="tabs" ${tabs.length < 2 ? 'hidden' : ''}>${tabs.map(([k, l]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="t-panel"></div>`;
     await renderTab();
+  }
+
+  // Discord: Webhook der Organisation und welche Ereignisse dorthin gehen (Wunsch vom 2026-11-13)
+  async function discordPanel(t, panel) {
+    const d = await api.get(`/teams/${t.id}/discord`);
+    panel.innerHTML = `<div class="card"><div class="card-head"><h2>Discord</h2>${d.configured ? tag('ok', 'Verbunden') : tag('', 'Nicht verbunden')}</div>
+      <p class="muted" style="margin-top:0">Ausgewählte Ereignisse dieser Organisation landen automatisch in einem Discord-Kanal. In Discord: Kanal bearbeiten → Integrationen → Webhooks → „Neuer Webhook“ → „Webhook-URL kopieren“. Die Adresse wird verschlüsselt gespeichert; Erwähnungen wie @everyone werden nie ausgelöst.</p>
+      <form id="dc-form" class="form" novalidate>
+        <label class="field full">Webhook-URL<input name="webhook_url" type="password" autocomplete="off" placeholder="${d.configured ? `gespeichert (${esc(d.webhook_hint)}) – leer lassen zum Behalten` : 'https://discord.com/api/webhooks/…'}"></label>
+        <div class="field full"><span>Ereignisse</span><div class="dc-events">${Object.entries(d.available).map(([k, l]) => `<label class="row start" style="gap:8px"><input type="checkbox" name="ev" value="${k}" ${d.events.includes(k) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div></div>
+        <div class="full row start" style="gap:8px;flex-wrap:wrap"><button class="btn" type="submit">Speichern</button>${d.configured ? '<button class="btn ghost" type="button" id="dc-test">Testnachricht senden</button><button class="btn danger" type="button" id="dc-del">Verbindung entfernen</button>' : ''}</div>
+      </form></div>`;
+    $('#dc-form', panel).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const body = { events: [...f.querySelectorAll('input[name=ev]:checked')].map((i) => i.value) };
+      if (f.webhook_url.value.trim()) body.webhook_url = f.webhook_url.value.trim();
+      try { await api.put(`/teams/${t.id}/discord`, body); toast('Discord gespeichert'); await discordPanel(t, panel); } catch (x) { toast(x.message, true); }
+    });
+    $('#dc-test', panel)?.addEventListener('click', async () => { try { await api.post(`/teams/${t.id}/discord/test`); toast('Testnachricht gesendet'); } catch (x) { toast(x.message, true); } });
+    $('#dc-del', panel)?.addEventListener('click', async () => {
+      if (!(await confirmBox('Discord-Verbindung entfernen', 'Es gehen keine Nachrichten mehr an Discord.', 'Entfernen'))) return;
+      try { await api.put(`/teams/${t.id}/discord`, { webhook_url: '', events: [] }); toast('Entfernt'); await discordPanel(t, panel); } catch (x) { toast(x.message, true); }
+    });
   }
 
   async function renderTab() {
@@ -44,6 +68,7 @@ export async function render(view, params) {
     else if (tab === 'ranks') panel.innerHTML = ranksHtml(t);
     else if (tab === 'groups') panel.innerHTML = groupsHtml(t);
     else if (tab === 'rights') { await loadRights(t); panel.innerHTML = rightsHtml(t); }
+    else if (tab === 'discord') await discordPanel(t, panel);
     else panel.innerHTML = await overviewHtml(t);
   }
 
