@@ -106,8 +106,13 @@ app.addHook('onRequest', async (req) => {
   req.log.warn('Anfrage kam über einen Proxy, aber TRUST_PROXY ist nicht gesetzt');
 });
 
+// Daten nie zwischenspeichern, weder im Browser noch in einem Proxy oder CDN davor: Jede Anzeige kommt frisch vom Server
 app.addHook('onSend', async (req, reply) => {
-  if (req.url.startsWith('/api/') || req.url.startsWith('/health')) reply.header('cache-control', 'no-store');
+  if (!req.url.startsWith('/api/') && !req.url.startsWith('/health')) return;
+  reply.header('cache-control', 'no-store, no-cache, must-revalidate, private, max-age=0');
+  reply.header('pragma', 'no-cache');
+  reply.header('expires', '0');
+  reply.header('surrogate-control', 'no-store');
 });
 
 // Klartext statt Stacktrace, damit "docker compose logs" die Lösung lesbar zeigt

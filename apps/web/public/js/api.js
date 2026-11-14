@@ -21,13 +21,14 @@ async function raw(method, path, body, opts = {}) {
   if (body instanceof FormData) payload = body;
   else if (body !== undefined) { headers['content-type'] = 'application/json'; payload = JSON.stringify(body); }
   if (opts.headers) Object.assign(headers, opts.headers);
-  return fetch(`/api${path}`, { method, headers, body: payload, credentials: 'same-origin' });
+  // cache: 'no-store': nie eine Antwort aus dem Browser-Cache zeigen, immer den aktuellen Stand holen
+  return fetch(`/api${path}`, { method, headers, body: payload, credentials: 'same-origin', cache: 'no-store' });
 }
 
 export async function refresh() {
   refreshing ||= (async () => {
     try {
-      const r = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin' });
+      const r = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin', cache: 'no-store' });
       if (!r.ok) return false;
       token = (await r.json()).access_token;
       return true;

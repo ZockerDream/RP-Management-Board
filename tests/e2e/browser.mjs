@@ -110,6 +110,28 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   await go(page, '#/transactions');
   check('Transaktionen zeigen zukünftige Buchung', /Zukunft Test/.test(await page.textContent('#view')));
 
+  // Immer aktueller Stand: Zurück in den Tab lädt die Liste neu und behält den Filter, ein Klick auf die offene Seite lädt sie ganz neu
+  at('alice immer aktuell');
+  await page.fill('#t-q', 'Zukunft');
+  await until(page, () => /1 Buchungen/.test(document.querySelector('#t-sum')?.textContent || ''));
+  await page.evaluate(() => {
+    document.querySelector('#t-table table')?.setAttribute('data-alt', '1');
+    document.activeElement?.blur();
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    const realNow = Date.now;
+    Date.now = () => realNow() + 20000;
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    document.dispatchEvent(new Event('visibilitychange'));
+    Date.now = realNow;
+  });
+  const reloaded = await until(page, () => !document.querySelector('#t-table table[data-alt]'), null, 5000).catch(() => false);
+  check('Rückkehr in den Tab lädt Transaktionen neu', reloaded);
+  check('Filter bleibt beim Neuladen erhalten', await page.inputValue('#t-q') === 'Zukunft' && /1 Buchungen/.test(await page.textContent('#t-sum')), await page.textContent('#t-sum'));
+  await page.locator('.sidebar .nav[data-nav=transactions]').click();
+  await until(page, () => document.querySelector('#t-q')?.value === '' && !!document.querySelector('#t-table table'), null, 5000).catch(() => {});
+  check('Klick auf die offene Seite lädt sie neu', await page.inputValue('#t-q') === '' && /Zukunft Test/.test(await page.textContent('#view')));
+
   // Screenshot-Scanning: nachgebaute Bank-Apps rendern, als Bild scannen und die Vorschläge prüfen
   at('alice screenshot scan');
   const day = (offset) => page.evaluate((o) => { const d = new Date(); d.setDate(d.getDate() + o); return d.toLocaleDateString('sv-SE'); }, offset);

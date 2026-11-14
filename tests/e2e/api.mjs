@@ -58,6 +58,9 @@ for (const p of ['js/app.js', 'js/theme.js', 'js/pages/sport.js', 'js/pages/spen
   const res = await fetch(`${BASE}/${assetBase}${p}`);
   check(`Asset ${p}`, res.status === 200 && /immutable/.test(res.headers.get('cache-control') || ''), `${res.status} ${res.headers.get('cache-control')}`);
 }
+// Daten nie zwischenspeichern, auch nicht in einem Proxy davor (Wunsch des Auftraggebers vom 2026-11-14)
+const apiCache = (await fetch(`${BASE}/api/auth/config`)).headers;
+check('API-Antworten ohne Cache', /no-store/.test(apiCache.get('cache-control') || '') && /private/.test(apiCache.get('cache-control') || '') && apiCache.get('pragma') === 'no-cache' && apiCache.get('expires') === '0', apiCache.get('cache-control'));
 check('Fremde Asset-Version gibt es nicht', (await fetch(`${BASE}/assets/000000000000/js/app.js`)).status === 404);
 check('Unversionierte Datei gibt es nicht', (await fetch(`${BASE}/js/app.js`)).status === 404);
 check('Keine Dotfiles unter Assets', (await fetch(`${BASE}/${assetBase}.env`)).status === 404);
