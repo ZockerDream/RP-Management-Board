@@ -445,5 +445,7 @@ export async function render(view, params) {
     $$('.dash-mod', view).forEach((n) => n.classList.remove('dragging', 'drop-before', 'drop-after'));
   });
 
+  // Beim Zurückkehren in den Tab und jede Minute neu laden (app.js), nicht während das Layout angepasst wird
+  view._refresh = () => (editing ? undefined : load());
   await load();
 }

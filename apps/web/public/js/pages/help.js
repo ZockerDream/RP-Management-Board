@@ -258,6 +258,10 @@ const sections = [
     text: 'Lade die Seite einmal neu (F5). Cache löschen ist nicht nötig. Ein Tab, der während eines Updates offen war, aktualisiert sich normalerweise beim nächsten Seitenwechsel von selbst.',
   },
   {
+    title: 'Häufige Fragen: Zeigt die App immer den aktuellen Stand?',
+    text: 'Ja. Daten werden nie zwischengespeichert, jede Seite holt sie beim Öffnen frisch vom Server. Klickst du in der Navigation auf die Seite, auf der du gerade bist, lädt sie neu. Dashboard, Transaktionen und Konten aktualisieren sich außerdem von selbst, wenn du in den Tab zurückkehrst, und jede Minute, solange er offen ist; Filter und Auswahl bleiben dabei erhalten. Während ein Dialog offen ist oder du in ein Feld tippst, wartet die Aktualisierung.',
+  },
+  {
     title: 'Häufige Fragen: Warum fehlt eine Buchung im Saldo?',
     text: 'Dashboard und Kontostand zeigen nur, was heute wirklich auf dem Konto ist: Einnahmen minus Ausgaben bis zum heutigen Tag. Eine Buchung mit Datum in der Zukunft zählt erst ab diesem Datum, steht aber schon unter „Transaktionen“. Einzahlungen auf ein Sparziel ändern den Saldo nicht, denn das Geld bleibt auf dem Konto und ist nur für das Ziel vorgemerkt.',
   },

@@ -52,8 +52,13 @@ export async function render(view) {
     <div class="actions"><div class="seg" id="b-scope"><button data-s="all" class="on">Alle</button><button data-s="solo">Solo</button><button data-s="shared">Geteilt</button></div>
     ${can('transaction:create') ? '<button class="btn ghost" id="b-transfer">Umbuchen</button>' : ''}${can('budget:create') ? '<button class="btn" id="b-new">Neues Konto</button>' : ''}</div></div><div id="b-transfers"></div><div id="b-body"></div>`;
 
+  let latest = 0;
   async function load() {
-    budgets = await loadBudgets();
+    const current = ++latest;
+    const fresh = await loadBudgets();
+    // Nur die neueste Antwort zeichnen, sonst überschreibt eine langsame ältere den aktuellen Stand
+    if (current !== latest || !view.isConnected) return;
+    budgets = fresh;
     renderPendingTransfers($('#b-transfers'), load).catch((x) => toast(x.message, true));
     const list = budgets.filter((b) => scope === 'all' || b.type === scope);
     if (!list.find((b) => b.id === sel)) sel = list[0]?.id;
@@ -94,5 +99,6 @@ export async function render(view) {
       if (t('[data-sel]')) { sel = t('[data-sel]').dataset.sel; load(); }
     } catch (x) { toast(x.message, true); }
   });
+  view._refresh = load;
   await load();
 }

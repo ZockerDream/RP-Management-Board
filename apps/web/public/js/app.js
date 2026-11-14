@@ -666,6 +666,46 @@ document.addEventListener('keydown', (e) => {
 });
 window.addEventListener('hashchange', route);
 
+/* ---------- Immer der aktuelle Stand ---------- */
+// Seiten laden ihre Daten beim Öffnen. Damit nichts Veraltetes stehen bleibt (Buchungen anderer Mitglieder, Gehaltslauf,
+// angenommene Umbuchungen): Ein Klick auf die gerade offene Seite lädt sie neu (der Hash ändert sich dabei nicht, also
+// gäbe es kein hashchange). Seiten mit `view._refresh` (Dashboard, Transaktionen, Konten) holen ihre Daten zusätzlich
+// beim Zurückkehren in den Tab und jede Minute neu, ohne Filter oder Auswahl zu verlieren – nie während ein Dialog offen
+// ist oder jemand in ein Feld der Seite tippt.
+document.addEventListener('click', (e) => {
+  if (e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  const a = e.target.closest('a[href^="#/"]');
+  if (!a || !state.me || a.getAttribute('href') !== location.hash) return;
+  e.preventDefault();
+  route();
+});
+
+const REFRESH_EVERY = 60000;
+let lastRefresh = Date.now();
+let hiddenSince = 0;
+function busy(view) {
+  if (document.querySelector('.modal.open')) return true;
+  const el = document.activeElement;
+  return !!el && view.contains(el) && el.matches('input, textarea, select, [contenteditable]');
+}
+async function refreshView() {
+  const view = $('#view');
+  if (!state.me || !view || typeof view._refresh !== 'function' || busy(view)) return;
+  lastRefresh = Date.now();
+  try { await view._refresh(); } catch { /* Fehler zeigt der nächste Seitenwechsel; nichts überschreiben */ }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenSince = Date.now(); return; }
+  if (!state.me || Date.now() - hiddenSince < 10000) return;
+  refreshView();
+  loadBell();
+});
+setInterval(() => {
+  if (!document.hidden && Date.now() - lastRefresh >= REFRESH_EVERY) refreshView();
+}, 15000);
+// Aus dem Zurück-Cache des Browsers (bfcache) wiederhergestellt: alles neu laden statt den alten Stand zu zeigen
+window.addEventListener('pageshow', (e) => { if (e.persisted) location.reload(); });
+
 // Tabellen auf dem Handy als Karten (layout.css, .table.stackable): jede Zelle bekommt ihre Spaltenüberschrift.
 // Ein Beobachter erfasst auch Tabellen, die Seiten nachträglich zeichnen; ausgenommen sind schmale Rechentabellen.
 function labelTables() {

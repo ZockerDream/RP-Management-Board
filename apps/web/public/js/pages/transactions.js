@@ -23,9 +23,13 @@ export async function render(view) {
     </div><div id="t-sum" class="row" style="gap:18px;margin:10px 0"></div><div class="scroll-x" id="t-table"></div><div id="t-pager" class="row between" style="margin-top:12px"></div></div>`;
 
   const qs = () => new URLSearchParams(Object.entries({ ...f, limit: LIMIT }).filter(([, v]) => v !== '' && v !== null)).toString();
+  // Schnelle Filterwechsel: Nur die neueste Antwort darf die Liste zeichnen, sonst bliebe ein älterer Stand stehen
+  let latest = 0;
   async function load() {
+    const current = ++latest;
     renderPendingTransfers($('#t-transfers'), load).catch(() => {});
     const r = await api.get(`/transactions?${qs()}`);
+    if (current !== latest || !view.isConnected) return;
     $('#t-sum').innerHTML = `<span class="muted">${r.total} Buchungen</span><span class="up">Einnahmen ${eur(r.income)}</span><span class="up">davon Gehalt ${eur(r.salary_income)}</span><span class="down">Ausgaben ${eur(r.expense)}</span>`;
     $('#t-table').innerHTML = r.items.length ? `<table class="table"><thead><tr><th>Datum</th><th>Titel</th><th>Kategorie</th><th>Konto</th><th>Von</th><th style="text-align:right">Betrag</th><th></th></tr></thead><tbody>${r.items.map((t) => `<tr>
       <td>${fdate(t.booked_at)}</td>      <td><b>${esc(t.title || '–')}</b>${t.income_kind === 'salary' ? ' <span class="tag">Gehalt</span>' : ''}${t.attachments ? ' 📎' : ''}${t.tags?.length ? `<br><small class="muted">${t.tags.map((g) => '#' + esc(g)).join(' ')}</small>` : ''}</td>
@@ -41,7 +45,7 @@ export async function render(view) {
     if (s) { f.scope = s.dataset.s; document.querySelectorAll('#t-scope button').forEach((b) => b.classList.toggle('on', b === s)); reset(); }
     if (e.target.closest('#t-new') && (await txForm())) load();
     if (e.target.closest('#t-scan') && (await scanForm())) load();
-    if (e.target.closest('#t-transfer') && (await openTransferDialog(budgets).catch((x) => toast(x.message, true)))) load();
+    if (e.target.closest('#t-transfer') && (await openTransferDialog(await loadBudgets()).catch((x) => toast(x.message, true)))) load();
     if (e.target.closest('#t-prev')) { f.offset = Math.max(0, f.offset - LIMIT); load(); }
     if (e.target.closest('#t-next')) { f.offset += LIMIT; load(); }
     if (e.target.closest('#t-csv')) api.download(`/transactions/export.csv?${qs()}`, 'transaktionen.csv').catch((x) => toast(x.message, true));
@@ -56,5 +60,6 @@ export async function render(view) {
   bind('#t-budget', 'budget_id'); bind('#t-type', 'type'); bind('#t-income-kind', 'income_kind'); bind('#t-from', 'from'); bind('#t-to', 'to');
   $('#t-q').addEventListener('input', debounce((e) => { f.q = e.target.value.trim(); reset(); }));
   void cats;
+  view._refresh = load;
   await load();
 }
