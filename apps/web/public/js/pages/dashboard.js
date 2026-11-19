@@ -129,7 +129,8 @@ const hours = (h) => Number(h).toLocaleString('de-DE', { maximumFractionDigits: 
 
 export async function render(view, params) {
   view.classList.add('dashboard-view');
-  let scope = 'all';
+  // Standard „Solo“ (Wunsch des Auftraggebers vom 2026-11-14): zuerst nur die eigenen Konten
+  let scope = 'solo';
   let mode = savedView();
   let range = 0;
   let latest = 0;
@@ -139,7 +140,7 @@ export async function render(view, params) {
   const weekStart = Number(state.me.week_start ?? 1);
 
   view.innerHTML = `<div class="page-head"><div>${isModern() ? `<h1>${greeting()}, ${esc(state.me.name)}</h1><p>Dein Überblick</p>` : `<h1>Dashboard</h1><p>Willkommen zurück, ${esc(state.me.name)}</p>`}</div>
-    <div class="actions"><div class="seg" id="d-scope"><button data-s="solo">Solo</button><button data-s="shared">Organisation</button><button data-s="all" class="on">Gesamt</button></div>
+    <div class="actions"><div class="seg" id="d-scope"><button data-s="solo" class="on">Solo</button><button data-s="shared">Organisation</button><button data-s="all">Gesamt</button></div>
     <div class="seg" id="d-view">${[['day', 'Tag'], ['week', 'Woche'], ['month', 'Monat']].map(([value, label]) => `<button data-v="${value}" class="${value === mode ? 'on' : ''}">${label}</button>`).join('')}</div>
     <select id="d-range" style="width:170px" aria-label="Zeitraum">${periodOptions(mode, weekStart)}</select>
     ${isV2() ? `<button class="btn ghost" id="d-edit" aria-pressed="false">${icon(ICONS.tune)}<span>Anpassen</span></button>` : ''}
