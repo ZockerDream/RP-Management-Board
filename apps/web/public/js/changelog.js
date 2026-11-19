@@ -10,6 +10,7 @@ export const UNRELEASED = [
   ['changed', 'Der Design-Dialog erscheint nach dem Update für alle noch einmal, jetzt mit vier Designs. „Später“ behält dein bisheriges Design.'],
   ['changed', 'Das anpassbare Dashboard gibt es jetzt in V2, V3 und V4; in V3 und V4 begrüßt es dich mit Namen.'],
   ['fixed', 'Transaktionen, Konten und Dashboard zeigen immer den aktuellen Stand: Ein Klick auf die gerade offene Seite in der Navigation lädt sie neu, und die drei Seiten aktualisieren sich beim Zurückkehren in den Tab und jede Minute von selbst, ohne Filter zu verlieren. Buchungen anderer Mitglieder, Gehaltsgutschriften und angenommene Umbuchungen erscheinen so ohne F5. Schnelle Filterwechsel zeigen nie mehr eine ältere Liste.'],
+  ['changed', 'Das Dashboard startet mit „Solo“, also nur mit deinen persönlichen Konten. „Organisation“ und „Gesamt“ sind weiter einen Klick entfernt.'],
   ['tech', 'Antworten der API tragen `Cache-Control: no-store, no-cache, must-revalidate, private, max-age=0` samt `Pragma`, `Expires` und `Surrogate-Control`, damit auch kein Proxy oder CDN davor sie speichert; das Frontend fragt mit `cache: \'no-store\'`. Seiten können `view._refresh` setzen (`app.js` ruft es beim Zurückkehren in den Tab und jede Minute).'],
   ['tech', 'Migration 042: `users.ui_version` erlaubt `v3` und `v4`, `ui_choice_seen` für alle zurückgesetzt. Aussehen in `css/theme-v3.css` über `data-look="v3"` und `data-shell="top"` am Wurzelelement; V4 setzt zusätzlich `data-ui="v2"`. Die Navigation oben baut `buildTopnav` (`app.js`) aus der Seitenleiste.'],
 ];

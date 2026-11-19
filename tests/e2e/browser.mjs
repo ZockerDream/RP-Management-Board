@@ -97,6 +97,9 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   // Dashboard zeigt nur den echten Stand
   at('alice dashboard saldo');
   await go(page, '#/dashboard');
+  check('Dashboard startet mit Solo', (await page.$eval('#d-scope .on', (b) => b.dataset.s)) === 'solo');
+  await page.click('#d-scope [data-s=all]');
+  await page.waitForTimeout(500);
   check('Dashboard ohne zukünftige Buchung', !/Zukunft Test/.test(await page.textContent('#view')));
   check('Gesamtsaldo gleich Kontostand', /960,50/.test(await page.locator('.kpi', { hasText: 'Gesamtsaldo' }).textContent()), await page.locator('.kpi', { hasText: 'Gesamtsaldo' }).textContent());
   const dashboardText = await page.textContent('#d-body');
@@ -214,6 +217,8 @@ const viewErr = (page) => page.$eval('#view', (v) => v.querySelector('.auth-erro
   // Dashboard: Tag, Woche, Monat
   at('alice dashboard ansichten');
   await go(page, '#/dashboard');
+  await page.click('#d-scope [data-s=all]');
+  await page.waitForTimeout(500);
   const activeView = () => page.$eval('#d-view .on', (b) => b.dataset.v);
   const yAxis = () => page.$$eval('#d-cash text.axis[text-anchor="end"]', (t) => t.map((x) => x.textContent));
   const expenseKpi = () => page.locator('.kpi', { hasText: 'Ausgaben' }).locator('.value').textContent();
